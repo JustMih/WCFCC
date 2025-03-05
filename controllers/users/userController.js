@@ -36,6 +36,19 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+const getAgents = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent" }, 
+    });
+
+    res.status(200).json(agents);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
 const deleteUser = async (req, res) => {
   const userId = req.params.id;
 
@@ -175,6 +188,7 @@ const resetUserPassword = async (req, res) => {
 module.exports = {
   createUser,
   getAllUsers,
+  getAgents,
   deleteUser,
   activateUser,
   deactivateUser,
