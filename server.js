@@ -16,5 +16,5 @@ sequelize.sync({ alter: true }).then(() => {
   registerSuperAdmin(); // Ensure Super Admin is created at startup
 });
 
-const PORT = process.env.PORT || 5010;
+const PORT = process.env.PORT || 5070;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
