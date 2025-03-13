@@ -32,6 +32,11 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "offline",
+    },
   },
   { timestamps: true }
 );

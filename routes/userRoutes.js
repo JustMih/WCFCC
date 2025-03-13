@@ -8,6 +8,8 @@ const {
   resetUserPassword,
   getAllUsers,
   getAgents,
+  getAgentOffline,
+  getAgentOnline
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -35,6 +37,20 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   getAgents
+);
+
+router.get(
+  "/agents-online",
+  // authMiddleware,
+  // roleMiddleware(["admin", "super-admin"]),
+  getAgentOnline
+);
+
+router.get(
+  "/agents-offline",
+  // authMiddleware,
+  // roleMiddleware(["admin", "super-admin"]),
+  getAgentOffline
 );
 
 // Delete User route

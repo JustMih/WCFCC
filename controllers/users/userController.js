@@ -1,6 +1,6 @@
 const User = require("../../models/User");
 const bcrypt = require("bcryptjs");
-const { validationResult } = require('express-validator'); // For input validation
+const { validationResult } = require("express-validator"); // For input validation
 
 const createUser = async (req, res) => {
   try {
@@ -39,11 +39,53 @@ const getAllUsers = async (req, res) => {
 const getAgents = async (req, res) => {
   try {
     const agents = await User.findAll({
-      where: { role: "agent" }, 
+      where: { role: "agent" },
     });
 
-    res.status(200).json(agents);
+    const agentCount = agents.length;
+
+    res.status(200).json({
+      agents,
+      count: agentCount,
+    });
   } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAgentOnline = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "online" },
+    });
+
+    const agentCount = agents.length;
+
+    // Debugging: Check how many online agents were found
+    console.log(`Found ${agentCount} online agents`);
+
+    res.status(200).json({ agentCount });
+  } catch (error) {
+    console.error("Error fetching online agents:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
+const getAgentOffline = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "offline" },
+    });
+
+    const agentCount = agents.length;
+
+    // Debugging: Check how many offline agents were found
+    console.log(`Found ${agentCount} offline agents`);
+
+    res.status(200).json({ agentCount });
+  } catch (error) {
+    console.error("Error fetching offline agents:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -194,4 +236,6 @@ module.exports = {
   deactivateUser,
   updateUser,
   resetUserPassword,
+  getAgentOnline,
+  getAgentOffline,
 };
