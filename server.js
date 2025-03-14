@@ -20,7 +20,7 @@ connectAsterisk()
   .then(() => {
     console.log("Asterisk connected successfully");
 
-    sequelize.sync({ alter: true }).then(() => {
+    sequelize.sync({ force: false, alter: false }).then(() => {
       console.log("Database synced");
       registerSuperAdmin(); // Ensure Super Admin is created at startup
     });

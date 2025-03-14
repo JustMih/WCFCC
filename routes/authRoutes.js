@@ -4,6 +4,7 @@ const {
   logout,
   getAgentOnlineTime,
   getTotalAgentStatus,
+  getAgentLoginTime,
 } = require("../controllers/auth/authController");
 const router = express.Router();
 
@@ -18,5 +19,8 @@ router.get("/online-time", getAgentOnlineTime);
 
 // Route to get the total online time of all agents for today
 router.get("/total-status", getTotalAgentStatus);
+
+// Route to get the login time of the agent
+router.post("/login-time", getAgentLoginTime);
 
 module.exports = router;

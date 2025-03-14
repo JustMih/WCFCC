@@ -76,6 +76,7 @@ const login = async (req, res) => {
       name: user.name,
       isActive: user.isActive,
       role: user.role,
+      id: user.id,
     },
   });
 };
@@ -90,6 +91,8 @@ const logout = async (req, res) => {
   if (!user) {
     return res.status(400).json({ message: "User not found" });
   }
+
+  if (user.role === "agent") {
 
   // Update user status to "offline"
   user.status = "offline";
@@ -120,9 +123,41 @@ const logout = async (req, res) => {
   console.log(
     `Agent ${agentStatus.userId} is now offline. Online time today: ${onlineDuration} seconds.`
   );
+  }
 
   res.json({ message: "Logged out successfully" });
 };
+
+// Get time of agent login
+const getAgentLoginTime = async (req, res) => {
+  const { userId } = req.body;
+
+  try {
+    // Find the latest status entry for the agent with status "online"
+    const agentStatus = await AgentStatus.findOne({
+      where: {
+        userId,
+        status: "online",
+      },
+      order: [["createdAt", "DESC"]], // Get the most recent login status
+    });
+
+    // If no online status found for the agent
+    if (!agentStatus) {
+      return res.status(400).json({ message: "Agent is not online." });
+    }
+
+    // Return the login time of the agent
+    res.json({
+      message: "Agent login time retrieved successfully",
+      loginTime: agentStatus.loginTime, // login time of the agent
+    });
+  } catch (error) {
+    console.error("Error retrieving agent login time:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 
 const getAgentOnlineTime = async (req, res) => {
   const { userId } = req.body;
@@ -184,4 +219,5 @@ module.exports = {
   logout,
   getAgentOnlineTime,
   getTotalAgentStatus,
+  getAgentLoginTime,
 };
