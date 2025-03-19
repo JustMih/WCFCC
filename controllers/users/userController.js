@@ -6,7 +6,20 @@ const createUser = async (req, res) => {
   try {
     const { name, email, password, role, isActive } = req.body;
 
-    if (!["admin", "supervisor", "agent"].includes(role)) {
+    if (
+      ![
+        "admin",
+        "supervisor",
+        "agent",
+        "attendee",
+        "coordinator",
+        "head-of-unit",
+        "manager",
+        "director",
+        "focal-person",
+        "director-general",
+      ].includes(role)
+    ) {
       return res.status(400).json({ message: "Invalid role" });
     }
 
