@@ -77,13 +77,81 @@ const getAgentOnline = async (req, res) => {
     // Debugging: Check how many online agents were found
     console.log(`Found ${agentCount} online agents`);
 
-    res.status(200).json({ agentCount });
+    res.status(200).json({ agents, agentCount });
   } catch (error) {
     console.error("Error fetching online agents:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
+const getAgentIdle = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "idle" },
+    });
+    const agentCount = agents.length;
+    res.status(200).json({ agents, agentCount });
+  } catch (error) {
+    console.error("Error fetching offline agents:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAgentActive = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "active" },
+    });
+    const agentCount = agents.length;
+    res.status(200).json({ agents, agentCount });
+  } catch (error) {
+    console.error("Error fetching offline agents:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAgentPause = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "pause" },
+    });
+    const agentCount = agents.length;
+    res.status(200).json({ agents, agentCount });
+  } catch (error) {
+    console.error("Error fetching offline agents:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAgentForcePause = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "force-pause" },
+    });
+
+    const agentCount = agents.length;
+
+    res.status(200).json({ agents, agentCount });
+  } catch (error) {
+    console.error("Error fetching offline agents:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAgentMission = async (req, res) => {
+  try {
+    const agents = await User.findAll({
+      where: { role: "agent", status: "mission" },
+    });
+
+    const agentCount = agents.length;
+
+    res.status(200).json({ agents, agentCount });
+  } catch (error) {
+    console.error("Error fetching offline agents:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 const getAgentOffline = async (req, res) => {
   try {
@@ -96,15 +164,12 @@ const getAgentOffline = async (req, res) => {
     // Debugging: Check how many offline agents were found
     console.log(`Found ${agentCount} offline agents`);
 
-    res.status(200).json({ agentCount });
+    res.status(200).json({ agents, agentCount });
   } catch (error) {
     console.error("Error fetching offline agents:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
-
-
 
 const deleteUser = async (req, res) => {
   const userId = req.params.id;
@@ -253,4 +318,9 @@ module.exports = {
   resetUserPassword,
   getAgentOnline,
   getAgentOffline,
+  getAgentActive,
+  getAgentForcePause,
+  getAgentIdle,
+  getAgentMission,
+  getAgentPause
 };

@@ -9,7 +9,12 @@ const {
   getAllUsers,
   getAgents,
   getAgentOffline,
-  getAgentOnline
+  getAgentOnline,
+  getAgentActive,
+  getAgentForcePause,
+  getAgentIdle,
+  getAgentMission,
+  getAgentPause,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -35,22 +40,57 @@ router.get(
 router.get(
   "/agents",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin"]),
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
   getAgents
 );
 
 router.get(
   "/agents-online",
-  // authMiddleware,
-  // roleMiddleware(["admin", "super-admin"]),
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
   getAgentOnline
 );
 
 router.get(
   "/agents-offline",
-  // authMiddleware,
-  // roleMiddleware(["admin", "super-admin"]),
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
   getAgentOffline
+);
+
+router.get(
+  "/agents-active",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  getAgentActive
+);
+
+router.get(
+  "/agents-force-pause",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  getAgentForcePause
+);
+
+router.get(
+  "/agents-pause",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  getAgentPause
+);
+
+router.get(
+  "/agents-idle",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  getAgentIdle
+);
+
+router.get(
+  "/agents-mission",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  getAgentMission
 );
 
 // Delete User route
