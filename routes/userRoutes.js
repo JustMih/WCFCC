@@ -15,6 +15,8 @@ const {
   getAgentIdle,
   getAgentMission,
   getAgentPause,
+  GetAgentLogs,
+  getSupervisor,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -35,6 +37,13 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   getAllUsers
+);
+
+router.get(
+  "/supervisor",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent"]),
+  getSupervisor
 );
 
 router.get(
@@ -91,6 +100,13 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin", "supervisor"]),
   getAgentMission
+);
+
+router.get(
+  "/:userId/agents-logs",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  GetAgentLogs
 );
 
 // Delete User route

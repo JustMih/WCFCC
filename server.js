@@ -8,12 +8,73 @@ const {
   connectAsterisk,
   makeCall,
 } = require("./controllers/ami/amiController");
+const ChatMassage = require("./models/chart_message")
+const { Server } = require("socket.io");
+const http = require("http");
 
 dotenv.config();
 const app = express();
 app.use(express.json());
 app.use(cors());
 app.use("/api", routes);
+
+// Create HTTP Server & WebSocket Server
+const server = http.createServer(app);
+const io = new Server(server, {
+  // test
+  // cors: {
+  //   origin: "http://localhost:3000",
+  //   methods: ["GET", "POST"],
+  // },
+  // live
+  cors: {
+    origin: "http://10.57.0.16:3022",
+    methods: ["GET", "POST"],
+  },
+});
+
+const users = {}; // Store connected users (agent/supervisor)
+
+io.on("connection", (socket) => {
+  console.log("New user connected:", socket.id);
+
+  // Store user ID with their socket
+  socket.on("register", (userId) => {
+    users[userId] = socket.id;
+    console.log(`User ${userId} connected with socket ${socket.id}`);
+  });
+
+  // Private messaging (agent -> supervisor)
+  socket.on("private_message", async ({ senderId, receiverId, message }) => {
+    console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
+
+    // Save message to MySQL
+    // await sequelize.query(
+    //   "INSERT INTO chat_messages (sender_id, receiver_id, message) VALUES (?, ?, ?)",
+    //   { replacements: [senderId, receiverId, message] }
+    // );
+    await ChatMassage.create({
+      senderId,
+      receiverId,
+      message,
+    });
+
+    // Send message to the recipient if online
+    if (users[receiverId]) {
+      io.to(users[receiverId]).emit("private_message", { senderId, message });
+    }
+  });
+
+  // Handle user disconnect
+  socket.on("disconnect", () => {
+    Object.keys(users).forEach((key) => {
+      if (users[key] === socket.id) {
+        console.log(`User ${key} disconnected`);
+        delete users[key];
+      }
+    });
+  });
+});
 
 // Ensure Asterisk is connected before syncing the database and starting the server
 connectAsterisk()
@@ -26,7 +87,8 @@ connectAsterisk()
     });
 
     const PORT = process.env.PORT || 5070;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   })
   .catch((error) => {
     console.error("Asterisk connection failed:", error);

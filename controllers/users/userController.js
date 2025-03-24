@@ -1,4 +1,5 @@
 const User = require("../../models/User");
+const AgentLoginLog = require("../../models/agent_activity_logs");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
 
@@ -60,6 +61,23 @@ const getAgents = async (req, res) => {
     res.status(200).json({
       agents,
       count: agentCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getSupervisor = async (req, res) => {
+  try {
+    const supervisors = await User.findAll({
+      where: { role: "supervisor" },
+    });
+
+    const supervisorsCount = supervisors.length;
+
+    res.status(200).json({
+      supervisors,
+      count: supervisorsCount,
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -171,6 +189,21 @@ const getAgentOffline = async (req, res) => {
   }
 };
 
+const GetAgentLogs = async (req, res) => {
+   const { userId } = req.params;
+
+   try {
+     const logs = await AgentLoginLog.findAll({
+       where: { userId: userId },
+       order: [["loginTime", "DESC"]],
+     });
+
+     res.json({ logs });
+   } catch (error) {
+     console.error("Error fetching agent logs:", error);
+     res.status(500).json({ message: "Internal server error" });
+   }
+}
 const deleteUser = async (req, res) => {
   const userId = req.params.id;
 
@@ -322,5 +355,7 @@ module.exports = {
   getAgentForcePause,
   getAgentIdle,
   getAgentMission,
-  getAgentPause
+  getAgentPause,
+  GetAgentLogs,
+  getSupervisor,
 };
