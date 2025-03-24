@@ -17,6 +17,7 @@ const {
   getAgentPause,
   GetAgentLogs,
   getSupervisor,
+  getMessage,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -37,6 +38,14 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   getAllUsers
+);;
+
+
+router.get(
+  "/messages/:user1/:user2",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
+  getMessage
 );
 
 router.get(

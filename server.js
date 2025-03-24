@@ -49,10 +49,6 @@ io.on("connection", (socket) => {
     console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
 
     // Save message to MySQL
-    // await sequelize.query(
-    //   "INSERT INTO chat_messages (sender_id, receiver_id, message) VALUES (?, ?, ?)",
-    //   { replacements: [senderId, receiverId, message] }
-    // );
     await ChatMassage.create({
       senderId,
       receiverId,
@@ -61,9 +57,25 @@ io.on("connection", (socket) => {
 
     // Send message to the recipient if online
     if (users[receiverId]) {
-      io.to(users[receiverId]).emit("private_message", { senderId, message });
+      io.to(users[receiverId]).emit("private_message", {
+        senderId,
+        receiverId,
+        message,
+      });
+    } else {
+      console.warn(`User ${receiverId} is offline, message not delivered.`);
+    }
+
+    // Also send the message back to the sender to update their UI
+    if (users[senderId]) {
+      io.to(users[senderId]).emit("private_message", {
+        senderId,
+        receiverId,
+        message,
+      });
     }
   });
+
 
   // Handle user disconnect
   socket.on("disconnect", () => {
