@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const AgentLoginLog = require("../../models/agent_activity_logs");
 const ChatMassage = require("../../models/chart_message")
+const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
 
@@ -85,26 +86,43 @@ const getSupervisor = async (req, res) => {
   }
 };
 
-const getMessage =  async (req, res) => {
-    const { user1, user2 } = req.params;
+const getMessage = async (req, res) => {
+  const { user1, user2 } = req.params;
 
-    try {
-        const messages = await ChatMassage.findAll({
-          where: {
-            [Op.or]: [
-              { senderId: user1, receiverId: user2 },
-              { senderId: user2, receiverId: user1 },
-            ],
+  try {
+    const messages = await ChatMassage.findAll({
+      where: {
+        [Op.or]: [
+          { senderId: user1, receiverId: user2 },
+          { senderId: user2, receiverId: user1 },
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort messages by time
+      attributes: ["senderId", "receiverId", "message", "createdAt"], // Only select necessary fields
+      include: [
+        {
+          model: User,
+          attributes: {
+            exclude: ["password", "createdAt", "updatedAt", "role"],
           },
-          order: [["createdAt", "ASC"]], // Sort messages by time
-        });
+        },
+      ],
+    });
 
-        res.json(messages);
-    } catch (error) {
-        console.error("Error fetching messages:", error);
-        res.status(500).json({ error: "Failed to fetch messages" });
+    // Check if there are no messages
+    if (messages.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No messages found between these users." });
     }
-}
+
+    res.json(messages);
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
+};
+
 
 const getAgentOnline = async (req, res) => {
   try {
