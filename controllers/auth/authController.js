@@ -1,5 +1,5 @@
 const User = require("../../models/User");
-const AgentLoginLog = require("../../models/agent_activity_logs")
+const AgentLoginLog = require("../../models/agent_activity_logs");
 const AgentStatus = require("../../models/agents_status");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -8,7 +8,9 @@ require("dotenv").config();
 
 const registerSuperAdmin = async () => {
   try {
-    const existingAdmin = await User.findOne({ where: { role: "super-admin" } });
+    const existingAdmin = await User.findOne({
+      where: { role: "super-admin" },
+    });
     if (existingAdmin) {
       console.log("Super Admin already exists");
       return;
@@ -37,9 +39,68 @@ const login = async (req, res) => {
     return res.status(400).json({ message: "Invalid email or password" });
   }
 
+  // Initialize failed login attempts if not set
+  if (!user.failedLoginAttempts || isNaN(user.failedLoginAttempts)) {
+    user.failedLoginAttempts = 0; // Initialize if undefined or NaN
+  }
+
+  console.log(
+    `User before incrementing: Failed login attempts = ${user.failedLoginAttempts}`
+  );
+
+  // Check if user is locked out
+  if (user.failedLoginAttempts >= 3) {
+    const lockoutTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const timePassed =
+      new Date().getTime() - new Date(user.lastFailedLogin).getTime();
+    console.log(`Time passed since last failed login: ${timePassed} ms`);
+
+    if (timePassed < lockoutTime) {
+      const timeRemaining = lockoutTime - timePassed;
+      const minutesRemaining = Math.ceil(timeRemaining / 60000); // Time remaining in minutes
+      console.log(
+        `Account is locked. Try again in ${minutesRemaining} minute(s).`
+      );
+      return res.status(400).json({
+        message: `Your account is locked. Try again in ${minutesRemaining} minute${
+          minutesRemaining > 1 ? "s" : ""
+        }.`,
+        timeRemaining,
+      });
+    } else {
+      // Reset failed attempts after lockout time has passed
+      user.failedLoginAttempts = 0;
+      user.lastFailedLogin = null;
+      await user.save();
+      console.log("Lockout period passed. Resetting failed attempts.");
+    }
+  }
+
   // Check password
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
+    // Increment failed login attempts
+    user.failedLoginAttempts = user.failedLoginAttempts + 1;
+    user.lastFailedLogin = new Date();
+
+    // Log the user data before saving for debugging
+    console.log(
+      "User data before save:",
+      user.failedLoginAttempts,
+      user.lastFailedLogin
+    );
+
+    try {
+      // Ensure user is saved to the database
+      await user.save();
+
+      // Log the updated data after saving
+      console.log("User data after save:", user.failedLoginAttempts);
+    } catch (err) {
+      console.error("Error saving user:", err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+
     return res.status(400).json({ message: "Invalid email or password" });
   }
 
@@ -127,7 +188,6 @@ const logout = async (req, res) => {
   res.json({ message: "Logged out successfully" });
 };
 
-
 // Get time of agent login
 const getAgentLoginTime = async (req, res) => {
   const { userId } = req.body;
@@ -157,7 +217,6 @@ const getAgentLoginTime = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 
 const getAgentOnlineTime = async (req, res) => {
   const { userId } = req.body;
@@ -210,8 +269,6 @@ const getTotalAgentStatus = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
-
 
 module.exports = {
   registerSuperAdmin,
