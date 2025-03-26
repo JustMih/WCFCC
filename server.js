@@ -22,15 +22,15 @@ app.use("/api", routes);
 const server = http.createServer(app);
 const io = new Server(server, {
   // test
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-  },
-  // live
   // cors: {
-  //   origin: "http://10.57.0.16:3022",
+  //   origin: "http://localhost:3000",
   //   methods: ["GET", "POST"],
   // },
+  // live
+  cors: {
+    origin: "http://10.57.0.16:3022",
+    methods: ["GET", "POST"],
+  },
 });
 
 const users = {}; // Store connected users (agent/supervisor)
