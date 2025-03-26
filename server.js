@@ -28,7 +28,7 @@ const io = new Server(server, {
   // },
   // live
   cors: {
-    origin: "http://10.57.0.16:3022",
+    origin: "http://10.52.0.19:3000",
     methods: ["GET", "POST"],
   },
 });
