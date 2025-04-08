@@ -142,6 +142,21 @@ const getAgentOnline = async (req, res) => {
   }
 };
 
+const updateAgentStatus = async (req, res) => {
+  const { userId } = req.params;
+  const { status } = req.body;
+
+  try {
+    await User.update({ status }, { where: { id: userId } });
+    res.json({ message: "Status updated" });
+  } catch (error) {
+    console.error("Error updating status:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
 const getAgentIdle = async (req, res) => {
   try {
     const agents = await User.findAll({
@@ -399,4 +414,5 @@ module.exports = {
   GetAgentLogs,
   getSupervisor,
   getMessage,
+  updateAgentStatus,
 };

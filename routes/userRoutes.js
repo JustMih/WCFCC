@@ -18,6 +18,7 @@ const {
   GetAgentLogs,
   getSupervisor,
   getMessage,
+  updateAgentStatus,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -66,7 +67,7 @@ router.get(
 router.get(
   "/agents-online",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   getAgentOnline
 );
 
@@ -133,6 +134,13 @@ router.put(
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   activateUser
+);
+
+router.put(
+  "/status/:userId",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent"]),
+  updateAgentStatus
 );
 
 // Deactivate User route

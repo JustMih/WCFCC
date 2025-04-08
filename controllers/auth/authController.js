@@ -51,8 +51,16 @@ const login = async (req, res) => {
   // Check if user is locked out
   if (user.failedLoginAttempts >= 3) {
     const lockoutTime = 5 * 60 * 1000; // 5 minutes in milliseconds
-    const timePassed =
-      new Date().getTime() - new Date(user.lastFailedLogin).getTime();
+    const lastFailedLoginTime = new Date(user.lastFailedLogin);
+
+    // Check if lastFailedLogin is a valid date
+    if (isNaN(lastFailedLoginTime.getTime())) {
+      return res
+        .status(400)
+        .json({ message: "Invalid last failed login time" });
+    }
+
+    const timePassed = new Date().getTime() - lastFailedLoginTime.getTime();
     console.log(`Time passed since last failed login: ${timePassed} ms`);
 
     if (timePassed < lockoutTime) {
@@ -71,8 +79,14 @@ const login = async (req, res) => {
       // Reset failed attempts after lockout time has passed
       user.failedLoginAttempts = 0;
       user.lastFailedLogin = null;
-      await user.save();
-      console.log("Lockout period passed. Resetting failed attempts.");
+
+      try {
+        await user.save();
+        console.log("Lockout period passed. Resetting failed attempts.");
+      } catch (err) {
+        console.error("Error resetting user lockout:", err);
+        return res.status(500).json({ message: "Internal server error" });
+      }
     }
   }
 
@@ -143,6 +157,7 @@ const login = async (req, res) => {
     },
   });
 };
+
 
 const logout = async (req, res) => {
   const { userId } = req.body;
