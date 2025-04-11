@@ -7,6 +7,8 @@ const pjsipAuthRoutes = require("./pjsip_authsRoutes");
 const pjsipAorsRoutes = require("./pjsip_aorsRoutes");
 const pjsipEndpointsRoutes = require("./pjsip_endpointsRoutes");
 const adminDashboardRoutes = require("./adminDashboard");
+const voiceRoutes = require("./voiceRoutes");
+const ivrActionRoutes = require("./ivrActionRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -17,5 +19,7 @@ router.use("/pjsip_auths", pjsipAuthRoutes);
 router.use("/pjsip_aors", pjsipAorsRoutes);
 router.use("/pjsip_endpoints", pjsipEndpointsRoutes);
 router.use("/admin-dashboard", adminDashboardRoutes);
+router.use("/ivr", voiceRoutes);
+router.use("/ivr-actions", ivrActionRoutes);
 
 module.exports = router;
