@@ -19,6 +19,8 @@ function connectAsterisk() {
       console.log("Connected to Asterisk AMI");
 
       // Optionally, you can initiate a test call or leave it empty if you only need connection check
+
+      
       resolve(); // Resolve the promise when connected
     });
 
