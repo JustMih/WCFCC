@@ -17,7 +17,8 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 app.use("/api", routes);
-
+app.use("/api", require("./routes/ivr-dtmf-routes"));
+ 
 // Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
 const io = new Server(server, {

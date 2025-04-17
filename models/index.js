@@ -34,5 +34,11 @@ Object.keys(db).forEach((modelName) => {
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
+// models/index.js
+IVRDTMFMapping.belongsTo(IVRVoices, { foreignKey: "ivr_voice_id" });
+IVRDTMFMapping.belongsTo(IVRActions, { foreignKey: "action_id" });
+
+IVRVoice.hasMany(IVRDTMFMapping, { foreignKey: "ivr_voice_id" });
+IVRAction.hasMany(IVRDTMFMapping, { foreignKey: "action_id" });
 
 module.exports = db;
