@@ -8,12 +8,11 @@ module.exports = {
         allowNull: false,
         primaryKey: true
       },
-      
       ivr_voice_id: {
         type: Sequelize.UUID,
         allowNull: false,
         references: {
-          model: 'IVRVoices',
+          model: 'IVRVoice', // Corrected casing
           key: 'id',
         },
         onDelete: 'CASCADE',
@@ -23,10 +22,10 @@ module.exports = {
         allowNull: false,
       },
       ivr_action_id: {
-        type: Sequelize.UUID,
+        type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-          model: 'IVRActions',
+          model: 'IVRActions', // Corrected casing
           key: 'id',
         },
         onDelete: 'CASCADE',

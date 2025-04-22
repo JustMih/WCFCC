@@ -20,7 +20,7 @@ const IVRDTMFMapping = sequelize.define("IVRDTMFMapping", {
     type: DataTypes.STRING,
   },
   ivr_voice_id: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
   }
 });
