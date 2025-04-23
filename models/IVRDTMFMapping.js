@@ -7,6 +7,21 @@ const IVRDTMFMapping = sequelize.define("IVRDTMFMapping", {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
+  dtmf_digit: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  action_id: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+  parameter: {
+    type: DataTypes.STRING,
+  },
+  ivr_voice_id: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  }
  
   dtmf_digit: { type: DataTypes.STRING, allowNull: false },
   action_id: { type: DataTypes.UUID, allowNull: false },
