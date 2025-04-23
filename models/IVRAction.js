@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/mysql_connection.js");
+const sequelize = require("../config/mysql_connection");
 
-const IVRActions = sequelize.define(
-  "IVRActions",
+const IVRAction = sequelize.define(  // ✅ Ensure it's IVRAction singular
+  "IVRAction",
   {
     id: {
       type: DataTypes.INTEGER,
@@ -15,4 +15,4 @@ const IVRActions = sequelize.define(
   { timestamps: true }
 );
 
-module.exports = IVRActions;
+module.exports = IVRAction;  // ✅ Export as IVRAction (singular)
