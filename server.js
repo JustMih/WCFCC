@@ -91,7 +91,7 @@ io.on("connection", (socket) => {
 // Ensure Asterisk is connected before syncing the database and starting the server
 connectAsterisk()
   .then(() => {
-    console.log("Asterisk connected successfully");
+    console.log("Asterisk connected successfully!");
 
     sequelize.sync({ force: false, alter: false }).then(() => {
       console.log("Database synced");
