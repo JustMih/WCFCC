@@ -1,6 +1,3 @@
-// const IVRDTMFMapping = require("../../models/IVRDTMFMapping");
-// const IVRAction = require("../../models/IVRAction");  // Correct model name (singular)
-// const IVRVoice = require("../../models/IVRVoice");    // Correct model name (singular)
 const { IVRDTMFMapping, IVRAction, IVRVoice } = require("../../models");
 const addIVRDTMFMapping = async (req, res) => {
   try {
