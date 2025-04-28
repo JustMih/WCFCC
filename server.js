@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
+
 const {
   connectAsterisk,
   makeCall,
@@ -18,7 +19,7 @@ app.use(express.json());
 app.use(cors());
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
- 
+app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
 // Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -109,118 +110,4 @@ connectAsterisk()
   });
 
 
-
-// "use strict";
-
-// const express = require("express");
-// const cors = require("cors");
-// const dotenv = require("dotenv");
-// dotenv.config();
-
-// const sequelize = require("./config/mysql_connection.js");
-// const routes = require("./routes");
-// const { registerSuperAdmin } = require("./controllers/auth/authController");
-
-// // Asterisk connection
-// const {
-//   connectAsterisk,
-//   makeCall,
-// } = require("./controllers/ami/amiController");
-
-// // WebSocket & HTTP
-// const { Server } = require("socket.io");
-// const http = require("http");
-
-// // Chat model
-// const ChatMessage = require("./models/chart_message"); // ✅ Fixed typo
-
-// const app = express();
-// app.use(express.json());
-// app.use(cors());
-// app.use("/api", routes);
-
-// // Create HTTP & WebSocket server
-// const server = http.createServer(app);
-// const io = new Server(server, {
-//   cors: {
-//     origin: process.env.CLIENT_ORIGIN || "*",
-//     methods: ["GET", "POST"],
-//   },
-// });
-
-// // WebSocket connections
-// const users = {};
-
-// io.on("connection", (socket) => {
-//   console.log("New user connected:", socket.id);
-
-//   // Register user
-//   socket.on("register", (userId) => {
-//     users[userId] = socket.id;
-//     console.log(`User ${userId} registered with socket ${socket.id}`);
-//   });
-
-//   // Handle private message
-//   socket.on("private_message", async ({ senderId, receiverId, message }) => {
-//     console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
-
-//     try {
-//       await ChatMessage.create({ senderId, receiverId, message });
-
-//       // Send to recipient if online
-//       if (users[receiverId]) {
-//         io.to(users[receiverId]).emit("private_message", {
-//           senderId,
-//           receiverId,
-//           message,
-//         });
-//       }
-
-//       // Also send back to sender
-//       if (users[senderId]) {
-//         io.to(users[senderId]).emit("private_message", {
-//           senderId,
-//           receiverId,
-//           message,
-//         });
-//       }
-//     } catch (error) {
-//       console.error("Error saving chat message:", error.message);
-//     }
-//   });
-
-//   socket.on("disconnect", () => {
-//     for (const userId in users) {
-//       if (users[userId] === socket.id) {
-//         console.log(`User ${userId} disconnected`);
-//         delete users[userId];
-//         break;
-//       }
-//     }
-//   });
-// });
-
-// // ✅ Optional Asterisk connect (based on env)
-// const startServer = async () => {
-//   try {
-//     if (process.env.ENABLE_AMI === "true") {
-//       await connectAsterisk();
-//       console.log("Asterisk connected successfully");
-//     } else {
-//       console.log("⚠️ Asterisk AMI connection is disabled.");
-//     }
-
-//     await sequelize.sync({ force: false, alter: false });
-//     console.log("✅ Database synced");
-
-//     await registerSuperAdmin();
-
-//     const PORT = process.env.PORT || 5070;
-//     server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-//   } catch (error) {
-//     console.error("Startup error:", error.message);
-//     process.exit(1);
-//   }
-// };
-
-// startServer();
+ 
