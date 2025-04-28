@@ -56,7 +56,7 @@ module.exports = {
         type: Sequelize.UUID,
         allowNull: true
       },
-      assigned_to_role: Sequelize.ENUM('Coordinator', 'Attendee', 'Focal', 'Manager', 'Director', 'DG'),
+      assigned_to_role: Sequelize.ENUM('Agent','Coordinator', 'Attendee', 'Focal', 'Manager', 'Director', 'DG'),
       status: Sequelize.ENUM( 'Open',
         'Assigned',
         'Carried Forward',
