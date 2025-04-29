@@ -12,7 +12,7 @@ const { Op } = require("sequelize");
 router.get(
   "/functions-data/:functionId",
   authMiddleware,
-  roleMiddleware(["agent", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getAllFunctionDetails
 );
 
@@ -21,7 +21,7 @@ router.get(
 router.get(
   "/functions-data",
   authMiddleware,
-  roleMiddleware(["agent", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getAllFunction
 );
 

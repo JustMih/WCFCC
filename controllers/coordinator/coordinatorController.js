@@ -17,13 +17,13 @@ const getAllCoordinatorComplaints = async (req, res) => {
         status: 'Open'
 
       },
-      include: [
-        {
-          model: User,
-          as: 'createdBy',
-          attributes: ['id', 'name']
-        }
-      ],
+      // include: [
+      //   {
+      //     model: User,
+      //     as: 'creator',
+      //     attributes: ['id', 'name']
+      //   }
+      // ],
       order: [['created_at', 'DESC']]
     });
 

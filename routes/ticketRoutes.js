@@ -13,7 +13,7 @@ const { Op } = require("sequelize");
 router.post(
   "/create-ticket",
   authMiddleware,
-  roleMiddleware(["agent", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   createTicket
 );
 
@@ -21,7 +21,7 @@ router.post(
 router.get(
   "/list/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getTickets
 );
 
@@ -29,7 +29,7 @@ router.get(
 router.get(
   "/open/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getOpenTickets
 );
 
@@ -37,7 +37,7 @@ router.get(
 router.get(
   "/assigned/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getAssignedTickets
 );
 
@@ -45,7 +45,7 @@ router.get(
 router.get(
   "/in-progress/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getInprogressTickets
 );
 
@@ -54,7 +54,7 @@ router.get(
 router.get(
   "/carried-forward/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getCarriedForwardTickets
 );
 
@@ -62,7 +62,7 @@ router.get(
 router.get(
   "/closed/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getClosedTickets
 );
 
@@ -70,7 +70,7 @@ router.get(
 router.get(
   "/overdue/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getOverdueTickets
 );
 
@@ -78,14 +78,14 @@ router.get(
 router.get(
   "/all/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getAllTickets
 );
 
 router.get(
   "/count/:userId",
   authMiddleware,
-  roleMiddleware(["agent","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin"]),
   getTicketCounts
 );
 
@@ -93,7 +93,7 @@ router.get(
 router.get(
   "/all-customer-tickets",
   authMiddleware,
-  roleMiddleware(["agent", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getAllCustomersTickets
 );
 

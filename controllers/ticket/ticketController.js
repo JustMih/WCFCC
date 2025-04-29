@@ -171,13 +171,18 @@ const createTicket = async (req, res) => {
       status
     } = req.body;
 
-    const ticketId = generateTicketId(); // e.g., WCF-CC-123456
-    const userId = req.user.userId; // from auth middleware
+    const ticketId = generateTicketId();
+    // const { id: userId } = req.user; // ✅ Get from auth middleware
+    const userId = req.user.userId;
+    // ❗ Check if userId exists
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required to create a ticket." });
+    }
 
     const newTicket = await Ticket.create({
       ticket_id: ticketId,
       first_name: firstName,
-      middle_name: middleName || '', // optional
+      middle_name: middleName || '',
       last_name: lastName,
       phone_number: phoneNumber,
       nida_number: nidaNumber,
@@ -190,7 +195,7 @@ const createTicket = async (req, res) => {
       function_id: functionId,
       description,
       status: status || 'Open',
-      created_by: userId
+      created_by: userId,
     });
 
     return res.status(201).json({
@@ -199,10 +204,11 @@ const createTicket = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Ticket creation error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    console.error("Ticket creation error:", error.stack);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
+
 
 
 
@@ -761,17 +767,34 @@ const getOverdueTickets = async (req, res) => {
   }
 };
 
+// const getAllCustomersTickets = async (req, res) => {
+//   try {
+//     const tickets = await Ticket.findAll({
+//       order: [["created_at", "DESC"]],
+//       include: [
+//         {
+//           model: User,
+//           as: "creator",
+//           attributes: ["id", "name"],
+//         },
+//       ],
+//     });
+
+//     return res.status(200).json({
+//       message: "Tickets fetched successfully",
+//       totalTickets: tickets.length,
+//       tickets,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching tickets:", error.stack);
+//     return res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
 const getAllCustomersTickets = async (req, res) => {
   try {
     const tickets = await Ticket.findAll({
       order: [["created_at", "DESC"]],
-      include: [
-        {
-          model: User,
-          as: "creator",
-          attributes: ["id", "name"],
-        },
-      ],
     });
 
     return res.status(200).json({

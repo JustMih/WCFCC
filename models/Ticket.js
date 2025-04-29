@@ -6,16 +6,17 @@ const Ticket = sequelize.define(
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
 
-    userId: { // This maps to 'created_by' column
+    userId: {
       type: DataTypes.UUID,
+      allowNull: true,
+      field: 'created_by', // Physical DB field
       references: {
         model: 'Users',
-        key: 'id',
+        key: 'id'
       },
-      onDelete: 'SET NULL',
-      field: 'created_by',
+      onDelete: 'SET NULL'
     },
-
+    
     assigned_to_id: {
       type: DataTypes.UUID,
       references: {
