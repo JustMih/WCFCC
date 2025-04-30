@@ -7,7 +7,7 @@ const sequelize = require("../config/mysql_connection");
 
 const basename = path.basename(__filename);
 const db = {};
-
+//const IVRDTMFMapping = require("./IVRDTMFMapping")
 // Import all models
 fs.readdirSync(__dirname)
   .filter((file) => (

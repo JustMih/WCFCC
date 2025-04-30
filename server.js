@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
+const recordingRoutes = require('./routes/recordingRoutes');
 
 const {
   connectAsterisk,
@@ -20,6 +21,9 @@ app.use(cors());
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
 app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
+app.use('/api', recordingRoutes);
+//app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
+app.use("/sounds", express.static("public/sounds"));
 // Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -34,7 +38,12 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
-
+app.use(cors({
+  origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
+  credentials: true, // Allow cookies/sessions
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Accept"],
+}));
 const users = {}; // Store connected users (agent/supervisor)
 
 io.on("connection", (socket) => {

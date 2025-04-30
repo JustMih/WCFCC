@@ -9,6 +9,7 @@ const pjsipEndpointsRoutes = require("./pjsip_endpointsRoutes");
 const adminDashboardRoutes = require("./adminDashboard");
 const voiceRoutes = require("./voiceRoutes");
 const ivrActionRoutes = require("./ivrActionRoutes");
+const recordingRoutes = require("./recordingRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -21,5 +22,5 @@ router.use("/pjsip_endpoints", pjsipEndpointsRoutes);
 router.use("/admin-dashboard", adminDashboardRoutes);
 router.use("/ivr", voiceRoutes);
 router.use("/ivr-actions", ivrActionRoutes);
-
+router.use("/voice-notes", recordingRoutes);  
 module.exports = router;
