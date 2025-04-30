@@ -17,7 +17,9 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       unique: true,
-      validate: { isEmail: true },
+      validate: {
+        isEmail: true,
+      },
     },
     password: {
       type: DataTypes.STRING,
@@ -37,6 +39,7 @@ const User = sequelize.define(
         "focal-person",
         "director-general"
       ),
+      allowNull: false,
       defaultValue: "super-admin",
     },
     isActive: {
@@ -50,7 +53,18 @@ const User = sequelize.define(
       defaultValue: "offline",
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    tableName: "Users", // Optional but helps if your table name is explicitly Users (plural)
+  }
 );
+
+// Associations
+User.associate = (models) => {
+  User.hasMany(models.Ticket, {
+    foreignKey: "userId", // ✅ Sequelize field in Ticket model
+    as: "ticketsCreated",
+  });
+};
 
 module.exports = User;

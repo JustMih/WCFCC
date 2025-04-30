@@ -40,3 +40,30 @@ module.exports = {
   IVRDTMFMapping,
   sequelize,
 };
+// models/index.js
+IVRDTMFMapping.belongsTo(IVRVoices, { foreignKey: "ivr_voice_id" });
+IVRDTMFMapping.belongsTo(IVRActions, { foreignKey: "action_id" });
+
+IVRVoice.hasMany(IVRDTMFMapping, { foreignKey: "ivr_voice_id" });
+IVRAction.hasMany(IVRDTMFMapping, { foreignKey: "action_id" });
+
+// Ticket associations
+// Ticket.belongsTo(User, { foreignKey: 'userId', as: 'creator' });
+// Ticket.belongsTo(User, { foreignKey: 'assigned_to_id', as: 'assignee' });
+// Ticket.belongsTo(User, { foreignKey: 'attended_by_id', as: 'attendedBy' });
+// Ticket.belongsTo(User, { foreignKey: 'rated_by_id', as: 'ratedBy' });
+// Ticket.belongsTo(FunctionModel, { foreignKey: 'responsible_unit_id', as: 'responsibleUnit' });
+// Ticket.belongsTo(FunctionData, { foreignKey: 'function_data_id', as: 'functionData' });
+
+// Function associations
+// FunctionModel.belongsTo(Section, { foreignKey: 'section_id', as: 'section' });
+// FunctionModel.hasMany(FunctionData, { foreignKey: 'function_id', as: 'functionData' });
+// FunctionModel.hasMany(Ticket, { foreignKey: 'responsible_unit_id', as: 'tickets' });
+
+// FunctionData associations
+// FunctionData.belongsTo(FunctionModel, { foreignKey: 'function_id', as: 'parentFunction' });
+
+// Section associations
+// Section.hasMany(FunctionModel, { foreignKey: 'section_id', as: 'functions' });
+
+module.exports = db;

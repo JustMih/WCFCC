@@ -10,6 +10,9 @@ const adminDashboardRoutes = require("./adminDashboard");
 const voiceRoutes = require("./voiceRoutes");
 const ivrActionRoutes = require("./ivrActionRoutes");
 const recordingRoutes = require("./recordingRoutes");
+const ticketRoutes = require("./ticketRoutes");
+const coordinatorRoutes = require("./coordinatorRoutes");
+const sectionRoutes = require("./sectionRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -23,4 +26,8 @@ router.use("/admin-dashboard", adminDashboardRoutes);
 router.use("/ivr", voiceRoutes);
 router.use("/ivr-actions", ivrActionRoutes);
 router.use("/voice-notes", recordingRoutes);  
+router.use("/ticket", ticketRoutes);
+router.use("/coordinator", coordinatorRoutes);
+router.use("/section", sectionRoutes);
+
 module.exports = router;
