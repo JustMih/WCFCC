@@ -41,7 +41,7 @@ module.exports = {
   sequelize,
 };
 // models/index.js
-IVRDTMFMapping.belongsTo(IVRVoice, { foreignKey: "ivr_voice_id" });
+// IVRDTMFMapping.belongsTo(IVRVoice, { foreignKey: "ivr_voice_id" });
 IVRDTMFMapping.belongsTo(IVRAction, { foreignKey: "action_id" });
 
 IVRVoice.hasMany(IVRDTMFMapping, { foreignKey: "ivr_voice_id" });
