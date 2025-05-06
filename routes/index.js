@@ -12,6 +12,7 @@ const ivrActionRoutes = require("./ivrActionRoutes");
 const ticketRoutes = require("./ticketRoutes");
 const coordinatorRoutes = require("./coordinatorRoutes");
 const sectionRoutes = require("./sectionRoutes");
+const getCallsRoutes = require("./callsRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -27,5 +28,6 @@ router.use("/ivr-actions", ivrActionRoutes);
 router.use("/ticket", ticketRoutes);
 router.use("/coordinator", coordinatorRoutes);
 router.use("/section", sectionRoutes);
+router.use("/calls", getCallsRoutes);
 
 module.exports = router;
