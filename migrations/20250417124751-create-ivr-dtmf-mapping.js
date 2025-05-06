@@ -2,7 +2,7 @@
 
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.createTable('IVRDTMFMapping', {
+    await queryInterface.createTable('IVRDTMFMappings', {
       id: {
         type: Sequelize.STRING,
         allowNull: false,
@@ -21,7 +21,7 @@ module.exports = {
         type: Sequelize.STRING,
         allowNull: false,
       },
-      ivr_action_id: {
+      action_id: {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
@@ -48,6 +48,6 @@ module.exports = {
   },
 
   async down(queryInterface, Sequelize) {
-    await queryInterface.dropTable('IVRDTMFMapping');
+    await queryInterface.dropTable('IVRDTMFMappings');
   }
 };
