@@ -38,7 +38,7 @@ const getVoiceById = async (req, res) => {
     res.status(200).json(voice);
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
+  } 
 };
 
 // Update Voice
