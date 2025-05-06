@@ -20,29 +20,28 @@ app.use(express.json());
 app.use(cors());
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
-app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
+// app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
 app.use('/api', recordingRoutes);
-//app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
-app.use("/sounds", express.static("public/sounds"));
+ 
+ // Replace existing static file config with:
+app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.wav')) {
+      res.set('Content-Type', 'audio/wav');
+    }
+  }
+}));
 // Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
 const io = new Server(server, {
-  // test
-  // cors: {
-  //   origin: "http://localhost:3000",
-  //   methods: ["GET", "POST"],
-  // },
-  // live
-  cors: {
-    origin: "http://10.52.0.19:3000",
-    methods: ["GET", "POST"],
-  },
+ 
 });
+ 
 app.use(cors({
-  origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
-  credentials: true, // Allow cookies/sessions
+  origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Accept"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
 }));
 const users = {}; // Store connected users (agent/supervisor)
 
@@ -111,12 +110,11 @@ connectAsterisk()
 
     const PORT = process.env.PORT || 5070;
     // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-    server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    //server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   })
   .catch((error) => {
     console.error("Asterisk connection failed:", error);
     process.exit(1); // Exit the process if Asterisk connection fails
   });
-
 
  
