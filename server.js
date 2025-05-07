@@ -110,7 +110,7 @@ connectAsterisk()
     });
 
     const PORT = process.env.PORT || 5070;
-    // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     //server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   })
   .catch((error) => {
