@@ -16,7 +16,7 @@ const http = require("http");
 dotenv.config();
 const app = express();
 app.use(express.json());
-// app.use(cors());
+app.use(cors());
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
 // app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
@@ -36,13 +36,13 @@ const io = new Server(server, {
  
 });
  
-app.use(cors({
-  // origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
-  origin: "http://10.52.0.19:3000",
-  credentials: true, // Allow cookies/sessions
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
-}));
+// app.use(cors({
+//   // origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
+//   origin: "http://10.52.0.19:3000",
+//   credentials: true, // Allow cookies/sessions
+//   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+//   allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+// }));
 const users = {}; 
 
 io.on("connection", (socket) => {
