@@ -38,7 +38,7 @@ const io = new Server(server, {
  
 app.use(cors({
   // origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
-  origin: "https://10.52.0.19:3000",
+  origin: "http://10.52.0.19:3000",
   credentials: true, // Allow cookies/sessions
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Accept"]
