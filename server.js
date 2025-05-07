@@ -5,7 +5,6 @@ const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
 const recordingRoutes = require('./routes/recordingRoutes');
-
 const {
   connectAsterisk,
   makeCall,
@@ -37,14 +36,14 @@ const io = new Server(server, {
  
 });
  
-// app.use(cors({
-//   // origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
-//   origin: "https://10.52.0.19:3000",
-//   credentials: true, // Allow cookies/sessions
-//   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-//   allowedHeaders: ["Content-Type", "Authorization", "Accept"]
-// }));
-const users = {}; // Store connected users (agent/supervisor)
+app.use(cors({
+  origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
+  origin: "https://10.52.0.19:3000",
+  credentials: true, // Allow cookies/sessions
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+}));
+const users = {}; 
 
 io.on("connection", (socket) => {
   console.log("New user connected:", socket.id);
