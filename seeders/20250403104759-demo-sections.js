@@ -18,7 +18,7 @@ module.exports = {
       throw new Error(`DEFAULT_USER_ID (${DEFAULT_USER_ID}) does not exist in Users table.`);
     }
 
-    await queryInterface.bulkInsert('Sections', [
+    const sections = [
       {
         id: '550e8400-e29b-41d4-a716-446655440001',
         name: 'Directorate of Operations',
@@ -51,7 +51,24 @@ module.exports = {
         updated_by: DEFAULT_USER_ID,
         updated_at: new Date()
       }
-    ]);
+    ];
+
+    // Check if sections already exist
+    for (const section of sections) {
+      const [existing] = await queryInterface.sequelize.query(
+        'SELECT * FROM `Sections` WHERE id = :id',
+        {
+          replacements: { id: section.id }
+        }
+      );
+
+      if (existing.length === 0) {
+        await queryInterface.bulkInsert('Sections', [section]);
+        console.log(`✔️  Section created: ${section.name}`);
+      } else {
+        console.log(`ℹ️  Section already exists: ${section.name}`);
+      }
+    }
   },
 
   down: async (queryInterface) => {

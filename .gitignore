@@ -3,3 +3,4 @@ controllers\auth
 config\config.js
 config\mysql_connection.js
 server.js
+.env
