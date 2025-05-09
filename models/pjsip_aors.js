@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/mysql_connection.js");
+const User = require("./user.js");
 
 const PjsipAors = sequelize.define(
   "pjsip_aors",
@@ -25,8 +26,20 @@ const PjsipAors = sequelize.define(
       allowNull: true,
       defaultValue: null,
     },
-  },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: User,
+        key: "id",
+      },
+      unique: true,
+    },
+  }
   // { timestamps: true }
 );
+
+User.hasOne(PjsipAors, { foreignKey: "userId", onDelete: "CASCADE" });
+PjsipAors.belongsTo(User, { foreignKey: "userId", onDelete: "CASCADE" });
 
 module.exports = PjsipAors;
