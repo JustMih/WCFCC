@@ -1,6 +1,6 @@
 const express = require("express");
 const {
-    getAllCoordinatorComplaints, rateTickets, convertOrForwardTicket
+    getAllCoordinatorComplaints, rateTickets, convertOrForwardTicket, getCoordinatorDashboardCounts
 } = require("../controllers/coordinator/coordinatorController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -33,5 +33,7 @@ router.post(
   convertOrForwardTicket
 );
 
+// Get coordinator dashboard counts
+router.get('/dashboard-counts/:userId', authMiddleware, roleMiddleware(['coordinator']), getCoordinatorDashboardCounts);
 
 module.exports = router;

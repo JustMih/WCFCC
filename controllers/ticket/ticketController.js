@@ -11,7 +11,7 @@ const { Op } = require("sequelize");
 
 const getTicketCounts = async (req, res) => {
   try {
-    const { userId: id } = req.params; // Rename userId to id (consistency)
+    const { userId: id } = req.params;
 
     console.log("Request URL:", req.originalUrl);
     console.log("Request Params:", req.params);
@@ -24,7 +24,7 @@ const getTicketCounts = async (req, res) => {
     console.log("Fetching ticket counts for user ID:", id);
 
     const user = await User.findOne({
-      where: { id }, // Use id here
+      where: { id },
       attributes: ["id", "name", "role"],
     });
 
@@ -33,7 +33,7 @@ const getTicketCounts = async (req, res) => {
     }
 
     const isSuperAdmin = user.role === "super-admin";
-    const whereUserCondition = isSuperAdmin ? {} : { userId: id }; // Use userId field in DB
+    const whereUserCondition = isSuperAdmin ? {} : { created_by: id };
 
     // Count tickets by status
     const statuses = ["Open", "Assigned", "Closed", "Carried Forward", "In Progress"];
@@ -41,7 +41,7 @@ const getTicketCounts = async (req, res) => {
 
     for (const status of statuses) {
       const key = status.toLowerCase().replace(/ /g, "");
-      const condition = isSuperAdmin ? { status } : { userId: id, status };
+      const condition = isSuperAdmin ? { status } : { created_by: id, status };
       counts[key] = await Ticket.count({ where: condition });
     }
 
@@ -83,7 +83,7 @@ const getTicketCounts = async (req, res) => {
       where: {
         ...whereUserCondition,
         status: "Closed",
-        updated_at: { [Op.gte]: lastHour }, // Use updated_at (DB column)
+        updated_at: { [Op.gte]: lastHour },
       },
     });
 
@@ -132,8 +132,8 @@ const getTicketCounts = async (req, res) => {
       avgWait,
       maxWait,
       lastHour: inHourCount || 0,
-      avgDelay: avgWait, // Use same for now
-      maxDelay: maxWait, // Use same for now
+      avgDelay: avgWait,
+      maxDelay: maxWait,
       slaBreaches: slaBreaches || 0,
     };
 
@@ -910,6 +910,93 @@ const getAllTickets = async (req, res) => {
   }
 };
 
+// Mock function to simulate complaint workflow
+const mockComplaintWorkflow = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { action, userId } = req.body;
+
+    // Mock ticket data
+    const mockTicket = {
+      id: ticketId,
+      category: 'complaint',
+      status: 'pending',
+      complaint_rating: null,
+      complaint_type: null,
+      assigned_to_id: null,
+      attended_by_id: null,
+      recommendation: null,
+      evidence_url: null,
+      review_notes: null,
+      approval_notes: null
+    };
+
+    // Mock workflow actions
+    switch (action) {
+      case 'rate':
+        // Coordinator rates and assigns complaint
+        mockTicket.complaint_rating = 'minor';
+        mockTicket.complaint_type = 'unit';
+        mockTicket.status = 'assigned';
+        mockTicket.assigned_to_id = userId;
+        break;
+
+      case 'progress':
+        // Head of Unit/Manager updates progress
+        mockTicket.status = 'in_progress';
+        mockTicket.attended_by_id = userId;
+        mockTicket.recommendation = 'Working on resolution';
+        break;
+
+      case 'recommend':
+        // Attendee makes recommendation
+        mockTicket.status = 'recommended';
+        mockTicket.recommendation = 'Proposed solution';
+        mockTicket.evidence_url = 'https://example.com/evidence.pdf';
+        break;
+
+      case 'review':
+        // Head of Unit/Manager reviews
+        mockTicket.status = 'reviewed';
+        mockTicket.review_notes = 'Review completed';
+        break;
+
+      case 'approve':
+        // DG approves
+        mockTicket.status = 'approved';
+        mockTicket.approval_notes = 'Approved by DG';
+        mockTicket.closed_at = new Date();
+        break;
+
+      case 'reverse':
+        // Any approver can reverse
+        mockTicket.status = 'reversed';
+        mockTicket.review_notes = 'Reversed for further review';
+        break;
+
+      case 'convert':
+        // Coordinator converts to inquiry
+        mockTicket.category = 'inquiry';
+        mockTicket.status = 'pending';
+        break;
+
+      default:
+        return res.status(400).json({ message: 'Invalid action' });
+    }
+
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    res.json({
+      message: `Complaint ${action} completed successfully`,
+      ticket: mockTicket
+    });
+
+  } catch (error) {
+    console.error('Error in mock workflow:', error);
+    res.status(500).json({ message: 'Error in mock workflow' });
+  }
+};
 
 module.exports = {
   createTicket,
@@ -922,5 +1009,6 @@ module.exports = {
   getClosedTickets,
   getOverdueTickets,
   getAllTickets,
-  getAllCustomersTickets
+  getAllCustomersTickets,
+  mockComplaintWorkflow
 };

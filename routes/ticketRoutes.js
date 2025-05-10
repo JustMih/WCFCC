@@ -1,7 +1,9 @@
 const express = require("express");
 const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
-  getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets
+  getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets,
+  rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
+  mockComplaintWorkflow
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -95,6 +97,13 @@ router.get(
   authMiddleware,
   roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getAllCustomersTickets
+);
+
+// Mock complaint workflow route (for testing)
+router.post(
+  '/complaints/:ticketId/mock',
+  authMiddleware,
+  mockComplaintWorkflow
 );
 
 module.exports = router;
