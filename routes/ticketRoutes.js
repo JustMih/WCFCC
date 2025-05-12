@@ -31,7 +31,7 @@ router.get(
 router.get(
   "/open/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
   getOpenTickets
 );
 

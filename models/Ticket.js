@@ -10,6 +10,10 @@ const Ticket = sequelize.define(
       primaryKey: true 
     },
 
+    ticket_id: { 
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
     userId: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -113,7 +117,7 @@ const Ticket = sequelize.define(
       }
     },
     category: {
-      type: DataTypes.ENUM('Inquiry', 'Complaint', 'Suggestion', 'Compliment'),
+      type: DataTypes.ENUM('Inquiry', 'Complaint', 'Suggestion', 'Compliment', 'Congrats'),
       allowNull: false
     },
     sub_section: {

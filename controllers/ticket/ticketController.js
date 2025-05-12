@@ -168,15 +168,20 @@ const createTicket = async (req, res) => {
       category,
       functionId,
       description,
-      status
+      status,
+      subject
     } = req.body;
 
     const ticketId = generateTicketId();
-    // const { id: userId } = req.user; // ✅ Get from auth middleware
     const userId = req.user.userId;
-    // ❗ Check if userId exists
+    
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
+    }
+
+    // Validate required fields
+    if (!subject) {
+      return res.status(400).json({ message: "Subject is required." });
     }
 
     const newTicket = await Ticket.create({
@@ -194,6 +199,7 @@ const createTicket = async (req, res) => {
       category,
       function_id: functionId,
       description,
+      subject,
       status: status || 'Open',
       created_by: userId,
     });
@@ -807,50 +813,6 @@ const getAllCustomersTickets = async (req, res) => {
     return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
-// const getAllCustomersTickets = async (req, res) => {
-//   try {
-//     const tickets = await Ticket.findAll({
-//       order: [["created_at", "DESC"]],
-//       include: [
-//         {
-//           model: User,
-//           as: "createdBy",
-//           attributes: ["id", "name"]
-//         },
-//         {
-//           model: FunctionData,
-//           as: "functionData", // 👈 match updated alias
-//           attributes: ["id", "name"],
-//           include: [
-//             {
-//               model: Function,
-//               as: "parentFunction", // 👈 match updated alias
-//               attributes: ["id", "name"],
-//               include: [
-//                 {
-//                   model: Sections,
-//                   as: "section", // ✅ already correct
-//                   attributes: ["id", "name"]
-//                 }
-//               ]
-//             }
-//           ]
-//         }
-//       ]
-//     });
-
-//     return res.status(200).json({
-//       message: "Tickets fetched successfully",
-//       totalTickets: tickets.length,
-//       tickets
-//     });
-
-//   } catch (error) {
-//     console.error("Error fetching tickets:", error);
-//     return res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
 
 const getAllTickets = async (req, res) => {
   try {
