@@ -18,7 +18,7 @@ module.exports = {
       { name: 'Hawa Attendee', email: 'attendeehawa@wcf.go.tz', phone_number: '0712029002', role: 'attendee' },
       { name: 'David Director', email: 'director@wcf.go.tz', phone_number: '0712000004', role: 'director' },
       { name: 'Emily Manager', email: 'manager@wcf.go.tz', phone_number: '0712000005', role: 'manager' },
-      { name: 'Frank Head', email: 'headofunit@wcf.go.tz', phone_number: '0712000006', role: 'headofunit' },
+      { name: 'Frank Head', email: 'headofunit@wcf.go.tz', phone_number: '0712000006', role: 'head-of-unit' },
       { name: 'Grace Coordinator', email: 'coordinator@wcf.go.tz', phone_number: '0712000007', role: 'coordinator' },
       { name: 'Henry DG', email: 'dg@wcf.go.tz', phone_number: '0712000008', role: 'director-general' },
     ];
@@ -29,7 +29,7 @@ module.exports = {
     await queryInterface.sequelize.transaction(async (transaction) => {
       for (const user of users) {
         const [existing] = await queryInterface.sequelize.query(
-          'SELECT * FROM `Users` WHERE email = :email', // Changed for MariaDB
+          'SELECT * FROM Users WHERE email = :email',
           {
             replacements: { email: user.email },
             transaction,
@@ -49,7 +49,7 @@ module.exports = {
             password: hashedPassword,
             role: user.role,
             isActive: true,
-            active_status: true, // Match migration
+            status: 'offline',
             createdAt: new Date(),
             updatedAt: new Date(),
           }], { transaction });

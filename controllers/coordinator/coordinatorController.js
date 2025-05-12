@@ -5,25 +5,26 @@ const User = require('../../models/User');
 const Unit = require('../../models/FunctionData');
 const FunctionModel = require('../../models/Function');
 const Section = require('../../models/Section');
+const { Op, Sequelize } = require('sequelize');
 
-const { Op } = require('sequelize');
+const sequelize = require('sequelize');
 
 const getAllCoordinatorComplaints = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
         category: 'Complaint',
-        assigned_to_role: 'Coordinator',
+        // assigned_to_role: 'Coordinator',
         status: 'Open'
 
       },
-      // include: [
-      //   {
-      //     model: User,
-      //     as: 'creator',
-      //     attributes: ['id', 'name']
-      //   }
-      // ],
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name']
+        }
+      ],
       order: [['created_at', 'DESC']]
     });
 
@@ -157,8 +158,8 @@ const convertOrForwardTicket = async (req, res) => {
         return res.status(400).json({ message: "Invalid responsible_unit_id: must be a valid UUID" });
       }
 
-      // Check if the unit exists (optional: if responsible_unit_id is a foreign key)
-      const unit = await Unit.findByPk(responsible_unit_id);
+      // Check if the unit exists and get its name
+      const unit = await FunctionModel.findByPk(responsible_unit_id);
       if (!unit) {
         return res.status(404).json({ message: "Unit not found for the given responsible_unit_id" });
       }
@@ -166,14 +167,26 @@ const convertOrForwardTicket = async (req, res) => {
       ticket.responsible_unit_id = responsible_unit_id;
       ticket.forwarded_by_id = req.user.id;
       ticket.forwarded_at = new Date();
+      ticket.assigned_to_role = 'Attendee'; // Set the role to Attendee when forwarding to a unit
     }
 
     // Save the updated ticket
     await ticket.save();
 
+    // Get the updated ticket with unit information
+    const updatedTicket = await Ticket.findByPk(ticketId, {
+      include: [
+        {
+          model: FunctionModel,
+          as: 'responsibleUnit',
+          attributes: ['name']
+        }
+      ]
+    });
+
     return res.status(200).json({
       message: `Ticket ${category ? `converted to ${category}` : ''}${category && responsible_unit_id ? ' and ' : ''}${responsible_unit_id ? 'forwarded to unit' : ''}`,
-      data: ticket,
+      data: updatedTicket,
     });
   } catch (error) {
     console.error("Convert/Forward Error:", error);
@@ -181,10 +194,65 @@ const convertOrForwardTicket = async (req, res) => {
   }
 };
 
+const getCoordinatorDashboardCounts = async (req, res) => {
+  try {
+    // New Tickets breakdown
+    const complaintsCount = await Ticket.count({ where: { category: 'Complaint' } });
+    const newTicketsCount = await Ticket.count({ where: { status: 'Open' } });
+    const escalatedTicketsCount = await Ticket.count({ where: { status: 'Escalated' } });
 
+    // Converted Tickets breakdown
+    const inquiriesCount = await Ticket.count({ where: { converted_to: 'Inquiry' } });
+    const convertedComplaintsCount = await Ticket.count({ where: { converted_to: 'Complaint' } });
+    const suggestionsCount = await Ticket.count({ where: { converted_to: 'Suggestion' } });
+    const complementsCount = await Ticket.count({ where: { converted_to: 'Compliment' } });
+
+    // Channeled Tickets breakdown
+    const directorateCount = await Ticket.count({ where: { assigned_to_role: 'Directorate' } });
+    const unitsCount = await Ticket.count({ where: { assigned_to_role: 'Unit' } });
+
+    // Ticket Status breakdown
+    const openCount = await Ticket.count({ where: { status: 'Open' } });
+    const onProgressCount = await Ticket.count({ where: { status: 'In Progress' } });
+    const closedCount = await Ticket.count({ where: { status: 'Closed' } });
+    const minorCount = await Ticket.count({ where: { complaint_type: 'Minor' } });
+    const majorCount = await Ticket.count({ where: { complaint_type: 'Major' } });
+
+    res.status(200).json({
+      message: "Dashboard counts retrieved successfully",
+      data: {
+        newTickets: {
+          Complaints: complaintsCount,
+          "New Tickets": newTicketsCount,
+          "Escalated Tickets": escalatedTicketsCount
+        },
+        convertedTickets: {
+          Inquiries: inquiriesCount,
+          Complaints: convertedComplaintsCount,
+          Suggestions: suggestionsCount,
+          Complements: complementsCount
+        },
+        channeledTickets: {
+          Directorate: directorateCount,
+          Units: unitsCount
+        },
+        ticketStatus: {
+          Open: openCount,
+          "On Progress": onProgressCount,
+          Closed: closedCount,
+          Minor: minorCount,
+          Major: majorCount
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 module.exports = {
   getAllCoordinatorComplaints,
   rateTickets,
   convertOrForwardTicket,
+  getCoordinatorDashboardCounts
 }
