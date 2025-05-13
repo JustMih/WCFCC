@@ -56,7 +56,7 @@ FunctionData.associate = (models) => {
   // A FunctionData belongs to a Function
   FunctionData.belongsTo(models.Function, { 
     foreignKey: 'function_id', 
-    as: 'parentFunction',
+    as: 'function',
     onDelete: 'CASCADE'
   });
   

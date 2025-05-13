@@ -249,13 +249,55 @@ const Ticket = sequelize.define(
 
 // Associations inside model
 Ticket.associate = (models) => {
-  Ticket.belongsTo(models.User, { foreignKey: 'userId', as: 'creator' });
-  Ticket.belongsTo(models.User, { foreignKey: 'assigned_to_id', as: 'assignee' });
-  Ticket.belongsTo(models.User, { foreignKey: 'attended_by_id', as: 'attendedBy' });
-  Ticket.belongsTo(models.User, { foreignKey: 'rated_by_id', as: 'ratedBy' });
-  Ticket.belongsTo(models.User, { foreignKey: 'converted_by_id', as: 'convertedBy' });
-  Ticket.belongsTo(models.User, { foreignKey: 'forwarded_by_id', as: 'forwardedBy' });
-  Ticket.belongsTo(models.Function, { foreignKey: 'responsible_unit_id', as: 'responsibleUnit' });
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'created_by', 
+    as: 'creator',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'assigned_to_id', 
+    as: 'assignee',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'attended_by_id', 
+    as: 'attendedBy',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'rated_by_id', 
+    as: 'ratedBy',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'converted_by_id', 
+    as: 'convertedBy',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'forwarded_by_id', 
+    as: 'forwardedBy',
+    onDelete: 'SET NULL'
+  });
+
+  // Update Section association
+  Ticket.belongsTo(models.Section, { 
+    foreignKey: 'responsible_unit_id', 
+    as: 'responsibleSection',
+    onDelete: 'SET NULL'
+  });
+
+  // Update Function association
+  Ticket.belongsTo(models.Function, { 
+    foreignKey: 'responsible_unit_id', 
+    as: 'responsibleUnit',
+    onDelete: 'SET NULL'
+  });
 };
 
 module.exports = Ticket;
