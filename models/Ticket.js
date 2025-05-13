@@ -182,6 +182,39 @@ const Ticket = sequelize.define(
       defaultValue: 0,
       allowNull: false
     },
+
+    responsible_unit_name: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    converted_by_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'Users',
+        key: 'id'
+      }
+    },
+    converted_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    forwarded_by_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'Users',
+        key: 'id'
+      }
+    },
+    forwarded_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    assigned_to_role: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    }
   },
   {
     tableName: 'Tickets',
@@ -220,6 +253,8 @@ Ticket.associate = (models) => {
   Ticket.belongsTo(models.User, { foreignKey: 'assigned_to_id', as: 'assignee' });
   Ticket.belongsTo(models.User, { foreignKey: 'attended_by_id', as: 'attendedBy' });
   Ticket.belongsTo(models.User, { foreignKey: 'rated_by_id', as: 'ratedBy' });
+  Ticket.belongsTo(models.User, { foreignKey: 'converted_by_id', as: 'convertedBy' });
+  Ticket.belongsTo(models.User, { foreignKey: 'forwarded_by_id', as: 'forwardedBy' });
   Ticket.belongsTo(models.Function, { foreignKey: 'responsible_unit_id', as: 'responsibleUnit' });
 };
 

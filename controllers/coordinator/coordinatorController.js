@@ -12,21 +12,23 @@ const getAllCoordinatorComplaints = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
-        category: 'Complaint',
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { converted_to: null },
-              { converted_to: 'Complaint' }
-            ]
-          },
-          {
-            [Op.or]: [
-              { status: null },
-              { status: 'Open' }
-            ]
-          }
-        ]
+        category: {
+          [Op.in]: ['Complaint', 'Suggestion', 'Compliment']
+        },
+        // [Op.and]: [
+        //   {
+        //     [Op.or]: [
+        //       { converted_to: null },
+        //       { converted_to: 'Complaint' }
+        //     ]
+        //   },
+        //   {
+        //     [Op.or]: [
+        //       { status: null },
+        //       { status: 'Open' }
+        //     ]
+        //   }
+        // ]
       },
       include: [
         {
@@ -56,7 +58,6 @@ const getAllCoordinatorComplaints = async (req, res) => {
     });
   }
 };
-
 
 const rateTickets = async (req, res) => {
   const { userId } = req.body;
@@ -136,15 +137,13 @@ const isValidUUID = (uuid) => {
   const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
   return uuidRegex.test(uuid);
 };
+
 const convertOrForwardTicket = async (req, res) => {
-  const { userId, category, responsible_unit_id } = req.body;
+  const { userId, category, responsible_unit_name } = req.body;
   const { id: ticketId } = req.params;
 
   try {
-    // Validate userId (should be a valid UUID)
-    if (!userId || !isValidUUID(userId)) {
-      return res.status(400).json({ message: "Invalid userId: must be a valid UUID" });
-    }
+    const userId = req.user.userId;
 
     // Find the ticket
     const ticket = await Ticket.findByPk(ticketId);
@@ -152,41 +151,49 @@ const convertOrForwardTicket = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
+    let conversionDone = false;
+    let forwardingDone = false;
+
     // Handle category conversion
     if (category) {
-      // Validate category (optional: ensure it's one of the allowed values)
-      const validCategories = ['Complaint', 'Congrats', 'Suggestion', 'Compliment', 'Inquiry'];
+      const validCategories = ['Inquiry'];
       if (!validCategories.includes(category)) {
-        return res.status(400).json({ message: "Invalid category: must be one of Complaint, Congrats, or Suggestion" });
+        return res.status(400).json({ message: "Invalid category: must be one of " + validCategories.join(', ') });
       }
-      ticket.category = category;
+
+      ticket.converted_to = category;
       ticket.converted_by_id = userId;
       ticket.converted_at = new Date();
+      conversionDone = true;
     }
 
     // Handle forwarding to a unit
-    if (responsible_unit_id) {
-      // Validate responsible_unit_id (must be a valid UUID)
-      if (!isValidUUID(responsible_unit_id)) {
-        return res.status(400).json({ message: "Invalid responsible_unit_id: must be a valid UUID" });
-      }
+    if (responsible_unit_name) {
+      const unit = await Section.findOne({ where: { name: responsible_unit_name } });
 
-      // Check if the unit exists and get its name
-      const unit = await FunctionModel.findByPk(responsible_unit_id);
       if (!unit) {
-        return res.status(404).json({ message: "Unit not found for the given responsible_unit_id" });
+        return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
       }
 
-      ticket.responsible_unit_id = responsible_unit_id;
-      ticket.forwarded_by_id = req.user.id;
+      ticket.responsible_unit_id = unit.id;
+      ticket.responsible_unit_name = unit.name;
+      ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
-      ticket.assigned_to_role = 'Attendee'; // Set the role to Attendee when forwarding to a unit
+      ticket.assigned_to_role = 'Attendee';
+      forwardingDone = true;
     }
 
-    // Save the updated ticket
+    // Ensure at least one action was taken
+    // if (!conversionDone && !forwardingDone) {
+    //   return res.status(400).json({
+    //     message: "Please select either a category to convert to, or a unit to forward to, or both"
+    //   });
+    // }
+
+    // Save the ticket
     await ticket.save();
 
-    // Get the updated ticket with unit information
+    // Reload updated ticket
     const updatedTicket = await Ticket.findByPk(ticketId, {
       include: [
         {
@@ -197,228 +204,154 @@ const convertOrForwardTicket = async (req, res) => {
       ]
     });
 
+    // Build dynamic message
+    const messageParts = [];
+    if (conversionDone) messageParts.push(`converted to '${category}'`);
+    if (forwardingDone) messageParts.push(`forwarded to '${responsible_unit_name}'`);
+    const message = `Ticket successfully ${messageParts.join(' and ')}`;
+
     return res.status(200).json({
-      message: `Ticket ${category ? `converted to ${category}` : ''}${category && responsible_unit_id ? ' and ' : ''}${responsible_unit_id ? 'forwarded to unit' : ''}`,
+      message,
       data: updatedTicket,
     });
+
   } catch (error) {
     console.error("Convert/Forward Error:", error);
     return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
+
 const getCoordinatorDashboardCounts = async (req, res) => {
   try {
-    // New Tickets breakdown
-    const complaintsCount = await Ticket.count({ 
-      where: { 
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ],
-        status: { [Op.ne]: 'Closed' },
+    const tenDaysAgo = new Date();
+    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
+    // Shared logic for new/unrated/unassigned/open tickets
+    const sharedNewTicketConditions = {
+      [Op.and]: [
+        { status: { [Op.ne]: 'Closed' } },
+        { responsible_unit_name: { [Op.is]: null } },
+        { complaint_type: { [Op.is]: null } },
+        {
+          [Op.or]: [
+            { status: null },
+            { status: 'Open' }
+          ]
+        }
+      ]
+    };
+
+    // New Tickets count
+    const newTicketsCount = await Ticket.count({
+      where: {
+        ...sharedNewTicketConditions,
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] }
+      }
+    });
+
+    // Escalated Tickets count
+    const escalatedTicketsCount = await Ticket.count({
+      where: {
         [Op.and]: [
-          {
-            [Op.or]: [
-              { converted_to: null },
-              { converted_to: 'Complaint' }
-            ]
-          },
-          {
-            [Op.or]: [
-              { status: null },
-              { status: 'Open' }
-            ]
-          }
-        ]
-      } 
-    });
-    
-    const newTicketsCount = await Ticket.count({ 
-      where: { 
-        [Op.or]: [
+          { responsible_unit_name: { [Op.not]: null } },
           { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ],
-        status: { [Op.ne]: 'Closed' },
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { converted_to: null },
-            ]
-          },
-          {
-            [Op.or]: [
-              { status: null },
-              { status: 'Open' }
-            ]
-          }
+          { created_at: { [Op.lt]: tenDaysAgo } },
+          { status: { [Op.notIn]: ['Closed', 'Resolved'] } }
         ]
-      } 
-    });
-    
-    const escalatedTicketsCount = await Ticket.count({ 
-      where: { 
-        status: 'Escalated',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ],
-        [Op.or]: [
-          { converted_to: null },
-          { converted_to: 'Complaint' }
-        ]
-      } 
+      }
     });
 
-    // Converted Tickets breakdown
-    const inquiriesCount = await Ticket.count({ 
-      where: { 
-        category: 'Inquiry',
-        status: { [Op.ne]: 'Closed' }
-      } 
-    });
-    
-    const convertedComplaintsCount = await Ticket.count({ 
-      where: { 
-        category: 'Complaint',
-        converted_to: { [Op.ne]: null },
-        status: { [Op.ne]: 'Closed' }
-      } 
-    });
-    
-    const suggestionsCount = await Ticket.count({ 
-      where: { 
-        category: 'Suggestion',
-        status: { [Op.ne]: 'Closed' }
-      } 
-    });
-    
-    const complementsCount = await Ticket.count({ 
-      where: { 
-        category: 'Compliment',
-        status: { [Op.ne]: 'Closed' }
-      } 
+    // Converted Tickets (filtered using same logic as new tickets per category)
+    const complaintsCount = await Ticket.count({
+      where: {
+        ...sharedNewTicketConditions,
+        category: 'Complaint'
+      }
     });
 
-    // Channeled Tickets breakdown
-    const directorateCount = await Ticket.count({ 
-      where: { 
-        assigned_to_role: 'Directorate',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ],
-        status: { [Op.ne]: 'Closed' }
-      } 
-    });
-    
-    const unitsCount = await Ticket.count({ 
-      where: { 
-        assigned_to_role: 'Unit',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ],
-        status: { [Op.ne]: 'Closed' }
-      } 
+    const suggestionsCount = await Ticket.count({
+      where: {
+        ...sharedNewTicketConditions,
+        category: 'Suggestion'
+      }
     });
 
-    // Ticket Status breakdown
-    const openCount = await Ticket.count({ 
-      where: { 
-        [Op.or]: [
-          { status: null },
-          { status: 'Open' }
-        ],
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ]
-      } 
+    const complementsCount = await Ticket.count({
+      where: {
+        ...sharedNewTicketConditions,
+        category: 'Compliment'
+      }
+    });
+
+    // Channeled Tickets Breakdown
+    const directorateCount = await Ticket.count({
+      where: {
+        responsible_unit_name: { [Op.like]: '%Directorate%' },
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+        status: { [Op.ne]: 'Closed' }
+      }
     });
     
-    const onProgressCount = await Ticket.count({ 
-      where: { 
-        status: 'In Progress',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ]
-      } 
+    const unitsCount = await Ticket.count({
+      where: {
+        responsible_unit_name: { [Op.like]: '%Unit%' },
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+        status: { [Op.ne]: 'Closed' }
+      }
     });
     
-    const closedCount = await Ticket.count({ 
-      where: { 
-        status: 'Closed',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ]
-      } 
+
+    // Ticket Status Breakdown
+    // const openCount = await Ticket.count({
+    //   where: {
+    //     category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+    //     [Op.or]: [
+    //       { status: null },
+    //       { status: 'Open' }
+    //     ]
+    //   }
+    // });
+
+    const onProgressCount = await Ticket.count({
+      where: {
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+        status: {[Op.ne]:['Closed']},
+        responsible_unit_name: { [Op.ne]: null },
+        complaint_type: { [Op.ne]: null }
+      }
     });
-    
-    const minorCount = await Ticket.count({ 
-      where: { 
+
+    const closedCount = await Ticket.count({
+      where: {
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+        status: 'Closed'
+      }
+    });
+
+    const minorCount = await Ticket.count({
+      where: {
         complaint_type: 'Minor',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ]
-      } 
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] }
+      }
     });
-    
-    const majorCount = await Ticket.count({ 
-      where: { 
+
+    const majorCount = await Ticket.count({
+      where: {
         complaint_type: 'Major',
-        [Op.or]: [
-          { category: 'Complaint' },
-          { category: 'Congrats' },
-          { category: 'Suggestion' },
-          { category: 'Compliment' },
-          { category: 'Inquiry' }
-        ]
-      } 
+        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] }
+      }
     });
 
     res.status(200).json({
       message: "Dashboard counts retrieved successfully",
       data: {
         newTickets: {
-          Complaints: complaintsCount,
           "New Tickets": newTicketsCount,
           "Escalated Tickets": escalatedTicketsCount
         },
         convertedTickets: {
-          Inquiries: inquiriesCount,
-          Complaints: convertedComplaintsCount,
+          Complaints: complaintsCount,
           Suggestions: suggestionsCount,
           Complements: complementsCount
         },
@@ -427,7 +360,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
           Units: unitsCount
         },
         ticketStatus: {
-          Open: openCount,
+          // Open: openCount,
           "On Progress": onProgressCount,
           Closed: closedCount,
           Minor: minorCount,
@@ -436,9 +369,11 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("Dashboard Error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
 
 const getTicketsByCategoryAndType = async (req, res) => {
   try {
@@ -852,9 +787,136 @@ const getTicketsByStatus = async (req, res) => {
   }
 };
 
+// Rate and complete registration of complaints
+const rateAndRegisterComplaint = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { rating, registrationNotes } = req.body;
+    const coordinatorId = req.user.userId;
+
+    const ticket = await Ticket.findOne({
+      where: { 
+        id: ticketId,
+        category: 'Complaint'
+      }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Complaint not found" });
+    }
+
+    // Update ticket with rating and registration details
+    await ticket.update({
+      complaint_rating: rating,
+      registration_notes: registrationNotes,
+      registered_by: coordinatorId,
+      registration_date: new Date(),
+      status: 'Registered'
+    });
+
+    res.status(200).json({
+      message: "Complaint rated and registered successfully",
+      ticket
+    });
+  } catch (error) {
+    console.error("Error rating and registering complaint:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Convert complaint to inquiry
+const convertToInquiry = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { conversionReason } = req.body;
+    const coordinatorId = req.user.userId;
+
+    const ticket = await Ticket.findOne({
+      where: { 
+        id: ticketId,
+        category: 'Complaint'
+      }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Complaint not found" });
+    }
+
+    // Update ticket to inquiry
+    await ticket.update({
+      category: 'Inquiry',
+      converted_to: 'Inquiry',
+      conversion_reason: conversionReason,
+      converted_by: coordinatorId,
+      conversion_date: new Date(),
+      status: 'Open'
+    });
+
+    res.status(200).json({
+      message: "Complaint converted to inquiry successfully",
+      ticket
+    });
+  } catch (error) {
+    console.error("Error converting complaint to inquiry:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Channel complaint to appropriate unit
+const channelComplaint = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { unitId, channelingNotes } = req.body;
+    const coordinatorId = req.user.userId;
+
+    const ticket = await Ticket.findOne({
+      where: { 
+        id: ticketId,
+        category: 'Complaint'
+      }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Complaint not found" });
+    }
+
+    // Get the supervisor of the unit
+    const supervisor = await User.findOne({
+      where: { 
+        role: 'supervisor',
+        unit_id: unitId
+      }
+    });
+
+    if (!supervisor) {
+      return res.status(404).json({ message: "No supervisor found for the selected unit" });
+    }
+
+    // Update ticket with channeling details
+    await ticket.update({
+      assigned_to: supervisor.id,
+      channeled_to_unit: unitId,
+      channeling_notes: channelingNotes,
+      channeled_by: coordinatorId,
+      channeling_date: new Date(),
+      status: 'Assigned'
+    });
+
+    res.status(200).json({
+      message: "Complaint channeled successfully",
+      ticket
+    });
+  } catch (error) {
+    console.error("Error channeling complaint:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 module.exports = {
   getAllCoordinatorComplaints,
+  rateAndRegisterComplaint,
+  convertToInquiry,
+  channelComplaint,
   rateTickets,
   convertOrForwardTicket,
   getCoordinatorDashboardCounts,

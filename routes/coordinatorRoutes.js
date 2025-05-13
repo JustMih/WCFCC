@@ -11,6 +11,9 @@ const {
     getClosedTickets,
     getOverdueTickets,
     getTicketsByStatus,
+    rateAndRegisterComplaint,
+    convertToInquiry,
+    channelComplaint
 } = require("../controllers/coordinator/coordinatorController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -92,6 +95,30 @@ router.get('/complaints',
     authMiddleware,
     roleMiddleware(['coordinator', 'super-admin']),
     getAllCoordinatorComplaints
+);
+
+// Rate and register complaint
+router.post(
+  "/complaints/:ticketId/rate",
+  authMiddleware,
+  roleMiddleware(['coordinator']),
+  rateAndRegisterComplaint
+);
+
+// Convert complaint to inquiry
+router.post(
+  "/complaints/:ticketId/convert",
+  authMiddleware,
+  roleMiddleware(['coordinator']),
+  convertToInquiry
+);
+
+// Channel complaint to unit
+router.post(
+  "/complaints/:ticketId/channel",
+  authMiddleware,
+  roleMiddleware(['coordinator']),
+  channelComplaint
 );
 
 module.exports = router;
