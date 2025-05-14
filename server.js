@@ -4,90 +4,104 @@ const dotenv = require("dotenv");
 const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
-const recordingRoutes = require('./routes/recordingRoutes');
-const {
-  connectAsterisk,
-  makeCall,
-} = require("./controllers/ami/amiController");
-const ChatMassage = require("./models/chart_message")
+const recordingRoutes = require("./routes/recordingRoutes");
+const { connectAsterisk } = require("./controllers/ami/amiController");
+const ChatMassage = require("./models/chart_message");
 const { Server } = require("socket.io");
 const http = require("http");
 
 dotenv.config();
 const app = express();
+
+// Middleware
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: "http://localhost:3001",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  })
+);
+
+// Routes
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
-// app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
-app.use('/api', recordingRoutes);
- 
- // Replace existing static file config with:
-app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
-  setHeaders: (res, path) => {
-    if (path.endsWith('.wav')) {
-      res.set('Content-Type', 'audio/wav');
-    }
-  }
-}));
-// Create HTTP Server & WebSocket Server
+app.use("/api", recordingRoutes);
+
+// Serve audio files
+app.use(
+  "/sounds",
+  express.static("/var/lib/asterisk/sounds", {
+    setHeaders: (res, path) => {
+      if (path.endsWith(".wav")) {
+        res.set("Content-Type", "audio/wav");
+      } else if (path.endsWith(".mp3")) {
+        res.set("Content-Type", "audio/mp3");
+      }
+    },
+  })
+);
+
+// Serve audio files for /audio endpoint
+app.use(
+  "/audio",
+  express.static("/var/lib/asterisk/sounds", {
+    setHeaders: (res, path) => {
+      if (path.endsWith(".mp3")) {
+        res.set("Content-Type", "audio/mp3");
+      } else if (path.endsWith(".wav")) {
+        res.set("Content-Type", "audio/wav");
+      }
+    },
+  })
+);
+
+// Create HTTP Server & Socket.IO Server
 const server = http.createServer(app);
 const io = new Server(server, {
- 
+  cors: {
+    origin: "http://localhost:3001",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
 });
- 
-// app.use(cors({
-//   // origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
-//   origin: "http://10.52.0.19:3000",
-//   credentials: true, // Allow cookies/sessions
-//   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-//   allowedHeaders: ["Content-Type", "Authorization", "Accept"]
-// }));
-const users = {}; 
+
+const users = {};
 
 io.on("connection", (socket) => {
   console.log("New user connected:", socket.id);
 
-  // Store user ID with their socket
   socket.on("register", (userId) => {
     users[userId] = socket.id;
     console.log(`User ${userId} connected with socket ${socket.id}`);
   });
 
-  // Private messaging (agent -> supervisor)
   socket.on("private_message", async ({ senderId, receiverId, message }) => {
     console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
-
-    // Save message to MySQL
-    await ChatMassage.create({
-      senderId,
-      receiverId,
-      message,
-    });
-
-    // Send message to the recipient if online
-    if (users[receiverId]) {
-      io.to(users[receiverId]).emit("private_message", {
-        senderId,
-        receiverId,
-        message,
-      });
-    } else {
-      console.warn(`User ${receiverId} is offline, message not delivered.`);
-    }
-
-    // Also send the message back to the sender to update their UI
-    if (users[senderId]) {
-      io.to(users[senderId]).emit("private_message", {
-        senderId,
-        receiverId,
-        message,
-      });
+    try {
+      await ChatMassage.create({ senderId, receiverId, message });
+      if (users[receiverId]) {
+        io.to(users[receiverId]).emit("private_message", {
+          senderId,
+          receiverId,
+          message,
+        });
+      } else {
+        console.warn(`User ${receiverId} is offline, message not delivered.`);
+      }
+      if (users[senderId]) {
+        io.to(users[senderId]).emit("private_message", {
+          senderId,
+          receiverId,
+          message,
+        });
+      }
+    } catch (error) {
+      console.error("Error saving message:", error);
     }
   });
 
-
-  // Handle user disconnect
   socket.on("disconnect", () => {
     Object.keys(users).forEach((key) => {
       if (users[key] === socket.id) {
@@ -98,23 +112,26 @@ io.on("connection", (socket) => {
   });
 });
 
-// Ensure Asterisk is connected before syncing the database and starting the server
+// Start server
 connectAsterisk()
   .then(() => {
     console.log("Asterisk connected successfully!");
-
-    sequelize.sync({ force: false, alter: false }).then(() => {
-      console.log("Database synced");
-      registerSuperAdmin(); // Ensure Super Admin is created at startup
-    });
-
-    const PORT = process.env.PORT || 5070;
-    //app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-    //server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    sequelize
+      .sync({ force: false, alter: false })
+      .then(() => {
+        console.log("Database synced");
+        registerSuperAdmin();
+        const PORT = process.env.PORT || 5070;
+        server.listen(PORT, () => {
+          console.log(`Server running on http://10.52.0.19:${PORT}`);
+        });
+      })
+      .catch((error) => {
+        console.error("Database sync failed:", error);
+        process.exit(1);
+      });
   })
   .catch((error) => {
     console.error("Asterisk connection failed:", error);
-    process.exit(1); // Exit the process if Asterisk connection fails
+    process.exit(1);
   });
-
- 
