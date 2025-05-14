@@ -27,13 +27,25 @@ const getAllFunction = async (req, res) => {
 const getAllFunctionData = async (req, res) => {
   try {
     const data = await FunctionData.findAll({
-      order: [['name', 'ASC']]
+      order: [['name', 'ASC']],
+      include: [
+        {
+          model: Function,
+          as: 'function',
+          include: [
+            {
+              model: Section,
+              as: 'section'
+            }
+          ]
+        }
+      ]
     });
 
     res.status(200).json({
       message: 'Function data fetched successfully',
-      totalFunction: data.length,   // ✅ use data.length, not Function.length
-      data: data                        // ✅ use the result of your query
+      totalFunction: data.length,
+      data: data
     });
   } catch (err) {
     console.error(err);
@@ -67,11 +79,11 @@ const getAllFunctionDetails = async (req, res) => {
       include: [
         {
           model: Function,
-          as: "parentFunction",
+          as: 'function',
           include: [
             {
               model: Section,
-              as: "section"
+              as: 'section'
             }
           ]
         }
@@ -82,11 +94,11 @@ const getAllFunctionDetails = async (req, res) => {
       return res.status(404).json({ message: "Function data not found" });
     }
 
-    if (!functionData.parentFunction) {
+    if (!functionData.function) {
       return res.status(404).json({ message: "No parent function associated with this functionData." });
     }
 
-    if (!functionData.parentFunction.section) {
+    if (!functionData.function.section) {
       return res.status(404).json({ message: "No section found for the parent function." });
     }
 
@@ -94,8 +106,8 @@ const getAllFunctionDetails = async (req, res) => {
       message: "Details fetched successfully",
       data: {
         subject: functionData.name,
-        function: functionData.parentFunction.name,
-        section: functionData.parentFunction.section.name
+        function: functionData.function.name,
+        section: functionData.function.section.name
       }
     });
   } catch (err) {
