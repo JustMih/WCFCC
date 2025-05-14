@@ -168,15 +168,20 @@ const createTicket = async (req, res) => {
       category,
       functionId,
       description,
-      status
+      status,
+      subject
     } = req.body;
 
     const ticketId = generateTicketId();
-    // const { id: userId } = req.user; // ✅ Get from auth middleware
     const userId = req.user.userId;
-    // ❗ Check if userId exists
+    
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
+    }
+
+    // Validate required fields
+    if (!subject) {
+      return res.status(400).json({ message: "Subject is required." });
     }
 
     const newTicket = await Ticket.create({
@@ -194,6 +199,7 @@ const createTicket = async (req, res) => {
       category,
       function_id: functionId,
       description,
+      subject,
       status: status || 'Open',
       created_by: userId,
     });
@@ -795,6 +801,70 @@ const getAllCustomersTickets = async (req, res) => {
   try {
     const tickets = await Ticket.findAll({
       order: [["created_at", "DESC"]],
+      include: [
+        {
+          model: Section,
+          as: 'responsibleSection',
+          attributes: ['id', 'name'],
+          include: [
+            {
+              model: Function,
+              as: 'functions',
+              attributes: ['id', 'name'],
+              include: [
+                {
+                  model: FunctionData,
+                  as: 'functionData',
+                  attributes: ['id', 'name']
+                }
+              ]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'attendedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'ratedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'convertedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'forwardedBy',
+          attributes: ['id', 'name', 'email']
+        }
+      ],
+      attributes: [
+        'id', 'ticket_id', 'first_name', 'middle_name', 'last_name',
+        'phone_number', 'nida_number', 'requester', 'institution',
+        'region', 'district', 'subject', 'category', 'sub_section',
+        'section', 'channel', 'description', 'complaint_type',
+        'converted_to', 'status', 'request_registered_date',
+        'date_of_resolution', 'date_of_feedback', 'date_of_review_resolution',
+        'resolution_details', 'aging_days', 'responsible_unit_name',
+        'converted_at', 'forwarded_at', 'assigned_to_role',
+        'created_at', 'updated_at', 'created_by', 'assigned_to_id',
+        'attended_by_id', 'rated_by_id', 'converted_by_id', 'forwarded_by_id',
+        'responsible_unit_id'
+      ]
     });
 
     return res.status(200).json({
@@ -808,61 +878,14 @@ const getAllCustomersTickets = async (req, res) => {
   }
 };
 
-// const getAllCustomersTickets = async (req, res) => {
-//   try {
-//     const tickets = await Ticket.findAll({
-//       order: [["created_at", "DESC"]],
-//       include: [
-//         {
-//           model: User,
-//           as: "createdBy",
-//           attributes: ["id", "name"]
-//         },
-//         {
-//           model: FunctionData,
-//           as: "functionData", // 👈 match updated alias
-//           attributes: ["id", "name"],
-//           include: [
-//             {
-//               model: Function,
-//               as: "parentFunction", // 👈 match updated alias
-//               attributes: ["id", "name"],
-//               include: [
-//                 {
-//                   model: Sections,
-//                   as: "section", // ✅ already correct
-//                   attributes: ["id", "name"]
-//                 }
-//               ]
-//             }
-//           ]
-//         }
-//       ]
-//     });
-
-//     return res.status(200).json({
-//       message: "Tickets fetched successfully",
-//       totalTickets: tickets.length,
-//       tickets
-//     });
-
-//   } catch (error) {
-//     console.error("Error fetching tickets:", error);
-//     return res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
-
 const getAllTickets = async (req, res) => {
   try {
-    const { userId } = req.params; // Get userId from URL
+    const { userId } = req.params;
 
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    console.log("Fetching all tickets for user ID:", userId);
-
-    // Fetch user details including role
     const user = await User.findOne({
       where: { id: userId },
       attributes: ["id", "name", "role"],
@@ -875,17 +898,77 @@ const getAllTickets = async (req, res) => {
     let tickets;
 
     if (user.role === "super-admin") {
-      // Super admin: Fetch all tickets (no status filter)
       tickets = await Ticket.findAll({
-        attributes: { exclude: ["userId"] }, // Exclude userId from ticket data
-        order: [["created_at", "DESC"]],
+        attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: Section,
+            as: 'responsibleSection',
+            attributes: ['id', 'name'],
+            include: [
+              {
+                model: Function,
+                as: 'functions',
+                attributes: ['id', 'name'],
+                include: [
+                  {
+                    model: FunctionData,
+                    as: 'functionData',
+                    attributes: ['id', 'name']
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            model: User,
+            as: 'creator',
+            attributes: ['id', 'name', 'email']
+          },
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'email']
+          }
+        ],
+        order: [["created_at", "DESC"]]
       });
     } else {
-      // Agent: Fetch only tickets created by this agent (no status filter)
       tickets = await Ticket.findAll({
-        where: { userId }, // Filter by userId only
+        where: { userId },
         attributes: { exclude: ["userId"] },
-        order: [["created_at", "DESC"]],
+        include: [
+          {
+            model: Section,
+            as: 'responsibleSection',
+            attributes: ['id', 'name'],
+            include: [
+              {
+                model: Function,
+                as: 'functions',
+                attributes: ['id', 'name'],
+                include: [
+                  {
+                    model: FunctionData,
+                    as: 'functionData',
+                    attributes: ['id', 'name']
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            model: User,
+            as: 'creator',
+            attributes: ['id', 'name', 'email']
+          },
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'email']
+          }
+        ],
+        order: [["created_at", "DESC"]]
       });
     }
 
@@ -893,7 +976,6 @@ const getAllTickets = async (req, res) => {
       return res.status(404).json({ message: "No tickets found for this user." });
     }
 
-    // Modify response to include created_by (user.name)
     const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name,

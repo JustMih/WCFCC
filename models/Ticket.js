@@ -10,6 +10,10 @@ const Ticket = sequelize.define(
       primaryKey: true 
     },
 
+    ticket_id: { 
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
     userId: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -113,7 +117,7 @@ const Ticket = sequelize.define(
       }
     },
     category: {
-      type: DataTypes.ENUM('Inquiry', 'Complaint', 'Suggestion', 'Compliment'),
+      type: DataTypes.ENUM('Inquiry', 'Complaint', 'Suggestion', 'Compliment', 'Congrats'),
       allowNull: false
     },
     sub_section: {
@@ -178,6 +182,39 @@ const Ticket = sequelize.define(
       defaultValue: 0,
       allowNull: false
     },
+
+    responsible_unit_name: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    converted_by_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'Users',
+        key: 'id'
+      }
+    },
+    converted_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    forwarded_by_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'Users',
+        key: 'id'
+      }
+    },
+    forwarded_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    assigned_to_role: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    }
   },
   {
     tableName: 'Tickets',
@@ -212,11 +249,55 @@ const Ticket = sequelize.define(
 
 // Associations inside model
 Ticket.associate = (models) => {
-  Ticket.belongsTo(models.User, { foreignKey: 'userId', as: 'creator' });
-  Ticket.belongsTo(models.User, { foreignKey: 'assigned_to_id', as: 'assignee' });
-  Ticket.belongsTo(models.User, { foreignKey: 'attended_by_id', as: 'attendedBy' });
-  Ticket.belongsTo(models.User, { foreignKey: 'rated_by_id', as: 'ratedBy' });
-  Ticket.belongsTo(models.Function, { foreignKey: 'responsible_unit_id', as: 'responsibleUnit' });
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'created_by', 
+    as: 'creator',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'assigned_to_id', 
+    as: 'assignee',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'attended_by_id', 
+    as: 'attendedBy',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'rated_by_id', 
+    as: 'ratedBy',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'converted_by_id', 
+    as: 'convertedBy',
+    onDelete: 'SET NULL'
+  });
+  
+  Ticket.belongsTo(models.User, { 
+    foreignKey: 'forwarded_by_id', 
+    as: 'forwardedBy',
+    onDelete: 'SET NULL'
+  });
+
+  // Update Section association
+  Ticket.belongsTo(models.Section, { 
+    foreignKey: 'responsible_unit_id', 
+    as: 'responsibleSection',
+    onDelete: 'SET NULL'
+  });
+
+  // Update Function association
+  Ticket.belongsTo(models.Function, { 
+    foreignKey: 'responsible_unit_id', 
+    as: 'responsibleUnit',
+    onDelete: 'SET NULL'
+  });
 };
 
 module.exports = Ticket;

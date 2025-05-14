@@ -62,6 +62,8 @@ Section.associate = (models) => {
     foreignKey: 'updated_by',
     as: 'updater'
   });
+
+  Section.hasMany(models.Ticket, { foreignKey: 'responsible_unit_id', as: 'tickets' });
 };
 
 module.exports = Section;
