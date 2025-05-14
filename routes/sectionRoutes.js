@@ -1,6 +1,6 @@
 const express = require("express");
 const {
-  getByFunctionId, getAllFunction, getAllFunctionDetails
+  getByFunctionId, getAllFunctionData, getAllFunctionDetails, getAllFunction
 } = require("../controllers/section/functionsDataController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -20,6 +20,13 @@ router.get(
 // Get function data of relation fuction and sections
 router.get(
   "/functions-data",
+  authMiddleware,
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
+  getAllFunctionData
+);
+
+router.get(
+  "/units-data",
   authMiddleware,
   roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getAllFunction

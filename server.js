@@ -4,9 +4,8 @@ const dotenv = require("dotenv");
 const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
-const recordingRoutes = require("./routes/recordingRoutes");
-const { connectAsterisk } = require("./controllers/ami/amiController");
-const ChatMassage = require("./models/chart_message");
+const recordingRoutes = require('./routes/recordingRoutes');
+const ChatMassage = require("./models/chart_message")
 const { Server } = require("socket.io");
 const http = require("http");
 
@@ -27,47 +26,30 @@ app.use(
 // Routes
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
-app.use("/api", recordingRoutes);
+// app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
+app.use('/api', recordingRoutes);
+ 
+// Replace existing static file config with:
+app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.wav')) {
+      res.set('Content-Type', 'audio/wav');
+    }
+  }
+}));
 
-// Serve audio files
-app.use(
-  "/sounds",
-  express.static("/var/lib/asterisk/sounds", {
-    setHeaders: (res, path) => {
-      if (path.endsWith(".wav")) {
-        res.set("Content-Type", "audio/wav");
-      } else if (path.endsWith(".mp3")) {
-        res.set("Content-Type", "audio/mp3");
-      }
-    },
-  })
-);
-
-// Serve audio files for /audio endpoint
-app.use(
-  "/audio",
-  express.static("/var/lib/asterisk/sounds", {
-    setHeaders: (res, path) => {
-      if (path.endsWith(".mp3")) {
-        res.set("Content-Type", "audio/mp3");
-      } else if (path.endsWith(".wav")) {
-        res.set("Content-Type", "audio/wav");
-      }
-    },
-  })
-);
-
-// Create HTTP Server & Socket.IO Server
+// Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:3001",
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-});
+const io = new Server(server, {});
+ 
+app.use(cors({
+  origin: ["http://localhost:3000", "https://10.52.0.19:3000"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+}));
 
-const users = {};
+const users = {}; 
 
 io.on("connection", (socket) => {
   console.log("New user connected:", socket.id);
@@ -102,6 +84,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Handle user disconnect
   socket.on("disconnect", () => {
     Object.keys(users).forEach((key) => {
       if (users[key] === socket.id) {
@@ -112,26 +95,16 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start server
-connectAsterisk()
-  .then(() => {
-    console.log("Asterisk connected successfully!");
-    sequelize
-      .sync({ force: false, alter: false })
-      .then(() => {
-        console.log("Database synced");
-        registerSuperAdmin();
-        const PORT = process.env.PORT || 5070;
-        server.listen(PORT, () => {
-          console.log(`Server running on http://10.52.0.19:${PORT}`);
-        });
-      })
-      .catch((error) => {
-        console.error("Database sync failed:", error);
-        process.exit(1);
-      });
-  })
-  .catch((error) => {
-    console.error("Asterisk connection failed:", error);
-    process.exit(1);
-  });
+// Start the server and sync database
+sequelize.sync({ force: false, alter: false }).then(() => {
+  console.log("Database synced");
+  registerSuperAdmin(); // Ensure Super Admin is created at startup
+  
+  const PORT = process.env.PORT || 5070;
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(error => {
+  console.error("Database sync failed:", error);
+  process.exit(1);
+});
+
+ 

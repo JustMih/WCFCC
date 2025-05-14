@@ -1,37 +1,124 @@
 const express = require("express");
 const {
-    getAllCoordinatorComplaints, rateTickets, convertOrForwardTicket
+    getAllCoordinatorComplaints,
+    rateTickets,
+    convertOrForwardTicket,
+    getCoordinatorDashboardCounts,
+    getOpenTickets,
+    getAssignedTickets,
+    getInprogressTickets,
+    getCarriedForwardTickets,
+    getClosedTickets,
+    getOverdueTickets,
+    getTicketsByStatus,
+    rateAndRegisterComplaint,
+    convertToInquiry,
+    channelComplaint
 } = require("../controllers/coordinator/coordinatorController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
-const { body } = require('express-validator'); // For validation
 const router = express.Router();
-const { Op } = require("sequelize");
 
+// Get coordinator dashboard counts
+router.get('/dashboard-counts/:userId', 
+    authMiddleware, 
+    roleMiddleware(['coordinator', 'super-admin']), 
+    getCoordinatorDashboardCounts
+);
 
-// Get ticket complaints created route
+// Get open tickets
+router.get('/open/:userId',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getOpenTickets
+);
+
+// Get assigned tickets
+router.get('/assigned/:userId',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getAssignedTickets
+);
+
+// Get in-progress tickets
+router.get('/in-progress/:userId',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getInprogressTickets
+);
+
+// Get carried forward tickets
+router.get('/carried-forward/:userId',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getCarriedForwardTickets
+);
+
+// Get closed tickets
+router.get('/closed/:userId',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getClosedTickets
+);
+
+// Get overdue tickets
+router.get('/overdue/:userId',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getOverdueTickets
+);
+
+// Rate tickets
+router.post('/:id/rate',
+    authMiddleware,
+    roleMiddleware(['coordinator']),
+    rateTickets
+);
+
+// Convert or forward tickets
+router.put('/:id/convert-or-forward-ticket',
+    authMiddleware,
+    roleMiddleware(['coordinator']),
+    convertOrForwardTicket
+);
+
+// Add this route for status/category-based ticket fetching
 router.get(
-  "/complaints",
-  authMiddleware,
-  roleMiddleware(["coordinator", "super-admin"]),
-  getAllCoordinatorComplaints
+    '/tickets',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getTicketsByStatus
+  );
+  
+// Get complaints tickets
+router.get('/complaints',
+    authMiddleware,
+    roleMiddleware(['coordinator', 'super-admin']),
+    getAllCoordinatorComplaints
 );
 
-// update ticket complaints rating if minor or major
+// Rate and register complaint
 router.post(
-  "/:id/rate",
+  "/complaints/:ticketId/rate",
   authMiddleware,
-  roleMiddleware(["coordinator"]),
-  rateTickets
+  roleMiddleware(['coordinator']),
+  rateAndRegisterComplaint
 );
 
-// update ticket complaints created route
+// Convert complaint to inquiry
 router.post(
-  "/:id/convert-or-forward-ticket",
+  "/complaints/:ticketId/convert",
   authMiddleware,
-  roleMiddleware(["coordinator"]),
-  convertOrForwardTicket
+  roleMiddleware(['coordinator']),
+  convertToInquiry
 );
 
+// Channel complaint to unit
+router.post(
+  "/complaints/:ticketId/channel",
+  authMiddleware,
+  roleMiddleware(['coordinator']),
+  channelComplaint
+);
 
 module.exports = router;

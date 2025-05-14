@@ -2,7 +2,7 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../config/mysql_connection.js");
 const pjsip_aors = require("./pjsip_aors");
 const pjsip_auths = require("./pjsip_auths");
-const User = require("./user.js");
+const User = require("./User.js");
 
 const Pjsip_Endpoints = sequelize.define(
   "pjsip_endpoints",

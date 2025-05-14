@@ -1,6 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/mysql_connection.js");
-const User = require("./user.js");
+const User = require("./User.js");
 
 const PjsipAuths = sequelize.define(
   "pjsip_auths",
