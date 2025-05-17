@@ -27,6 +27,8 @@ app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
   }
 }));
 
+const liveCalls = new Map(); // Key: callId, Value: callData
+
 // Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
 const io = new Server(server, {});
@@ -90,6 +92,20 @@ io.on("connection", (socket) => {
       }
     });
   });
+
+  socket.on("callStatusUpdate", (callData) => {
+    const { callId, status } = callData;
+
+    if (status === "Idle" || status === "Ended") {
+      liveCalls.delete(callId); // Remove ended calls
+    } else {
+      liveCalls.set(callId, callData); // Add or update live call
+    }
+
+    // Broadcast update to all connected dashboards
+    io.emit("dashboardUpdate", Array.from(liveCalls.values()));
+  });
+
 });
 
 // Start the server and sync database
