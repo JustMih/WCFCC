@@ -1080,6 +1080,50 @@ const mockComplaintWorkflow = async (req, res) => {
   }
 };
 
+const searchByPhoneNumber = async (req, res) => {
+  try {
+    const { phoneNumber } = req.params;
+
+    if (!phoneNumber) {
+      return res.status(400).json({ message: "Phone number is required" });
+    }
+
+    const tickets = await Ticket.findAll({
+      where: {
+        [Op.or]: [
+          { phone_number: phoneNumber },
+          { nida_number: phoneNumber }
+        ]
+      },
+      order: [['created_at', 'DESC']],
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'role']
+        }
+      ]
+    });
+
+    if (tickets.length === 0) {
+      return res.status(200).json({
+        found: false,
+        message: "No tickets found for this phone number"
+      });
+    }
+
+    return res.status(200).json({
+      found: true,
+      message: "Tickets found successfully",
+      tickets: tickets
+    });
+
+  } catch (error) {
+    console.error("Error searching tickets by phone number:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1092,5 +1136,6 @@ module.exports = {
   getOverdueTickets,
   getAllTickets,
   getAllCustomersTickets,
-  mockComplaintWorkflow
+  mockComplaintWorkflow,
+  searchByPhoneNumber
 };
