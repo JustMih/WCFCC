@@ -52,6 +52,10 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: "offline",
     },
+    extension: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     timestamps: true,
