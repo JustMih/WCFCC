@@ -5,10 +5,6 @@ const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
 const recordingRoutes = require('./routes/recordingRoutes');
-const {
-  connectAsterisk,
-  makeCall,
-} = require("./controllers/ami/amiController");
 const ChatMassage = require("./models/chart_message")
 const { Server } = require("socket.io");
 const http = require("http");
@@ -22,7 +18,7 @@ app.use("/api", require("./routes/ivr-dtmf-routes"));
 // app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
 app.use('/api', recordingRoutes);
  
- // Replace existing static file config with:
+// Replace existing static file config with:
 app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
   setHeaders: (res, path) => {
     if (path.endsWith('.wav')) {
@@ -30,19 +26,20 @@ app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
     }
   }
 }));
+
+const liveCalls = new Map(); // Key: callId, Value: callData
+
 // Create HTTP Server & WebSocket Server
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = new Server(server, {});
  
-});
- 
-// app.use(cors({
-//   // origin: "http://localhost:3000", // Adjust to match your frontend URL (e.g., React default port)
-//   origin: "http://10.52.0.19:3000",
-//   credentials: true, // Allow cookies/sessions
-//   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-//   allowedHeaders: ["Content-Type", "Authorization", "Accept"]
-// }));
+app.use(cors({
+  origin: ["http://localhost:3000", "https://10.52.0.19:3000"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+}));
+
 const users = {}; 
 
 io.on("connection", (socket) => {
@@ -86,7 +83,6 @@ io.on("connection", (socket) => {
     }
   });
 
-
   // Handle user disconnect
   socket.on("disconnect", () => {
     Object.keys(users).forEach((key) => {
@@ -96,25 +92,32 @@ io.on("connection", (socket) => {
       }
     });
   });
+
+  socket.on("callStatusUpdate", (callData) => {
+    const { callId, status } = callData;
+
+    if (status === "Idle" || status === "Ended") {
+      liveCalls.delete(callId); // Remove ended calls
+    } else {
+      liveCalls.set(callId, callData); // Add or update live call
+    }
+
+    // Broadcast update to all connected dashboards
+    io.emit("dashboardUpdate", Array.from(liveCalls.values()));
+  });
+
 });
 
-// Ensure Asterisk is connected before syncing the database and starting the server
-connectAsterisk()
-  .then(() => {
-    console.log("Asterisk connected successfully!");
-
-    sequelize.sync({ force: false, alter: false }).then(() => {
-      console.log("Database synced");
-      registerSuperAdmin(); // Ensure Super Admin is created at startup
-    });
-
-    const PORT = process.env.PORT || 5070;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-    //server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-  })
-  .catch((error) => {
-    console.error("Asterisk connection failed:", error);
-    process.exit(1); // Exit the process if Asterisk connection fails
-  });
+// Start the server and sync database
+sequelize.sync({ force: false, alter: false }).then(() => {
+  console.log("Database synced");
+  registerSuperAdmin(); // Ensure Super Admin is created at startup
+  
+  const PORT = process.env.PORT || 5070;
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(error => {
+  console.error("Database sync failed:", error);
+  process.exit(1);
+});
 
  

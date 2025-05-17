@@ -6,15 +6,14 @@ const { validationResult } = require("express-validator");
 const { Op } = require("sequelize"); 
 
 
-
 const getAllFunction = async (req, res) => {
   try {
-    const data = await FunctionData.findAll({
+    const data = await Section.findAll({
       order: [['name', 'ASC']]
     });
 
     res.status(200).json({
-      message: 'Function data fetched successfully',
+      message: 'Units data fetched successfully',
       totalFunction: data.length,   // ✅ use data.length, not Function.length
       data: data                        // ✅ use the result of your query
     });
@@ -24,9 +23,37 @@ const getAllFunction = async (req, res) => {
   }
 };
 
-module.exports = {
-  getAllFunction
+
+const getAllFunctionData = async (req, res) => {
+  try {
+    const data = await FunctionData.findAll({
+      order: [['name', 'ASC']],
+      include: [
+        {
+          model: Function,
+          as: 'function',
+          include: [
+            {
+              model: Section,
+              as: 'section'
+            }
+          ]
+        }
+      ]
+    });
+
+    res.status(200).json({
+      message: 'Function data fetched successfully',
+      totalFunction: data.length,
+      data: data
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Something went wrong', error: err.message });
+  }
 };
+
+
 const getByFunctionId = async (req, res) => {
   try {
     const functionId = req.params.functionId;
@@ -52,11 +79,11 @@ const getAllFunctionDetails = async (req, res) => {
       include: [
         {
           model: Function,
-          as: "parentFunction",
+          as: 'function',
           include: [
             {
               model: Section,
-              as: "section"
+              as: 'section'
             }
           ]
         }
@@ -67,11 +94,11 @@ const getAllFunctionDetails = async (req, res) => {
       return res.status(404).json({ message: "Function data not found" });
     }
 
-    if (!functionData.parentFunction) {
+    if (!functionData.function) {
       return res.status(404).json({ message: "No parent function associated with this functionData." });
     }
 
-    if (!functionData.parentFunction.section) {
+    if (!functionData.function.section) {
       return res.status(404).json({ message: "No section found for the parent function." });
     }
 
@@ -79,8 +106,8 @@ const getAllFunctionDetails = async (req, res) => {
       message: "Details fetched successfully",
       data: {
         subject: functionData.name,
-        function: functionData.parentFunction.name,
-        section: functionData.parentFunction.section.name
+        function: functionData.function.name,
+        section: functionData.function.section.name
       }
     });
   } catch (err) {
@@ -89,47 +116,12 @@ const getAllFunctionDetails = async (req, res) => {
   }
 };
 
-// const getAllFunctionDetails = async (req, res) => {
-//   try {
-//     const functionDataId = req.params.functionId; // ✅ match route param
 
 
-//     const functionData = await FunctionData.findOne({
-//       where: { id: functionDataId },
-//       include: [
-//         {
-//           model: Function,
-//           as: "parentFunction",
-//           include: [
-//             {
-//               model: Section,
-//               as: "section"
-//             }
-//           ]
-//         }
-//       ]
-//     });
-
-//     if (!functionData) {
-//       return res.status(404).json({ message: "Function data not found" });
-//     }
-
-//     res.status(200).json({
-//       message: "Details fetched successfully",
-//       data: {
-//         subject: functionData.name,
-//         function: functionData.function.name,
-//         section: functionData.function.section.name
-//       }
-//     });
-//   } catch (err) {
-//     console.error("Error fetching function details:", err);
-//     res.status(500).json({ message: "Server error", error: err.message });
-//   }
-// };
 
 module.exports = {
   getByFunctionId,
+  getAllFunctionData,
+  getAllFunctionDetails,
   getAllFunction,
-  getAllFunctionDetails
 };
