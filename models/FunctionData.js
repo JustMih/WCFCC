@@ -52,6 +52,8 @@ const FunctionData = sequelize.define('FunctionData', {
   underscored: true
 });
 
+FunctionData.name = 'FunctionData';
+
 FunctionData.associate = (models) => {
   // A FunctionData belongs to a Function
   FunctionData.belongsTo(models.Function, { 

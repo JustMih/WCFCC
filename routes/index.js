@@ -14,6 +14,7 @@ const ticketRoutes = require("./ticketRoutes");
 const coordinatorRoutes = require("./coordinatorRoutes");
 const sectionRoutes = require("./sectionRoutes");
 const getCallsRoutes = require("./callsRoutes");
+const notificationRoutes = require("./notificationRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -31,5 +32,5 @@ router.use("/ticket", ticketRoutes);
 router.use("/coordinator", coordinatorRoutes);
 router.use("/section", sectionRoutes);
 router.use("/calls", getCallsRoutes);
-
+router.use('/notifications', notificationRoutes);
 module.exports = router;
