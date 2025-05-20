@@ -21,6 +21,26 @@ exports.addHoliday = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// Update a holiday
+exports.updateHoliday = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { holiday_date, name } = req.body;
+
+    const holiday = await Holiday.findByPk(id);
+    if (!holiday) {
+      return res.status(404).json({ message: "Holiday not found" });
+    }
+
+    holiday.holiday_date = holiday_date;
+    holiday.name = name;
+    await holiday.save();
+
+    res.status(200).json(holiday);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
 // Delete a holiday
 exports.deleteHoliday = async (req, res) => {

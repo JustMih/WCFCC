@@ -1,6 +1,7 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require("../config/mysql_connection");
 
+
 const IVRDTMFMapping = sequelize.define('IVRDTMFMapping', {
   id: {
     type: DataTypes.CHAR(36),
@@ -31,5 +32,5 @@ const IVRDTMFMapping = sequelize.define('IVRDTMFMapping', {
   tableName: 'IVRDTMFMappings',
   timestamps: false,
 });
-
+ 
 module.exports = IVRDTMFMapping;
