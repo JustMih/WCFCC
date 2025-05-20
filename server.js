@@ -8,6 +8,8 @@ const recordingRoutes = require('./routes/recordingRoutes');
 const ChatMassage = require("./models/chart_message")
 const { Server } = require("socket.io");
 const http = require("http");
+const monitorRoutes = require('./routes/monitorRoutes');
+
 
 dotenv.config();
 const app = express();
