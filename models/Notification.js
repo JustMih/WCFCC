@@ -28,9 +28,13 @@ const Notification = sequelize.define('Notification', {
     allowNull: false
   },
   status: {
-    type: DataTypes.STRING,
+    type: DataTypes.ENUM('read', 'unread'),
     allowNull: false,
     defaultValue: 'unread'
+  },
+  comment: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   tableName: 'Notifications',

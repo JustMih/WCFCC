@@ -12,7 +12,9 @@ const { authMiddleware } = require("../middleware/authMiddleware");
 router.use(authMiddleware);
 
 // Create a notification
-router.post('/create', createNotification);
+router.post('/notify',
+    authMiddleware,
+     createNotification);
 
 // List notifications for a user
 router.get('/user/:userId', listNotifications);
