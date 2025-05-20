@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const Sequelize = require("sequelize");
 const sequelize = require("../config/mysql_connection");
+const DataTypes = Sequelize.DataTypes;
 
 const basename = path.basename(__filename);
 const db = {};
@@ -27,6 +28,11 @@ Object.keys(db).forEach((modelName) => {
 
 // Setup associations centrally
 const { IVRDTMFMapping, IVRVoice, IVRAction } = db;  // Ensure model names are singular and match exports
+const EmergencyNumber = require('./emergency_number')(sequelize, DataTypes);
+db.EmergencyNumber = EmergencyNumber;
+
+const Holiday = require("./holiday")(sequelize, Sequelize.DataTypes);
+db.holidays = Holiday; // lowercase 'holidays'
 
 console.log("Loaded models:", Object.keys(db));  // Debugging models
 
@@ -41,12 +47,13 @@ db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
 
-module.exports = {
-  IVRAction,
-  IVRVoice,
-  IVRDTMFMapping,
-  sequelize,
-};
+ 
+  db.sequelize = sequelize;
+  db.Sequelize = Sequelize;
+  
+  module.exports = db;
+  
+ 
 // models/index.js
 // IVRDTMFMapping.belongsTo(IVRVoice, { foreignKey: "ivr_voice_id" });
 IVRDTMFMapping.belongsTo(IVRAction, { foreignKey: "action_id" });

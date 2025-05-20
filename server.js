@@ -8,15 +8,33 @@ const recordingRoutes = require('./routes/recordingRoutes');
 const ChatMassage = require("./models/chart_message")
 const { Server } = require("socket.io");
 const http = require("http");
+const holidayRoutes = require('./routes/holidayRoutes'); // adjust path if needed
+const emergencyRoutes = require('./routes/emergencyRoutes');
+ 
+const reportsRoutes = require('./routes/reports.routes');
+
+
+ 
+
+
+
 
 dotenv.config();
 const app = express();
+
+app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.wav')) {
+      res.set('Content-Type', 'audio/wav');
+    }
+  }
+}));
 
 // Middleware
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:3001",
+    origin: "http://localhost:3000",
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization", "Accept"],
@@ -28,6 +46,9 @@ app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));
 // app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
 app.use('/api', recordingRoutes);
+app.use('/api/holidays', holidayRoutes);
+app.use('/api/emergency', require('./routes/emergencyRoutes'));
+app.use('/api/reports', reportsRoutes);
  
 // Replace existing static file config with:
 app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
