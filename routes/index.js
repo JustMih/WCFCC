@@ -14,6 +14,7 @@ const ticketRoutes = require("./ticketRoutes");
 const coordinatorRoutes = require("./coordinatorRoutes");
 const sectionRoutes = require("./sectionRoutes");
 const getCallsRoutes = require("./callsRoutes");
+const macRoutes = require('./macRoutes');
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -31,5 +32,6 @@ router.use("/ticket", ticketRoutes);
 router.use("/coordinator", coordinatorRoutes);
 router.use("/section", sectionRoutes);
 router.use("/calls", getCallsRoutes);
+router.use("/mac-system", macRoutes);
 
 module.exports = router;

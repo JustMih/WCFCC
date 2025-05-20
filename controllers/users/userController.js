@@ -7,7 +7,7 @@ const { validationResult } = require("express-validator"); // For input validati
 
 const createUser = async (req, res) => {
   try {
-    const { name, email, password, role, isActive } = req.body;
+    const { name, email, password, extension, role, isActive } = req.body;
 
     if (
       ![
@@ -31,6 +31,7 @@ const createUser = async (req, res) => {
       name,
       email,
       password: hashedPassword,
+      extension,
       role,
       isActive,
     });
@@ -311,7 +312,7 @@ const deactivateUser = async (req, res) => {
 
 const updateUser = async (req, res) => {
   const userId = req.params.id;
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role, extension } = req.body;
 
   try {
     // Find the user by ID
@@ -354,6 +355,7 @@ const updateUser = async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
+        extension: user.extension,
         role: user.role,
         isActive: user.isActive,
       },
