@@ -25,7 +25,6 @@ Object.keys(db).forEach((modelName) => {
   }
 });
 
-<<<<<<< HEAD
 // Setup associations centrally
 const { IVRDTMFMapping, IVRVoice, IVRAction } = db;  // Ensure model names are singular and match exports
 const EmergencyNumber = require('./emergency_number')(sequelize, DataTypes);
@@ -35,9 +34,6 @@ const Holiday = require("./holiday")(sequelize, Sequelize.DataTypes);
 db.holidays = Holiday; // lowercase 'holidays'
 
 console.log("Loaded models:", Object.keys(db));  // Debugging models
-=======
-const { IVRDTMFMapping, IVRVoice, IVRAction } = db;
->>>>>>> 4946b5d21c3f09572d8c682597f45fd5b099ae87
 
 IVRDTMFMapping.belongsTo(IVRVoice, { foreignKey: 'ivr_voice_id', as: 'voice' });
 IVRDTMFMapping.belongsTo(IVRAction, { foreignKey: 'action_id', as: 'action' });
@@ -48,7 +44,6 @@ IVRAction.hasMany(IVRDTMFMapping, { foreignKey: 'action_id', as: 'mappings' });
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
-<<<<<<< HEAD
 
  
   db.sequelize = sequelize;
@@ -64,6 +59,4 @@ IVRDTMFMapping.belongsTo(IVRAction, { foreignKey: "action_id" });
 IVRVoice.hasMany(IVRDTMFMapping, { foreignKey: "ivr_voice_id" });
 IVRAction.hasMany(IVRDTMFMapping, { foreignKey: "action_id" });
 
-=======
->>>>>>> 4946b5d21c3f09572d8c682597f45fd5b099ae87
 module.exports = db;
