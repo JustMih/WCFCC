@@ -1,20 +1,19 @@
 // const { Ticket, User, Unit } = require('../../models'); // Adjust path if needed
 
-const Ticket = require('../../models/Ticket');
-const User = require('../../models/User');
-const Unit = require('../../models/FunctionData');
-const FunctionModel = require('../../models/Function');
-const Section = require('../../models/Section');
-const { Op, Sequelize } = require('sequelize');
-
+const Ticket = require("../../models/Ticket");
+const User = require("../../models/User");
+const Unit = require("../../models/FunctionData");
+const FunctionModel = require("../../models/Function");
+const Section = require("../../models/Section");
+const { Op, Sequelize } = require("sequelize");
 
 const getAllCoordinatorComplaints = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
         category: {
-          [Op.in]: ['Complaint', 'Suggestion', 'Compliment']
-        },
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        }
         // [Op.and]: [
         //   {
         //     [Op.or]: [
@@ -33,27 +32,27 @@ const getAllCoordinatorComplaints = async (req, res) => {
       include: [
         {
           model: User,
-          as: 'creator',
-          attributes: ['id', 'name']
+          as: "creator",
+          attributes: ["id", "name"]
         }
       ],
-      order: [['created_at', 'DESC']]
+      order: [["created_at", "DESC"]]
     });
 
     if (!complaints.length) {
       return res.status(404).json({
-        message: 'No coordinator-eligible complaints found.'
+        message: "No coordinator-eligible complaints found."
       });
     }
 
     res.status(200).json({
-      message: 'Complaints routed to Coordinator fetched successfully.',
+      message: "Complaints routed to Coordinator fetched successfully.",
       complaints
     });
   } catch (error) {
-    console.error('Error fetching Coordinator complaints:', error);
+    console.error("Error fetching Coordinator complaints:", error);
     res.status(500).json({
-      message: 'Server error',
+      message: "Server error",
       error: error.message
     });
   }
@@ -68,7 +67,9 @@ const rateTickets = async (req, res) => {
   }
 
   if (!["Minor", "Major"].includes(complaintType)) {
-    return res.status(400).json({ message: "Invalid complaint type. Use 'Minor' or 'Major'." });
+    return res
+      .status(400)
+      .json({ message: "Invalid complaint type. Use 'Minor' or 'Major'." });
   }
 
   try {
@@ -134,7 +135,8 @@ const rateTickets = async (req, res) => {
 
 // UUID validation regex (matches UUID v1-v5)
 const isValidUUID = (uuid) => {
-  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+  const uuidRegex =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
   return uuidRegex.test(uuid);
 };
 
@@ -156,9 +158,14 @@ const convertOrForwardTicket = async (req, res) => {
 
     // Handle category conversion
     if (category) {
-      const validCategories = ['Inquiry'];
+      const validCategories = ["Inquiry"];
       if (!validCategories.includes(category)) {
-        return res.status(400).json({ message: "Invalid category: must be one of " + validCategories.join(', ') });
+        return res
+          .status(400)
+          .json({
+            message:
+              "Invalid category: must be one of " + validCategories.join(", ")
+          });
       }
 
       ticket.converted_to = category;
@@ -169,17 +176,21 @@ const convertOrForwardTicket = async (req, res) => {
 
     // Handle forwarding to a unit
     if (responsible_unit_name) {
-      const unit = await Section.findOne({ where: { name: responsible_unit_name } });
+      const unit = await Section.findOne({
+        where: { name: responsible_unit_name }
+      });
 
       if (!unit) {
-        return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+        return res
+          .status(404)
+          .json({ message: `Unit '${responsible_unit_name}' not found` });
       }
 
       ticket.responsible_unit_id = unit.id;
       ticket.responsible_unit_name = unit.name;
       ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
-      ticket.assigned_to_role = 'Attendee';
+      ticket.assigned_to_role = "Attendee";
       forwardingDone = true;
     }
 
@@ -198,8 +209,8 @@ const convertOrForwardTicket = async (req, res) => {
       include: [
         {
           model: FunctionModel,
-          as: 'responsibleUnit',
-          attributes: ['name']
+          as: "responsibleUnit",
+          attributes: ["name"]
         }
       ]
     });
@@ -207,20 +218,21 @@ const convertOrForwardTicket = async (req, res) => {
     // Build dynamic message
     const messageParts = [];
     if (conversionDone) messageParts.push(`converted to '${category}'`);
-    if (forwardingDone) messageParts.push(`forwarded to '${responsible_unit_name}'`);
-    const message = `Ticket successfully ${messageParts.join(' and ')}`;
+    if (forwardingDone)
+      messageParts.push(`forwarded to '${responsible_unit_name}'`);
+    const message = `Ticket successfully ${messageParts.join(" and ")}`;
 
     return res.status(200).json({
       message,
-      data: updatedTicket,
+      data: updatedTicket
     });
-
   } catch (error) {
     console.error("Convert/Forward Error:", error);
-    return res.status(500).json({ message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
-
 
 const getCoordinatorDashboardCounts = async (req, res) => {
   try {
@@ -230,14 +242,11 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     // Shared logic for new/unrated/unassigned/open tickets
     const sharedNewTicketConditions = {
       [Op.and]: [
-        { status: { [Op.ne]: 'Closed' } },
+        { status: { [Op.ne]: "Closed" } },
         { responsible_unit_name: { [Op.is]: null } },
         { complaint_type: { [Op.is]: null } },
         {
-          [Op.or]: [
-            { status: null },
-            { status: 'Open' }
-          ]
+          [Op.or]: [{ status: null }, { status: "Open" }]
         }
       ]
     };
@@ -245,19 +254,35 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     // New Tickets count
     const newTicketsCount = await Ticket.count({
       where: {
-        ...sharedNewTicketConditions,
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] }
+        category: {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        },
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { status: null },
+              { status: 'Open' }
+            ]
+          },
+          {
+            converted_to: null
+          },
+          {
+            responsible_unit_name: null
+          }
+        ],
+        ...sharedNewTicketConditions
       }
     });
-
+    
     // Escalated Tickets count
     const escalatedTicketsCount = await Ticket.count({
       where: {
         [Op.and]: [
           { responsible_unit_name: { [Op.not]: null } },
-          { category: 'Complaint' },
+          { category: "Complaint" },
           { created_at: { [Op.lt]: tenDaysAgo } },
-          { status: { [Op.notIn]: ['Closed', 'Resolved'] } }
+          { status: { [Op.notIn]: ["Closed", "Resolved"] } }
         ]
       }
     });
@@ -266,41 +291,40 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     const complaintsCount = await Ticket.count({
       where: {
         ...sharedNewTicketConditions,
-        category: 'Complaint'
+        category: "Complaint"
       }
     });
 
     const suggestionsCount = await Ticket.count({
       where: {
         ...sharedNewTicketConditions,
-        category: 'Suggestion'
+        category: "Suggestion"
       }
     });
 
     const complementsCount = await Ticket.count({
       where: {
         ...sharedNewTicketConditions,
-        category: 'Compliment'
+        category: "Compliment"
       }
     });
 
     // Channeled Tickets Breakdown
     const directorateCount = await Ticket.count({
       where: {
-        responsible_unit_name: { [Op.like]: '%Directorate%' },
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
-        status: { [Op.ne]: 'Closed' }
+        responsible_unit_name: { [Op.like]: "%Directorate%" },
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: { [Op.ne]: "Closed" }
       }
     });
-    
+
     const unitsCount = await Ticket.count({
       where: {
-        responsible_unit_name: { [Op.like]: '%Unit%' },
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
-        status: { [Op.ne]: 'Closed' }
+        responsible_unit_name: { [Op.like]: "%Unit%" },
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: { [Op.ne]: "Closed" }
       }
     });
-    
 
     // Ticket Status Breakdown
     // const openCount = await Ticket.count({
@@ -315,8 +339,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
 
     const onProgressCount = await Ticket.count({
       where: {
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
-        status: {[Op.ne]:['Closed']},
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: { [Op.ne]: ["Closed"] },
         responsible_unit_name: { [Op.ne]: null },
         complaint_type: { [Op.ne]: null }
       }
@@ -324,22 +348,22 @@ const getCoordinatorDashboardCounts = async (req, res) => {
 
     const closedCount = await Ticket.count({
       where: {
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
-        status: 'Closed'
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: "Closed"
       }
     });
 
     const minorCount = await Ticket.count({
       where: {
-        complaint_type: 'Minor',
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] }
+        complaint_type: "Minor",
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] }
       }
     });
 
     const majorCount = await Ticket.count({
       where: {
-        complaint_type: 'Major',
-        category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] }
+        complaint_type: "Major",
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] }
       }
     });
 
@@ -363,8 +387,9 @@ const getCoordinatorDashboardCounts = async (req, res) => {
           // Open: openCount,
           "On Progress": onProgressCount,
           Closed: closedCount,
-          Minor: minorCount,
-          Major: majorCount
+          " ": " "
+          // Minor: minorCount,
+          // Major: majorCount
         }
       }
     });
@@ -374,84 +399,83 @@ const getCoordinatorDashboardCounts = async (req, res) => {
   }
 };
 
-
 const getTicketsByCategoryAndType = async (req, res) => {
   try {
     const { category, type, userId } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = 10;
     const offset = (page - 1) * limit;
-    const search = req.query.search || '';
+    const search = req.query.search || "";
 
     let whereClause = {};
     let includeClause = [
       {
         model: User,
-        as: 'creator',
-        attributes: ['id', 'name', 'phone']
+        as: "creator",
+        attributes: ["id", "name", "phone"]
       }
     ];
 
     // Build where clause based on category and type
     switch (category) {
-      case 'new':
+      case "new":
         switch (type) {
-          case 'complaints':
-            whereClause = { category: 'Complaint' };
+          case "complaints":
+            whereClause = { category: "Complaint" };
             break;
-          case 'tickets':
-            whereClause = { status: 'Open' };
+          case "tickets":
+            whereClause = { status: "Open" };
             break;
-          case 'escalated':
-            whereClause = { status: 'Escalated' };
+          case "escalated":
+            whereClause = { status: "Escalated" };
             break;
         }
         break;
 
-      case 'converted':
+      case "converted":
         switch (type) {
-          case 'inquiries':
-            whereClause = { converted_to: 'Inquiry' };
+          case "inquiries":
+            whereClause = { converted_to: "Inquiry" };
             break;
-          case 'complaints':
-            whereClause = { converted_to: 'Complaint' };
+          case "complaints":
+            whereClause = { converted_to: "Complaint" };
             break;
-          case 'suggestions':
-            whereClause = { converted_to: 'Suggestion' };
+          case "suggestions":
+            whereClause = { converted_to: "Suggestion" };
             break;
-          case 'complements':
-            whereClause = { converted_to: 'Compliment' };
+          case "complements":
+            whereClause = { converted_to: "Compliment" };
             break;
         }
         break;
 
-      case 'channeled':
+      case "channeled":
         switch (type) {
-          case 'directorate':
-            whereClause = { assigned_to_role: 'Directorate' };
+          case "directorate":
+            whereClause = { assigned_to_role: "Directorate" };
             break;
-          case 'units':
-            whereClause = { assigned_to_role: 'Unit' };
+          case "units":
+            whereClause = { assigned_to_role: "Unit" };
             break;
         }
         break;
 
-      case 'status':
+      case "status":
         switch (type) {
-          case 'open':
-            whereClause = { status: 'Open' };
+          case "open":
+            whereClause = { status: "Open" };
             break;
-          case 'progress':
-            whereClause = { status: 'In Progress' };
+          case "progress":
+            whereClause = { status: "In Progress" };
             break;
-          case 'closed':
-            whereClause = { status: 'Closed' };
+          case "closed":
+            whereClause = { status: "Closed" };
             break;
-          case 'minor':
-            whereClause = { complaint_type: 'Minor' };
+          case "minor":
+            whereClause = { complaint_type: "Minor" };
             break;
-          case 'major':
-            whereClause = { complaint_type: 'Major' };
+          case "major":
+            whereClause = { complaint_type: "Major" };
             break;
         }
         break;
@@ -479,22 +503,22 @@ const getTicketsByCategoryAndType = async (req, res) => {
     const tickets = await Ticket.findAll({
       where: whereClause,
       include: includeClause,
-      order: [['created_at', 'DESC']],
+      order: [["created_at", "DESC"]],
       limit,
       offset
     });
 
     res.status(200).json({
-      message: 'Tickets fetched successfully',
+      message: "Tickets fetched successfully",
       tickets,
       totalPages: Math.ceil(totalCount / limit),
       currentPage: page,
       totalCount
     });
   } catch (error) {
-    console.error('Error fetching tickets:', error);
+    console.error("Error fetching tickets:", error);
     res.status(500).json({
-      message: 'Server error',
+      message: "Server error",
       error: error.message
     });
   }
@@ -512,7 +536,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
 //   }
 
 //   let whereClause = {};
-  
+
 //   if (isOverdue) {
 //     const tenDaysAgo = new Date();
 //     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
@@ -549,150 +573,155 @@ const getTicketsByCategoryAndType = async (req, res) => {
 const getOpenTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, 'Open');
+    const { tickets, user } = await getTicketsByStatus(userId, "Open");
 
     if (tickets.length === 0) {
-      return res.status(404).json({ message: 'No open tickets found' });
+      return res.status(404).json({ message: "No open tickets found" });
     }
 
-    const response = tickets.map(ticket => ({
+    const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
 
     res.status(200).json({
-      message: 'Open tickets fetched successfully',
+      message: "Open tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error('Error fetching open tickets:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error fetching open tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 const getAssignedTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, 'Assigned');
+    const { tickets, user } = await getTicketsByStatus(userId, "Assigned");
 
     if (tickets.length === 0) {
-      return res.status(404).json({ message: 'No assigned tickets found' });
+      return res.status(404).json({ message: "No assigned tickets found" });
     }
 
-    const response = tickets.map(ticket => ({
+    const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
 
     res.status(200).json({
-      message: 'Assigned tickets fetched successfully',
+      message: "Assigned tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error('Error fetching assigned tickets:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error fetching assigned tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 const getInprogressTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, 'In Progress');
+    const { tickets, user } = await getTicketsByStatus(userId, "In Progress");
 
     if (tickets.length === 0) {
-      return res.status(404).json({ message: 'No in-progress tickets found' });
+      return res.status(404).json({ message: "No in-progress tickets found" });
     }
 
-    const response = tickets.map(ticket => ({
+    const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
 
     res.status(200).json({
-      message: 'In-progress tickets fetched successfully',
+      message: "In-progress tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error('Error fetching in-progress tickets:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error fetching in-progress tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 const getCarriedForwardTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, 'Carried Forward');
+    const { tickets, user } = await getTicketsByStatus(
+      userId,
+      "Carried Forward"
+    );
 
     if (tickets.length === 0) {
-      return res.status(404).json({ message: 'No carried forward tickets found' });
+      return res
+        .status(404)
+        .json({ message: "No carried forward tickets found" });
     }
 
-    const response = tickets.map(ticket => ({
+    const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
 
     res.status(200).json({
-      message: 'Carried forward tickets fetched successfully',
+      message: "Carried forward tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error('Error fetching carried forward tickets:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error fetching carried forward tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 const getClosedTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, 'Closed');
+    const { tickets, user } = await getTicketsByStatus(userId, "Closed");
 
     if (tickets.length === 0) {
-      return res.status(404).json({ message: 'No closed tickets found' });
+      return res.status(404).json({ message: "No closed tickets found" });
     }
 
-    const response = tickets.map(ticket => ({
+    const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
 
     res.status(200).json({
-      message: 'Closed tickets fetched successfully',
+      message: "Closed tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error('Error fetching closed tickets:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error fetching closed tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 const getOverdueTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, 'Open', true);
+    const { tickets, user } = await getTicketsByStatus(userId, "Open", true);
 
     if (tickets.length === 0) {
-      return res.status(404).json({ message: 'No overdue tickets found' });
+      return res.status(404).json({ message: "No overdue tickets found" });
     }
 
-    const response = tickets.map(ticket => ({
+    const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
 
     res.status(200).json({
-      message: 'Overdue tickets fetched successfully',
+      message: "Overdue tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error('Error fetching overdue tickets:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error fetching overdue tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -701,83 +730,141 @@ const getTicketsByStatus = async (req, res) => {
     const { status } = req.query;
     let whereClause = {
       [Op.or]: [
-        { category: 'Complaint' },
-        { category: 'Congrats' },
-        { category: 'Suggestion' },
-        { category: 'Compliment' },
-        { category: 'Inquiry' }
+        { category: "Complaint" },
+        // { category: 'Congrats' },
+        { category: "Suggestion" },
+        { category: "Compliment" }
+        // { category: 'Inquiry' }
       ]
     };
 
     // Map status/category/channel/severity as needed
     switch (status) {
-      case 'complaints':
-        whereClause.category = 'Complaint';
+      case "complaints":
+        whereClause.category = "Complaint";
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.ne]: null } }
+        ];
         break;
-      case 'new':
+      case "new":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
         whereClause[Op.and] = [
           {
-            [Op.or]: [
-              { status: null },
-              { status: 'Open' }
-            ]
+            [Op.or]: [{ status: null }, { status: "Open" }]
           },
           {
-            [Op.or]: [
-              { converted_to: null }
-            ]
+            converted_to: null
+          },
+          {
+            responsible_unit_name: null
           }
         ];
         break;
-      case 'escalated':
-        whereClause.status = 'Escalated';
-        break;
-      case 'inquiries':
-        whereClause.category = 'Inquiry';
-        whereClause.status = { [Op.ne]: 'Closed' };
-        break;
-      case 'suggestions':
-        whereClause.category = 'Suggestion';
-        whereClause.status = { [Op.ne]: 'Closed' };
-        break;
-      case 'complements':
-        whereClause.category = 'Compliment';
-        whereClause.status = { [Op.ne]: 'Closed' };
-        break;
-      case 'directorate':
-        whereClause.assigned_to_role = 'Directorate';
-        whereClause.status = { [Op.ne]: 'Closed' };
-        break;
-      case 'units':
-        whereClause.assigned_to_role = 'Unit';
-        whereClause.status = { [Op.ne]: 'Closed' };
-        break;
-      case 'open':
-        whereClause[Op.or] = [
-          { status: null },
-          { status: 'Open' }
+      case "escalated":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.ne]: null } },
+          { created_at: { [Op.lt]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) } }
         ];
         break;
-      case 'on-progress':
-        whereClause.status = 'In Progress';
+      case "inquiries":
+        whereClause.category = "Inquiry";
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.ne]: null } }
+        ];
         break;
-      case 'closed':
-        whereClause.status = 'Closed';
+      case "suggestions":
+        whereClause.category = "Suggestion";
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.ne]: null } }
+        ];
         break;
-      case 'minor':
-        whereClause.complaint_type = 'Minor';
+      case "complements":
+        whereClause.category = "Compliment";
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.ne]: null } }
+        ];
         break;
-      case 'major':
-        whereClause.complaint_type = 'Major';
+      case "directorate":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.like]: "%Directorate%" } }
+        ];
+        break;
+      case "units":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } },
+          { responsible_unit_name: { [Op.like]: "%Unit%" } }
+        ];
+        break;
+      case "open":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { responsible_unit_name: { [Op.ne]: null } }
+        ];
+        break;
+      case "on-progress":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { status: "In Progress" },
+          { responsible_unit_name: { [Op.ne]: null } }
+        ];
+        break;
+      case "closed":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause.status = "Closed";
+        break;
+      case "minor":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { complaint_type: "Minor" },
+          { status: { [Op.ne]: "Closed" } }
+        ];
+        break;
+      case "major":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
+        whereClause[Op.and] = [
+          { complaint_type: "Major" },
+          { status: { [Op.ne]: "Closed" } }
+        ];
         break;
       default:
         whereClause.status = status;
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Closed" } }
+        ];
     }
 
     // Remove the include for now to avoid association errors
     const tickets = await Ticket.findAll({
       where: whereClause,
-      order: [['created_at', 'DESC']]
+      order: [["created_at", "DESC"]]
     });
 
     res.json({ tickets });
@@ -795,9 +882,9 @@ const rateAndRegisterComplaint = async (req, res) => {
     const coordinatorId = req.user.userId;
 
     const ticket = await Ticket.findOne({
-      where: { 
+      where: {
         id: ticketId,
-        category: 'Complaint'
+        category: "Complaint"
       }
     });
 
@@ -811,7 +898,7 @@ const rateAndRegisterComplaint = async (req, res) => {
       registration_notes: registrationNotes,
       registered_by: coordinatorId,
       registration_date: new Date(),
-      status: 'Registered'
+      status: "Registered"
     });
 
     res.status(200).json({
@@ -832,9 +919,9 @@ const convertToInquiry = async (req, res) => {
     const coordinatorId = req.user.userId;
 
     const ticket = await Ticket.findOne({
-      where: { 
+      where: {
         id: ticketId,
-        category: 'Complaint'
+        category: "Complaint"
       }
     });
 
@@ -844,12 +931,12 @@ const convertToInquiry = async (req, res) => {
 
     // Update ticket to inquiry
     await ticket.update({
-      category: 'Inquiry',
-      converted_to: 'Inquiry',
+      category: "Inquiry",
+      converted_to: "Inquiry",
       conversion_reason: conversionReason,
       converted_by: coordinatorId,
       conversion_date: new Date(),
-      status: 'Open'
+      status: "Open"
     });
 
     res.status(200).json({
@@ -870,9 +957,9 @@ const channelComplaint = async (req, res) => {
     const coordinatorId = req.user.userId;
 
     const ticket = await Ticket.findOne({
-      where: { 
+      where: {
         id: ticketId,
-        category: 'Complaint'
+        category: "Complaint"
       }
     });
 
@@ -882,14 +969,16 @@ const channelComplaint = async (req, res) => {
 
     // Get the supervisor of the unit
     const supervisor = await User.findOne({
-      where: { 
-        role: 'supervisor',
+      where: {
+        role: "supervisor",
         unit_id: unitId
       }
     });
 
     if (!supervisor) {
-      return res.status(404).json({ message: "No supervisor found for the selected unit" });
+      return res
+        .status(404)
+        .json({ message: "No supervisor found for the selected unit" });
     }
 
     // Update ticket with channeling details
@@ -899,7 +988,7 @@ const channelComplaint = async (req, res) => {
       channeling_notes: channelingNotes,
       channeled_by: coordinatorId,
       channeling_date: new Date(),
-      status: 'Assigned'
+      status: "Assigned"
     });
 
     res.status(200).json({
@@ -927,5 +1016,5 @@ module.exports = {
   getCarriedForwardTickets,
   getClosedTickets,
   getOverdueTickets,
-  getTicketsByStatus,
-}
+  getTicketsByStatus
+};
