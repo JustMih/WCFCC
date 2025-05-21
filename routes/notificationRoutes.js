@@ -4,7 +4,8 @@ const {
   createNotification, 
   listNotifications, 
   markAsRead, 
-  getUnreadCount 
+  getUnreadCount,
+  getNotificationById
 } = require('../controllers/notifications/notificationController');
 const { authMiddleware } = require("../middleware/authMiddleware");
 
@@ -24,5 +25,8 @@ router.patch('/read/:notificationId', markAsRead);
 
 // Get unread notification count for a user
 router.get('/unread-count/:userId', getUnreadCount);
+
+// Get single notification
+router.get('/:notificationId', getNotificationById);
 
 module.exports = router; 

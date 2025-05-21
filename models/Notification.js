@@ -44,4 +44,12 @@ const Notification = sequelize.define('Notification', {
 
 Notification.name = 'Notification';
 
+// Add association
+Notification.associate = (models) => {
+  Notification.belongsTo(models.Ticket, {
+    foreignKey: 'ticket_id',
+    as: 'ticket'
+  });
+};
+
 module.exports = Notification; 

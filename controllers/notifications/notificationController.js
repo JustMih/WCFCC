@@ -1,6 +1,7 @@
 const Notification = require("../../models/Notification");
 const User = require("../../models/User");
 const { Op } = require("sequelize");
+const Ticket = require("../../models/Ticket");
 
 // Create a notification
 const createNotification = async (req, res) => {
@@ -78,6 +79,13 @@ const listNotifications = async (req, res) => {
     const { userId } = req.params;
     const notifications = await Notification.findAll({
       where: { recipient_id: userId },
+      include: [
+        {
+          model: Ticket,
+          as: 'ticket',
+          attributes: ['id', 'ticket_id', 'subject', 'category', 'status', 'description']
+        }
+      ],
       order: [["created_at", "DESC"]]
     });
     return res.status(200).json({ notifications });
@@ -85,6 +93,33 @@ const listNotifications = async (req, res) => {
     return res
       .status(500)
       .json({ message: "Error fetching notifications", error: error.message });
+  }
+};
+
+// Get single notification with ticket details
+const getNotificationById = async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const notification = await Notification.findOne({
+      where: { id: notificationId },
+      include: [
+        {
+          model: Ticket,
+          as: 'ticket',
+          attributes: ['id', 'ticket_id', 'subject', 'category', 'status', 'description']
+        }
+      ]
+    });
+
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    return res.status(200).json({ notification });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Error fetching notification", error: error.message });
   }
 };
 
@@ -128,5 +163,6 @@ module.exports = {
   createNotification,
   listNotifications,
   markAsRead,
-  getUnreadCount
+  getUnreadCount,
+  getNotificationById
 };

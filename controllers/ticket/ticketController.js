@@ -995,6 +995,76 @@ const searchByPhoneNumber = async (req, res) => {
   }
 };
 
+const getTicketById = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: Section,
+          as: 'responsibleSection',
+          attributes: ['id', 'name'],
+          include: [
+            {
+              model: Function,
+              as: 'functions',
+              attributes: ['id', 'name'],
+              include: [
+                {
+                  model: FunctionData,
+                  as: 'functionData',
+                  attributes: ['id', 'name']
+                }
+              ]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'attendedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'ratedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'convertedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'forwardedBy',
+          attributes: ['id', 'name', 'email']
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    return res.status(200).json({ ticket });
+  } catch (error) {
+    console.error("Error fetching ticket:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1008,5 +1078,6 @@ module.exports = {
   getAllTickets,
   getAllCustomersTickets,
   mockComplaintWorkflow,
-  searchByPhoneNumber
+  searchByPhoneNumber,
+  getTicketById
 };
