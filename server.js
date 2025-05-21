@@ -8,6 +8,8 @@ const recordingRoutes = require('./routes/recordingRoutes');
 const ChatMassage = require("./models/chart_message");
 const { Server } = require("socket.io");
 const http = require("http");
+const monitorRoutes = require('./routes/monitorRoutes');
+
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
 const path = require("path");

@@ -187,7 +187,7 @@ const login = async (req, res) => {
   const token = jwt.sign(
     { userId: user.id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: "1h" }
+    { expiresIn: "24h" }
   );
 
   // Log agent login in AgentLoginLog
@@ -210,6 +210,7 @@ const login = async (req, res) => {
       isActive: user.isActive,
       role: user.role,
       id: user.id,
+      extension: user.extension,
     },
   });
 };

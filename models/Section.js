@@ -43,6 +43,8 @@ const Section = sequelize.define('Section', {
   underscored: true
 });
 
+Section.name = 'Section';
+
 Section.associate = (models) => {
   // A Section has many Functions
   Section.hasMany(models.Function, { 
