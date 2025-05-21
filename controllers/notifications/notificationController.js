@@ -111,7 +111,10 @@ const getUnreadCount = async (req, res) => {
   try {
     const { userId } = req.params;
     const count = await Notification.count({
-      where: { recipient_id: userId, status: "unread" }
+      where: {
+        recipient_id: userId,
+        [Op.or]: [{ status: "unread" }, { status: " " }] // Correctly checking both conditions
+      }
     });
     return res.status(200).json({ unreadCount: count });
   } catch (error) {
