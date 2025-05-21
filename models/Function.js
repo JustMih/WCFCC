@@ -52,6 +52,8 @@ const FunctionModel = sequelize.define('Function', {
   underscored: true
 });
 
+FunctionModel.name = 'Function';
+
 FunctionModel.associate = (models) => {
   // A Function belongs to a Section
   FunctionModel.belongsTo(models.Section, { 
