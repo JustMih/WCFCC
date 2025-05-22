@@ -78,7 +78,14 @@ const listNotifications = async (req, res) => {
   try {
     const { userId } = req.params;
     const notifications = await Notification.findAll({
-      where: { recipient_id: userId },
+      where: {
+        recipient_id: userId,
+        [Op.or]: [
+          { status: "unread" },
+          { status: " " }
+        ]
+      },
+      
       include: [
         {
           model: Ticket,
