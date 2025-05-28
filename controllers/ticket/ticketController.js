@@ -170,7 +170,11 @@ const createTicket = async (req, res) => {
       functionId,
       description,
       status,
-      subject
+      subject,
+      responsible_unit_id,
+      responsible_unit_name,
+      section,
+      sub_section
     } = req.body;
 
     const userId = req?.user?.userId; // Use optional chaining for safety
@@ -184,6 +188,15 @@ const createTicket = async (req, res) => {
     }
 
     const ticketId = generateTicketId();
+    const responsibleUnit = await Function.findOne({
+      where: { id: functionId || responsible_unit_id },
+      include: [
+        {
+          model: Section,
+          as: 'section'
+        }
+      ]
+    });
 
     // Create the ticket
     const newTicket = await Ticket.create({
@@ -199,9 +212,12 @@ const createTicket = async (req, res) => {
       region,
       district,
       category,
-      function_id: functionId,
+      responsible_unit_id: responsible_unit_id || functionId,
+      responsible_unit_name: responsible_unit_name || responsibleUnit?.section?.name || 'Unit',
+      section: section || responsibleUnit?.section?.name || 'Unit',
+      sub_section: sub_section || responsibleUnit?.name || '',  // Use provided sub_section or function name
+      subject: subject || '',  // Use provided subject
       description,
-      subject,
       status: status || 'Open',
       created_by: userId,
     });
