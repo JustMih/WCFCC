@@ -5,121 +5,139 @@ const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
 const recordingRoutes = require('./routes/recordingRoutes');
-const ChatMassage = require("./models/chart_message")
+const ChatMassage = require("./models/chart_message");
 const { Server } = require("socket.io");
 const http = require("http");
 const monitorRoutes = require('./routes/monitorRoutes');
-
+const holidayRoutes = require('./routes/holidayRoutes');
+const emergencyRoutes = require('./routes/emergencyRoutes');
+const livestreamRoutes = require("./routes/livestreamRoutes");
+const { setupSocket } = require("./controllers/livestream/livestreamController");
+const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
+const reportsRoutes = require('./routes/reports.routes');
+const path = require("path");
+const fs = require("fs");
+const VoiceNote = require('./models/voice_notes.model'); // ✅ Add this at the top
 
 dotenv.config();
 const app = express();
+const server = http.createServer(app);
+
+// Middleware
 app.use(express.json());
-app.use(cors());
-app.use("/api", routes);
-app.use("/api", require("./routes/ivr-dtmf-routes"));
-// app.use("/sounds", express.static("/var/lib/asterisk/sounds"));
-app.use('/api', recordingRoutes);
- 
-// Replace existing static file config with:
-app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
-  setHeaders: (res, path) => {
-    if (path.endsWith('.wav')) {
+app.use(cors({
+  origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
+
+app.get("/api/voice-notes/:id/audio", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const voiceNote = await VoiceNote.findByPk(id);
+
+    if (!voiceNote || !voiceNote.recording_path) {
+      return res.status(404).send("Voice note not found");
+    }
+
+    const filePath = path.resolve(voiceNote.recording_path);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Voice file not found on disk");
+    }
+
+    res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error("Failed to send audio file:", err);
+        res.status(500).send("Error sending file");
+      }
+    });
+  } catch (error) {
+    console.error("Unexpected error fetching voice note:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.wav')) {
       res.set('Content-Type', 'audio/wav');
     }
   }
 }));
 
-const liveCalls = new Map(); // Key: callId, Value: callData
 
-// Create HTTP Server & WebSocket Server
-const server = http.createServer(app);
-const io = new Server(server, {});
+// Routes
+app.use("/api", routes);
+app.use("/api", require("./routes/ivr-dtmf-routes"));
+app.use("/api", recordingRoutes);
+app.use("/api/holidays", holidayRoutes);
+app.use("/api/emergency", emergencyRoutes);
+app.use("/api/reports", reportsRoutes);
+app.use("/api/live-streaming", livestreamRoutes);
+app.use("/api/recorded-audio", recordedAudioRoutes);
  
-app.use(cors({
-  origin: ["http://localhost:3000", "https://10.52.0.19:3000"],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
-}));
+ 
 
-const users = {}; 
+// Setup Socket.IO with CORS
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
+setupSocket(io); 
+
+// Private message sockets
+const users = {};
 io.on("connection", (socket) => {
-  console.log("New user connected:", socket.id);
+  console.log("✅ Socket.IO client connected:", socket.id);
 
-  // Store user ID with their socket
   socket.on("register", (userId) => {
     users[userId] = socket.id;
-    console.log(`User ${userId} connected with socket ${socket.id}`);
+    console.log(`User ${userId} registered with socket ID ${socket.id}`);
   });
 
-  // Private messaging (agent -> supervisor)
   socket.on("private_message", async ({ senderId, receiverId, message }) => {
-    console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
+    console.log(`💬 Message from ${senderId} to ${receiverId}: ${message}`);
+    try {
+      await ChatMassage.create({ senderId, receiverId, message });
 
-    // Save message to MySQL
-    await ChatMassage.create({
-      senderId,
-      receiverId,
-      message,
-    });
-
-    // Send message to the recipient if online
-    if (users[receiverId]) {
-      io.to(users[receiverId]).emit("private_message", {
-        senderId,
-        receiverId,
-        message,
+      // Emit message to both users
+      [receiverId, senderId].forEach(id => {
+        if (users[id]) {
+          io.to(users[id]).emit("private_message", { senderId, receiverId, message });
+        }
       });
-    } else {
-      console.warn(`User ${receiverId} is offline, message not delivered.`);
-    }
 
-    // Also send the message back to the sender to update their UI
-    if (users[senderId]) {
-      io.to(users[senderId]).emit("private_message", {
-        senderId,
-        receiverId,
-        message,
-      });
+    } catch (error) {
+      console.error("❌ Failed to store or emit message:", error);
     }
   });
 
-  // Handle user disconnect
   socket.on("disconnect", () => {
-    Object.keys(users).forEach((key) => {
-      if (users[key] === socket.id) {
-        console.log(`User ${key} disconnected`);
-        delete users[key];
+    for (const id in users) {
+      if (users[id] === socket.id) {
+        console.log(`🛑 User ${id} disconnected`);
+        delete users[id];
       }
-    });
-  });
-
-  socket.on("callStatusUpdate", (callData) => {
-    const { callId, status } = callData;
-
-    if (status === "Idle" || status === "Ended") {
-      liveCalls.delete(callId); // Remove ended calls
-    } else {
-      liveCalls.set(callId, callData); // Add or update live call
     }
-
-    // Broadcast update to all connected dashboards
-    io.emit("dashboardUpdate", Array.from(liveCalls.values()));
   });
-
 });
 
-// Start the server and sync database
-sequelize.sync({ force: false, alter: false }).then(() => {
-  console.log("Database synced");
-  registerSuperAdmin(); // Ensure Super Admin is created at startup
-  
-  const PORT = process.env.PORT || 5070;
-  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-}).catch(error => {
-  console.error("Database sync failed:", error);
-  process.exit(1);
-});
-
- 
+// Start server after DB sync
+sequelize.sync({ force: false, alter: false })
+  .then(() => {
+    console.log("✅ Database synced");
+    registerSuperAdmin();
+    const PORT = process.env.PORT || 5070;
+    server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  })
+  .catch(err => {
+    console.error("❌ DB sync error:", err);
+    process.exit(1);
+  });
