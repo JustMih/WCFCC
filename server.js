@@ -17,7 +17,8 @@ const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const path = require("path");
 const fs = require("fs");
- 
+const VoiceNote = require('./models/voice_notes.model'); // ✅ Add this at the top
+
 dotenv.config();
 const app = express();
 const server = http.createServer(app);
@@ -34,20 +35,29 @@ app.use(cors({
 app.get("/api/voice-notes/:id/audio", async (req, res) => {
   const { id } = req.params;
 
-  const voiceNote = await getVoiceNoteById(id); // <-- implement this!
+  try {
+    const voiceNote = await VoiceNote.findByPk(id);
 
-  if (!voiceNote || !voiceNote.recording_path) {
-    return res.status(404).send("Voice note not found");
-  }
-
-  const filePath = path.resolve(voiceNote.recording_path);
-
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error("Failed to send audio file:", err);
-      res.status(500).send("Error sending file");
+    if (!voiceNote || !voiceNote.recording_path) {
+      return res.status(404).send("Voice note not found");
     }
-  });
+
+    const filePath = path.resolve(voiceNote.recording_path);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Voice file not found on disk");
+    }
+
+    res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error("Failed to send audio file:", err);
+        res.status(500).send("Error sending file");
+      }
+    });
+  } catch (error) {
+    console.error("Unexpected error fetching voice note:", error);
+    res.status(500).send("Internal server error");
+  }
 });
 
 app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
@@ -80,7 +90,7 @@ const io = new Server(server, {
   }
 });
 
-setupSocket(io); // Superadmin RTP stream handler
+setupSocket(io); 
 
 // Private message sockets
 const users = {};
