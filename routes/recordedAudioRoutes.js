@@ -19,9 +19,20 @@
 // router.get("/:filename", getRecordedAudio); 
  
 // module.exports = router;
+// const express = require("express");
+// const router = express.Router();
+// const { getAllRecordedAudio, getRecordedAudio } = require("../controllers/recordedaudios/recordedAudioController");
+
+// router.get("/", getAllRecordedAudio);
+// router.get("/:filename", getRecordedAudio);
+
+// module.exports = router;
 const express = require("express");
 const router = express.Router();
-const { getAllRecordedAudio, getRecordedAudio } = require("../controllers/recordedaudios/recordedAudioController");
+const {
+  getAllRecordedAudio,
+  getRecordedAudio
+} = require("../controllers/recordedaudios/recordedAudioController");
 
 router.get("/", getAllRecordedAudio);
 router.get("/:filename", getRecordedAudio);
