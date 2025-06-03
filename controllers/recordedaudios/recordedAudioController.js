@@ -1,49 +1,58 @@
- const path = require('path');
-const fs = require('fs');
+const db = require("../../models");
+const path = require("path");
+const fs = require("fs");
+const RecordedAudio = db.RecordedAudio; // This must be defined
 
-// GET all .wav files from the recorded directory
 const getAllRecordedAudio = async (req, res) => {
-  const directoryPath = '/opt/wcf_call_center_backend/recorded';
-
   try {
-    const files = await fs.promises.readdir(directoryPath);
-    const wavFiles = files.filter(file => file.endsWith('.wav'));
+    const calls = await RecordedAudio.findAll({
+      where: {
+        recordingfile: {
+          [db.Sequelize.Op.ne]: null,
+        },
+      },
+      order: [["clid", "DESC"]],
+      limit: 50,
+    });
 
-    res.json(wavFiles.map(file => ({
-      filename: file,
-      url: `/api/recorded-audio/${encodeURIComponent(file)}`
-    })));
+    const result = calls.map((call) => {
+      return {
+        filename: call.recordingfile,
+        url: `/api/recorded-audio/${encodeURIComponent(call.recordingfile)}`,
+        created: call.cdrstarttime,
+        caller: call.clid,
+      };
+    });
+
+    res.json(result);
   } catch (err) {
-    console.error('Cannot read recorded files:', err);
-    res.status(500).json({ error: 'Cannot read recordings' });
+    console.error("Failed to load recordings:", err);
+    res.status(500).json({ error: "Failed to load recordings" });
   }
 };
 
-// GET a specific audio file by filename
 const getRecordedAudio = async (req, res) => {
   const filename = decodeURIComponent(req.params.filename);
-
-  if (!filename.endsWith('.wav') || filename.includes('..')) {
-    return res.status(400).json({ error: 'Invalid filename' });
+  if (!filename.endsWith(".wav") || filename.includes("..")) {
+    return res.status(400).json({ error: "Invalid filename" });
   }
 
-  const filePath = path.join('/opt/wcf_call_center_backend/recorded', filename);
-
+  const filePath = path.join("/var/spool/asterisk/monitor", filename);
   try {
     await fs.promises.access(filePath, fs.constants.R_OK);
     res.sendFile(filePath, {
       headers: {
-        'Content-Type': 'audio/wav',
-        'Content-Disposition': `inline; filename="${filename}"`
-      }
+        "Content-Type": "audio/wav",
+        "Content-Disposition": `inline; filename="${filename}"`,
+      },
     });
   } catch (err) {
     console.error(`File not found: ${filePath}`, err);
-    res.status(404).json({ error: 'File not found' });
+    res.status(404).json({ error: "File not found" });
   }
 };
 
 module.exports = {
   getAllRecordedAudio,
-  getRecordedAudio
+  getRecordedAudio,
 };
