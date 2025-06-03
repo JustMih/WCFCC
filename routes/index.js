@@ -15,6 +15,7 @@ const coordinatorRoutes = require("./coordinatorRoutes");
 const sectionRoutes = require("./sectionRoutes");
 const getCallsRoutes = require("./callsRoutes");
 const notificationRoutes = require("./notificationRoutes");
+const complaintWorkflowRoutes = require("./complaintWorkflowRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -33,4 +34,5 @@ router.use("/coordinator", coordinatorRoutes);
 router.use("/section", sectionRoutes);
 router.use("/calls", getCallsRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/complaints', complaintWorkflowRoutes);
 module.exports = router;
