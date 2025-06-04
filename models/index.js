@@ -32,6 +32,8 @@ db.EmergencyNumber = EmergencyNumber;
 
 const Holiday = require("./holiday")(sequelize, Sequelize.DataTypes);
 db.holidays = Holiday; // lowercase 'holidays'
+const RecordedAudio = require("./recorded_audio.model.js")(sequelize, Sequelize.DataTypes);
+db.RecordedAudio = RecordedAudio;
 
 console.log("Loaded models:", Object.keys(db));  // Debugging models
 

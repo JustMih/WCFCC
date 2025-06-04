@@ -18,20 +18,20 @@ const reportsRoutes = require('./routes/reports.routes');
 const path = require("path");
 const fs = require("fs");
 const VoiceNote = require('./models/voice_notes.model'); // ✅ Add this at the top
-
+ 
 dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
 // Middleware
 app.use(express.json());
+ 
 app.use(cors({
   origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
-
 app.get("/api/voice-notes/:id/audio", async (req, res) => {
   const { id } = req.params;
 
@@ -78,7 +78,7 @@ app.use("/api/emergency", emergencyRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/live-streaming", livestreamRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
- 
+app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
  
 
 // Setup Socket.IO with CORS
