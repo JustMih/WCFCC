@@ -5,7 +5,8 @@ const {
   listNotifications, 
   markAsRead, 
   getUnreadCount,
-  getNotificationById
+  getNotificationById,
+  getNotificationsByTicketId
 } = require('../controllers/notifications/notificationController');
 const { authMiddleware } = require("../middleware/authMiddleware");
 
@@ -28,5 +29,8 @@ router.get('/unread-count/:userId', getUnreadCount);
 
 // Get single notification
 router.get('/:notificationId', getNotificationById);
+
+// Get notifications by ticket ID
+router.get('/ticket/:ticketId', getNotificationsByTicketId);
 
 module.exports = router; 

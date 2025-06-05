@@ -36,6 +36,13 @@ const getAllFunctionData = async (req, res) => {
             {
               model: Section,
               as: 'section'
+            },
+            {
+              model: FunctionData,
+              as: 'functionData',
+              include: [
+                
+              ]
             }
           ]
         }

@@ -45,12 +45,60 @@ module.exports = {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440004',
-        name: 'Units',
+        name: 'Legal Unit',
         created_by: DEFAULT_USER_ID,
         created_at: new Date(),
         updated_by: DEFAULT_USER_ID,
         updated_at: new Date()
-      }
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440005',
+        name: 'ICT Unit',
+        created_by: DEFAULT_USER_ID,
+        created_at: new Date(),
+        updated_by: DEFAULT_USER_ID,
+        updated_at: new Date()
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440006',
+        name: 'Actuarial Statistics and Risk Management',
+        created_by: DEFAULT_USER_ID,
+        created_at: new Date(),
+        updated_by: DEFAULT_USER_ID,
+        updated_at: new Date()
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440007',
+          name: 'Public Relation Unit',
+          created_by: DEFAULT_USER_ID,
+          created_at: new Date(),
+          updated_by: DEFAULT_USER_ID,
+          updated_at: new Date()
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440008',
+          name: 'Procurement Management Unit',
+          created_by: DEFAULT_USER_ID,
+          created_at: new Date(),
+          updated_by: DEFAULT_USER_ID,
+          updated_at: new Date()
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440009',
+          name: 'Human Resource Management and Attachment Unit',
+          created_by: DEFAULT_USER_ID,
+          created_at: new Date(),
+          updated_by: DEFAULT_USER_ID,
+          updated_at: new Date()
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440009',
+          name: 'Internal Audit Unit',
+          created_by: DEFAULT_USER_ID,
+          created_at: new Date(),
+          updated_by: DEFAULT_USER_ID,
+          updated_at: new Date()
+        },
     ];
 
     // Check if sections already exist

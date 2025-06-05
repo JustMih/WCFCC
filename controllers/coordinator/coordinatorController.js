@@ -7,36 +7,26 @@ const FunctionModel = require("../../models/Function");
 const Section = require("../../models/Section");
 const { Op, Sequelize } = require("sequelize");
 
+
 const getAllCoordinatorComplaints = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
         category: {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
-        }
-        // [Op.and]: [
-        //   {
-        //     [Op.or]: [
-        //       { converted_to: null },
-        //       { converted_to: 'Complaint' }
-        //     ]
-        //   },
-        //   {
-        //     [Op.or]: [
-        //       { status: null },
-        //       { status: 'Open' }
-        //     ]
-        //   }
-        // ]
-      },
-      include: [
-        {
-          model: User,
-          as: "creator",
-          attributes: ["id", "name"]
-        }
-      ],
-      order: [["created_at", "DESC"]]
+        },
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { status: null },
+              { status: 'Open' }
+            ]
+          },
+          { converted_to: null },
+          { responsible_unit_name: null },
+          { complaint_type: null }
+        ]
+      }
     });
 
     if (!complaints.length) {
@@ -57,6 +47,7 @@ const getAllCoordinatorComplaints = async (req, res) => {
     });
   }
 };
+
 
 const rateTickets = async (req, res) => {
   const { userId } = req.body;
@@ -239,73 +230,74 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     const tenDaysAgo = new Date();
     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
 
-    // Shared logic for new/unrated/unassigned/open tickets
-    const sharedNewTicketConditions = {
-      [Op.and]: [
-        { status: { [Op.ne]: "Closed" } },
-        { responsible_unit_name: { [Op.is]: null } },
-        { complaint_type: { [Op.is]: null } },
-        {
-          [Op.or]: [{ status: null }, { status: "Open" }]
-        }
-      ]
-    };
+    const baseNewTicketConditions = [
+      { responsible_unit_name: null },
+      { complaint_type: { [Op.is]: null } },
+      { [Op.or]: [{ status: null }, { status: "Open" }] },
+      { converted_to: null },
+      { created_at: { [Op.gte]: tenDaysAgo } }
+    ];
 
-    // New Tickets count
-    const newTicketsCount = await Ticket.count({
-      where: {
-        category: {
-          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
-        },
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { status: null },
-              { status: 'Open' }
-            ]
-          },
-          {
-            converted_to: null
-          },
-          {
-            responsible_unit_name: null
-          }
-        ],
-        ...sharedNewTicketConditions
-      }
-    });
-    
-    // Escalated Tickets count
-    const escalatedTicketsCount = await Ticket.count({
-      where: {
-        [Op.and]: [
-          { responsible_unit_name: { [Op.not]: null } },
-          { category: "Complaint" },
-          { created_at: { [Op.lt]: tenDaysAgo } },
-          { status: { [Op.notIn]: ["Closed", "Resolved"] } }
-        ]
-      }
-    });
-
-    // Converted Tickets (filtered using same logic as new tickets per category)
     const complaintsCount = await Ticket.count({
       where: {
-        ...sharedNewTicketConditions,
-        category: "Complaint"
+        category: "Complaint",
+        [Op.and]: baseNewTicketConditions
       }
     });
 
     const suggestionsCount = await Ticket.count({
       where: {
-        ...sharedNewTicketConditions,
-        category: "Suggestion"
+        category: "Suggestion",
+        [Op.and]: baseNewTicketConditions
       }
     });
 
     const complementsCount = await Ticket.count({
       where: {
-        ...sharedNewTicketConditions,
-        category: "Compliment"
+        category: "Compliment",
+        [Op.and]: baseNewTicketConditions
+      }
+    });
+
+    // New Tickets: last 10 days
+    const newTicketsCount = await Ticket.count({
+      where: {
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: { [Op.is]: null } },
+          { responsible_unit_name: { [Op.is]: null } },
+          { complaint_type: { [Op.is]: null } },
+          { created_at: { [Op.gte]: tenDaysAgo } }
+        ]
+      }
+    });
+
+    // Escalated Tickets: older than 10 days
+    const escalatedTicketsCount = await Ticket.count({
+      where: {
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: null },
+          { responsible_unit_name: null },
+          { complaint_type: { [Op.is]: null } },
+          { created_at: { [Op.lt]: tenDaysAgo } }
+        ]
+      }
+    });
+
+    // All New Tickets (no date filter)
+    const allNewTicketsTotal = await Ticket.count({
+      where: {
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: null },
+          { responsible_unit_name: null },
+          { complaint_type: { [Op.is]: null } }
+          // No date filter!
+        ]
       }
     });
 
@@ -367,10 +359,21 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       }
     });
 
+    const ticketStatus = {
+      "On Progress": onProgressCount,
+      Closed: closedCount,
+      Minor: minorCount,
+      Major: majorCount
+      // add other statuses if needed
+    };
+
+    const ticketStatusTotal = Object.values(ticketStatus).reduce((a, b) => 0 + b, 0);
+
     res.status(200).json({
       message: "Dashboard counts retrieved successfully",
       data: {
         newTickets: {
+          "Total": allNewTicketsTotal,
           "New Tickets": newTicketsCount,
           "Escalated Tickets": escalatedTicketsCount
         },
@@ -383,14 +386,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
           Directorate: directorateCount,
           Units: unitsCount
         },
-        ticketStatus: {
-          // Open: openCount,
-          "On Progress": onProgressCount,
-          Closed: closedCount,
-          " ": " "
-          // Minor: minorCount,
-          // Major: majorCount
-        }
+        ticketStatus,
+        ticketStatusTotal
       }
     });
   } catch (error) {
@@ -725,41 +722,33 @@ const getOverdueTickets = async (req, res) => {
   }
 };
 
+
 const getTicketsByStatus = async (req, res) => {
   try {
     const { status } = req.query;
+
     let whereClause = {
       [Op.or]: [
         { category: "Complaint" },
-        // { category: 'Congrats' },
         { category: "Suggestion" },
         { category: "Compliment" }
-        // { category: 'Inquiry' }
       ]
     };
 
-    // Map status/category/channel/severity as needed
     switch (status) {
-      case "complaints":
-        whereClause.category = "Complaint";
-        whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.ne]: null } }
-        ];
-        break;
       case "new":
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: { [Op.is]: null } },
+          { responsible_unit_name: { [Op.is]: null } },
+          { complaint_type: { [Op.is]: null } },
           {
-            [Op.or]: [{ status: null }, { status: "Open" }]
-          },
-          {
-            converted_to: null
-          },
-          {
-            responsible_unit_name: null
+            created_at: {
+              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
+            }
           }
         ];
         break;
@@ -768,48 +757,82 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.ne]: null } },
-          { created_at: { [Op.lt]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) } }
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: { [Op.is]: null } },
+          { responsible_unit_name: { [Op.is]: null } },
+          { complaint_type: { [Op.is]: null } },
+          {
+            created_at: {
+              [Op.lt]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // > 10 days
+            }
+          }
         ];
         break;
-      case "inquiries":
-        whereClause.category = "Inquiry";
+        case "complaints":
+        whereClause.category = {
+          [Op.in]: ["Complaint"]
+        };
         whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.ne]: null } }
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: { [Op.is]: null } },
+          { responsible_unit_name: { [Op.is]: null } },
+          { complaint_type: { [Op.is]: null } },
+          {
+            created_at: {
+              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
+            }
+          }
         ];
         break;
-      case "suggestions":
-        whereClause.category = "Suggestion";
+        case "suggestions":
+        whereClause.category = {
+          [Op.in]: ["Suggestion"]
+        };
         whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.ne]: null } }
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: { [Op.is]: null } },
+          { responsible_unit_name: { [Op.is]: null } },
+          { complaint_type: { [Op.is]: null } },
+          {
+            created_at: {
+              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
+            }
+          }
         ];
         break;
-      case "complements":
-        whereClause.category = "Compliment";
+        case "complements":
+        whereClause.category = {
+          [Op.in]: ["Compliment"]
+        };
         whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.ne]: null } }
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { converted_to: { [Op.is]: null } },
+          { responsible_unit_name: { [Op.is]: null } },
+          { complaint_type: { [Op.is]: null } },
+          {
+            created_at: {
+              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
+            }
+          }
         ];
         break;
-      case "directorate":
+        case "directorate":
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.like]: "%Directorate%" } }
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { responsible_unit_name:  { [Op.like]: "%Directorate%" } },
+          
         ];
         break;
-      case "units":
+        case "units":
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { status: { [Op.ne]: "Closed" } },
-          { responsible_unit_name: { [Op.like]: "%Unit%" } }
+          { [Op.or]: [{ status: null }, { status: "Open" }] },
+          { responsible_unit_name: { [Op.like]: "%unit%" } },
         ];
         break;
       case "open":
@@ -818,7 +841,7 @@ const getTicketsByStatus = async (req, res) => {
         };
         whereClause[Op.and] = [
           { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { responsible_unit_name: { [Op.ne]: null } }
+          { responsible_unit_name: { [Op.not]: null } }
         ];
         break;
       case "on-progress":
@@ -827,7 +850,7 @@ const getTicketsByStatus = async (req, res) => {
         };
         whereClause[Op.and] = [
           { status: "In Progress" },
-          { responsible_unit_name: { [Op.ne]: null } }
+          { responsible_unit_name: { [Op.not]: null } }
         ];
         break;
       case "closed":
@@ -854,14 +877,21 @@ const getTicketsByStatus = async (req, res) => {
           { status: { [Op.ne]: "Closed" } }
         ];
         break;
-      default:
-        whereClause.status = status;
+      case "major":
+        whereClause.category = {
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        };
         whereClause[Op.and] = [
+          { complaint_type: "Major" },
           { status: { [Op.ne]: "Closed" } }
         ];
+        break;
+      default:
+        whereClause.status = status;
+        whereClause[Op.and] = [{ status: { [Op.ne]: "Closed" } }];
+        break;
     }
 
-    // Remove the include for now to avoid association errors
     const tickets = await Ticket.findAll({
       where: whereClause,
       order: [["created_at", "DESC"]]
