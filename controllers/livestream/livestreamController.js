@@ -28,33 +28,48 @@
 // };
 
 // module.exports = { initializeSocket, rtpPacketHandler };
-let io;  // This will be injected from server.js
+// let io;  // This will be injected from server.js
 
-// Called once from server.js with the existing io instance
-const setupSocket = (ioInstance) => {
-  io = ioInstance;
+// // Called once from server.js with the existing io instance
+// const setupSocket = (ioInstance) => {
+//   io = ioInstance;
 
-  io.on("connection", (socket) => {
-    console.log("🔌 New socket connected:", socket.id);
+//   io.on("connection", (socket) => {
+//     console.log("🔌 New socket connected:", socket.id);
 
-    socket.on("disconnect", () => {
-      console.log("🔌 Socket disconnected:", socket.id);
+//     socket.on("disconnect", () => {
+//       console.log("🔌 Socket disconnected:", socket.id);
+//     });
+//   });
+// };
+
+// // Emits RTP packet data to all connected clients
+// const rtpPacketHandler = (packet) => {
+//   if (!io) return console.warn("⚠️ Socket.IO not initialized");
+
+//   console.log("📡 Emitting RTP packet:", packet);
+//   io.emit("rtp_update", {
+//     timestamp: packet.ts,
+//     seq: packet.seq,
+//     len: packet.len,
+//     source_ip: packet.source_ip,
+//     source_port: packet.source_port,
+//   });
+// };
+
+// module.exports = { setupSocket, rtpPacketHandler };
+const LiveCall = require("../../models/LiveCall");
+
+const getAllLiveCalls = async (req, res) => {
+  try {
+    const calls = await LiveCall.findAll({
+      order: [['call_start', 'DESC']]
     });
-  });
+    res.json(calls);
+  } catch (err) {
+    console.error("Error fetching live calls:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 };
 
-// Emits RTP packet data to all connected clients
-const rtpPacketHandler = (packet) => {
-  if (!io) return console.warn("⚠️ Socket.IO not initialized");
-
-  console.log("📡 Emitting RTP packet:", packet);
-  io.emit("rtp_update", {
-    timestamp: packet.ts,
-    seq: packet.seq,
-    len: packet.len,
-    source_ip: packet.source_ip,
-    source_port: packet.source_port,
-  });
-};
-
-module.exports = { setupSocket, rtpPacketHandler };
+module.exports = { getAllLiveCalls };

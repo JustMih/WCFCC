@@ -21,17 +21,24 @@
 // });
 
 // module.exports = router;
+// const express = require("express");
+// const router = express.Router();
+// const { rtpPacketHandler } = require("../controllers/livestream/livestreamController");
+
+// router.post("/emit-rtp", (req, res) => {
+//   const { ts, seq, len, source_ip, source_port } = req.body;
+
+//   const rtpPacket = { ts, seq, len, source_ip, source_port };
+//   rtpPacketHandler(rtpPacket);
+
+//   res.status(200).send("RTP packet emitted successfully");
+// });
+
+// module.exports = router;
 const express = require("express");
 const router = express.Router();
-const { rtpPacketHandler } = require("../controllers/livestream/livestreamController");
+const { getAllLiveCalls } = require("../controllers/livestream/livestreamController");
 
-router.post("/emit-rtp", (req, res) => {
-  const { ts, seq, len, source_ip, source_port } = req.body;
-
-  const rtpPacket = { ts, seq, len, source_ip, source_port };
-  rtpPacketHandler(rtpPacket);
-
-  res.status(200).send("RTP packet emitted successfully");
-});
+router.get("/live-calls", getAllLiveCalls);
 
 module.exports = router;
