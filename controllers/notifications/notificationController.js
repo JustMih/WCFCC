@@ -78,7 +78,14 @@ const listNotifications = async (req, res) => {
   try {
     const { userId } = req.params;
     const notifications = await Notification.findAll({
-      where: { recipient_id: userId },
+      where: {
+        recipient_id: userId,
+        [Op.or]: [
+          { status: "unread" },
+          { status: " " }
+        ]
+      },
+      
       include: [
         {
           model: Ticket,
@@ -159,10 +166,42 @@ const getUnreadCount = async (req, res) => {
   }
 };
 
+// Get notifications by ticket ID
+const getNotificationsByTicketId = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    console.log("Fetching notifications for ticket:", ticketId);
+
+    const notifications = await Notification.findAll({
+      where: {
+        ticket_id: ticketId
+      },
+      include: [
+        {
+          model: Ticket,
+          as: 'ticket',
+          attributes: ['id', 'ticket_id', 'subject', 'category', 'status', 'description']
+        }
+      ],
+      order: [["created_at", "DESC"]]
+    });
+
+    console.log("Found notifications:", notifications.length);
+    return res.status(200).json({ notifications });
+  } catch (error) {
+    console.error("Error fetching ticket notifications:", error);
+    return res.status(500).json({ 
+      message: "Error fetching ticket notifications", 
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   createNotification,
   listNotifications,
   markAsRead,
   getUnreadCount,
-  getNotificationById
+  getNotificationById,
+  getNotificationsByTicketId
 };

@@ -43,12 +43,27 @@ exports.updateHoliday = async (req, res) => {
 };
 
 // Delete a holiday
+// exports.deleteHoliday = async (req, res) => {
+//   try {
+//     const id = req.params.id;
+//     await Holiday.destroy({ where: { id } });
+//     res.status(204).send();
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// };
 exports.deleteHoliday = async (req, res) => {
   try {
     const id = req.params.id;
-    await Holiday.destroy({ where: { id } });
+    const deleted = await Holiday.destroy({ where: { id } });
+
+    if (deleted === 0) {
+      return res.status(404).json({ error: 'Holiday not found' });
+    }
+
     res.status(204).send();
   } catch (err) {
+    console.error("Server delete error:", err.message);
     res.status(500).json({ error: err.message });
   }
 };

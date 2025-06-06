@@ -148,7 +148,7 @@ const Ticket = sequelize.define(
       allowNull: true
     },
     status: {
-      type: DataTypes.ENUM('Open', 'Assigned', 'Carried Forward', 'In Progress', 'Returned', 'Closed'),
+      type: DataTypes.ENUM('Open', 'Assigned', 'Carried Forward', 'In Progress', 'Returned', 'Closed', 'Pending Review', 'Pending Approval'),
       defaultValue: 'Open',
       allowNull: false
     },
@@ -212,7 +212,21 @@ const Ticket = sequelize.define(
       allowNull: true
     },
     assigned_to_role: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.ENUM('Agent', 'Coordinator', 'Attendee', 'Head of Unit', 'Director', 'DG'),
+      allowNull: true
+    },
+
+    // New workflow fields
+    evidence_url: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    review_notes: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    approval_notes: {
+      type: DataTypes.TEXT,
       allowNull: true
     }
   },

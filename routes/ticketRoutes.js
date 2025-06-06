@@ -87,7 +87,7 @@ router.get(
 router.get(
   "/count/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
   getTicketCounts
 );
 
