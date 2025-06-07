@@ -11,8 +11,10 @@ const http = require("http");
 const monitorRoutes = require('./routes/monitorRoutes');
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
+// const livestreamRoutes = require("./routes/livestreamRoutes");
 const livestreamRoutes = require("./routes/livestreamRoutes");
 const { setupSocket } = require("./controllers/livestream/livestreamController");
+ 
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const path = require("path");
@@ -76,10 +78,13 @@ app.use("/api", recordingRoutes);
 app.use("/api/holidays", holidayRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/reports", reportsRoutes);
-app.use("/api/live-streaming", livestreamRoutes);
+// app.use("/api/live-streaming", livestreamRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
- 
+
+app.use("/api/livestream", livestreamRoutes); 
+
+
 
 // Setup Socket.IO with CORS
 const io = new Server(server, {

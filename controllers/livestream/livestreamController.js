@@ -1,60 +1,40 @@
-// const { Server } = require("socket.io");
-// let io;  
+const sequelize = require("../../config/mysql_connection");
+const { DataTypes } = require("sequelize");
 
-// // Initialize WebSocket server
-// const initializeSocket = (server) => {
-//   io = new Server(server, {});
-//   io.on("connection", (socket) => {
-//     console.log("New user connected", socket.id);
-//     // You can listen to custom events from the frontend here if needed
-//     socket.on("disconnect", () => {
-//       console.log("User disconnected");
-//     });
-//   });
-// };
+// Directly load the model from LiveCall.js
+const LiveCall = require("../../models/LiveCall")(sequelize, DataTypes);
 
-// // Emit RTP packet data to all connected clients (Supervisor's frontend)
-// const rtpPacketHandler = (packet) => {
-//   console.log("Emitting RTP packet:", packet);
-//   if (io) {
-//     io.emit("rtp_update", {
-//       timestamp: packet.ts,
-//       seq: packet.seq,
-//       len: packet.len,
-//       source_ip: packet.source_ip,
-//       source_port: packet.source_port,
-//     });
-//   }
-// };
+let ioInstance = null;
 
-// module.exports = { initializeSocket, rtpPacketHandler };
-let io;  // This will be injected from server.js
-
-// Called once from server.js with the existing io instance
-const setupSocket = (ioInstance) => {
-  io = ioInstance;
-
+const setupSocket = (io) => {
+  ioInstance = io;
   io.on("connection", (socket) => {
-    console.log("🔌 New socket connected:", socket.id);
+    console.log("📡 LiveCall client connected:", socket.id);
 
     socket.on("disconnect", () => {
-      console.log("🔌 Socket disconnected:", socket.id);
+      console.log("📴 LiveCall client disconnected:", socket.id);
     });
   });
 };
 
-// Emits RTP packet data to all connected clients
-const rtpPacketHandler = (packet) => {
-  if (!io) return console.warn("⚠️ Socket.IO not initialized");
-
-  console.log("📡 Emitting RTP packet:", packet);
-  io.emit("rtp_update", {
-    timestamp: packet.ts,
-    seq: packet.seq,
-    len: packet.len,
-    source_ip: packet.source_ip,
-    source_port: packet.source_port,
-  });
+const emitLiveCall = (callData) => {
+  if (!ioInstance) return;
+  ioInstance.emit("live_call_update", callData);
 };
 
-module.exports = { setupSocket, rtpPacketHandler };
+// REST API to get all calls
+const getAllLiveCalls = async (req, res) => {
+  try {
+    const calls = await LiveCall.findAll({ order: [["call_start", "DESC"]] });
+    res.status(200).json(calls);
+  } catch (err) {
+    console.error("Error fetching live calls:", err);
+    res.status(500).json({ error: "Failed to fetch calls" });
+  }
+};
+
+module.exports = {
+  setupSocket,
+  emitLiveCall,
+  getAllLiveCalls
+};
