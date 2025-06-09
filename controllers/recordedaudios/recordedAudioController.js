@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+ const path = require("path");
+=======
 // const { sequelize } = require("../../models");
 
 // // const path = require("path");
@@ -109,6 +112,7 @@
 
 // module.exports = { getAllRecordedAudio, getRecordedAudio };
 const path = require("path");
+>>>>>>> 89c0728fdae97d887e37872c58d3028b845ced71
 const fs = require("fs");
 const { sequelize } = require("../../models");
 
@@ -159,4 +163,8 @@ const getRecordedAudio = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 module.exports = { getAllRecordedAudio, getRecordedAudio };
+=======
+module.exports = { getAllRecordedAudio, getRecordedAudio };
+>>>>>>> 89c0728fdae97d887e37872c58d3028b845ced71
