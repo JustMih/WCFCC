@@ -89,12 +89,12 @@ app.use("/api/livestream", livestreamRoutes);
 // Setup Socket.IO with CORS
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+    origin:  "*",
     methods: ["GET", "POST"],
     credentials: true
   }
 });
-
+global._io = io;
 setupSocket(io); 
 
 // Private message sockets
@@ -146,3 +146,4 @@ sequelize.sync({ force: false, alter: false })
     console.error("❌ DB sync error:", err);
     process.exit(1);
   });
+  require('./utils/celPoller').startPolling();

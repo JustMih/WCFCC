@@ -86,9 +86,19 @@ exports.streamVoiceNote = async (req, res) => {
   }
 };
 
+// exports.getCDRReports = async (req, res) => {
+//   try {
+//     const cdrReports = await CDR.findAll();
+//     res.json(cdrReports);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// };
 exports.getCDRReports = async (req, res) => {
   try {
-    const cdrReports = await CDR.findAll();
+    const cdrReports = await CDR.findAll({
+      order: [['cdrstarttime', 'DESC']] // Replace 'calldate' with your actual datetime column name
+    });
     res.json(cdrReports);
   } catch (error) {
     res.status(500).json({ error: error.message });
