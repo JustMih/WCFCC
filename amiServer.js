@@ -49,4 +49,25 @@ app.get('/api/live-calls', async (req, res) => {
   }
 });
 
+app.get('/api/queue-status', async (req, res) => {
+  try {
+    const [rows] = await db.execute(`
+      SELECT 
+        q.name as queue_name,
+        COUNT(DISTINCT CASE WHEN q.event = 'CONNECT' THEN q.callid END) as active_calls,
+        COUNT(DISTINCT CASE WHEN q.event = 'ENTERQUEUE' AND q.event NOT IN ('CONNECT', 'COMPLETEAGENT', 'COMPLETECALLER') THEN q.callid END) as waiting_calls,
+        COUNT(DISTINCT CASE WHEN q.event = 'COMPLETEAGENT' THEN q.callid END) as completed_calls
+      FROM queue_log q
+      WHERE q.time >= NOW() - INTERVAL 1 HOUR
+      GROUP BY q.name
+      ORDER BY q.name
+    `);
+
+    res.json(rows);
+  } catch (error) {
+    console.error("❌ Queue status query failed:", error);
+    res.status(500).send("Database error");
+  }
+});
+
 app.listen(5070, () => console.log("CEL API running on port 5070"));
