@@ -134,16 +134,17 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start server after DB sync
-sequelize.sync({ force: false, alter: false })
-  .then(() => {
-    console.log("✅ Database synced");
-    registerSuperAdmin();
-    const PORT = process.env.PORT || 5070;
-    server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-  })
-  .catch(err => {
-    console.error("❌ DB sync error:", err);
-    process.exit(1);
-  });
-  require('./utils/celPoller').startPolling();
+// Start the server and sync database
+sequelize.sync({ force: false, alter: false }).then(() => {
+  console.log("Database synced");
+  registerSuperAdmin(); // Ensure Super Admin is created at startup
+  
+  const PORT = process.env.PORT || 5070;
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(error => {
+  console.error("Database sync failed:", error);
+  process.exit(1);
+});
+
+ 
+

@@ -17,6 +17,7 @@ const getCallsRoutes = require("./callsRoutes");
 const macRoutes = require('./macRoutes');
 const notificationRoutes = require("./notificationRoutes");
 const complaintWorkflowRoutes = require("./complaintWorkflowRoutes");
+const performanceRoutes = require("./performanceRoutes");
 const router = express.Router();
 const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
@@ -40,8 +41,7 @@ router.use("/calls", getCallsRoutes);
 router.use("/mac-system", macRoutes);
 router.use("/monitor", monitorRoutes);
 router.use("/missed-calls", missedCallRoutes);
-
-
+router.use("/performance", performanceRoutes);
 
 router.use('/notifications', notificationRoutes);
 router.use('/complaints', complaintWorkflowRoutes);

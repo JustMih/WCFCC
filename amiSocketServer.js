@@ -15,7 +15,7 @@ const ami = new AsteriskManager(5038, "localhost", "admin", "@Ttcl123", true);
 ami.keepConnected();
 
 let liveCalls = {}; // Active calls by Uniqueid
-let queueCalls = {}; // Queue entries indexed by position or unique ID
+let queueStatus = {}; // Queue entries indexed by position or unique ID
 
 ami.on("managerevent", (event) => {
   console.log("📥 AMI Event:", event);
@@ -69,7 +69,8 @@ ami.on("managerevent", (event) => {
 
   // Emit to clients
   io.emit("live-calls", Object.values(liveCalls));
-  io.emit("queue-status", Object.values(queueStatus));
+  io.emit("queueStatusUpdate", Object.values(queueStatus));
+
 });
 
 
@@ -79,7 +80,7 @@ io.on("connection", (socket) => {
 
   // Initial push
   socket.emit("live-calls", Object.values(liveCalls));
-  socket.emit("queue-status", Object.values(queueCalls));
+  socket.emit("queue-status", Object.values(queueStatus)); // ✅ consistent
 
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected");
