@@ -1,18 +1,22 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/mysql_connection");
 
-const IVRAction = sequelize.define(  // ✅ Ensure it's IVRAction singular
-  "IVRAction",
-  {
-    id: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      allowNull: false,
-      primaryKey: true,
-    },
-    name: { type: DataTypes.STRING, allowNull: false },
-  },
-  { timestamps: true }
-);
+// Import IVRDTMFMapping model
+const IVRDTMFMapping = require("./ivr_dtmf_mappings.model");
 
-module.exports = IVRAction;  // ✅ Export as IVRAction (singular)
+const IVRAction = sequelize.define("IVRAction", {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+});
+
+// Define the hasMany relationship
+IVRAction.hasMany(IVRDTMFMapping, { foreignKey: 'action_id' });
+
+module.exports = IVRAction;

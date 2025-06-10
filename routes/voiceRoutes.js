@@ -2,6 +2,8 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const IVRVoice = require("../models/IVRVoice");  
+
 const {
   createVoice,
   getAllVoices,
@@ -43,9 +45,37 @@ router.post(
   },
   createVoice
 );
+// Add this to your existing voiceRouter.js
 
+// Serve audio file for playing
+router.get("/voices/:id/audio", async (req, res) => {
+  try {
+    const voice = await IVRVoice.findByPk(req.params.id);
+    if (!voice) {
+      return res.status(404).json({ message: "Voice not found" });
+    }
 
-// Get All Voices
+    // Full path where files are physically stored
+    const fullFilePath = path.join(__dirname, "..", "voice", path.basename(voice.file_path));
+
+    console.log("Attempting to play file:", fullFilePath);
+
+    if (!fs.existsSync(fullFilePath)) {
+      return res.status(404).json({ message: "Audio file not found on server" });
+    }
+
+    res.sendFile(fullFilePath);
+  } catch (error) {
+    console.error("Error serving audio:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+ 
+ 
+ 
+ 
+//Get All Voices
 router.get("/voices", getAllVoices);
 
 // Get One Voice by ID

@@ -9,8 +9,7 @@ const createVoice = async (req, res) => {
   }
 
   const { file_name } = req.body;
-  const file_path = `/wcf-ivr-voice/${req.file.filename}`;
-
+  const file_path = `/voice/${req.file.filename}`;
   try {
     const voice = await IVRVoice.create({ file_name, file_path });
     res.status(201).json(voice);
@@ -65,17 +64,25 @@ const deleteVoice = async (req, res) => {
     const voice = await IVRVoice.findByPk(req.params.id);
     if (!voice) return res.status(404).json({ message: "Voice not found" });
 
-    // Delete the file from the server
-    const filePath = path.join(__dirname, "..", voice.file_path);
-    fs.unlinkSync(filePath); // Remove the file from the server
+    // Absolute path to the voice file
+    const filePath = path.join(__dirname, "..", "voice", path.basename(voice.file_path));
 
-    // Remove the record from the database
+    // Delete the file from the server, if it exists
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    } else {
+      console.warn("Voice file does not exist:", filePath);
+    }
+
+    // Remove DB record
     await voice.destroy();
     res.status(204).send();
   } catch (error) {
+    console.error("Error deleting voice:", error);
     res.status(500).json({ error: error.message });
   }
 };
+
 
 module.exports = {
   createVoice,

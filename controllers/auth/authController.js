@@ -30,134 +30,6 @@ const registerSuperAdmin = async () => {
   }
 };
 
-// const login = async (req, res) => {
-//   const { email, password } = req.body;
-
-//   // Find user by email
-//   const user = await User.findOne({ where: { email } });
-//   if (!user) {
-//     return res.status(400).json({ message: "Invalid email or password" });
-//   }
-
-//   // Initialize failed login attempts if not set
-//   if (!user.failedLoginAttempts || isNaN(user.failedLoginAttempts)) {
-//     user.failedLoginAttempts = 0; // Initialize if undefined or NaN
-//   }
-
-//   console.log(
-//     `User before incrementing: Failed login attempts = ${user.failedLoginAttempts}`
-//   );
-
-//   // Check if user is locked out
-//   if (user.failedLoginAttempts >= 3) {
-//     const lockoutTime = 5 * 60 * 1000; // 5 minutes in milliseconds
-//     const lastFailedLoginTime = new Date(user.lastFailedLogin);
-
-//     // Check if lastFailedLogin is a valid date
-//     if (isNaN(lastFailedLoginTime.getTime())) {
-//       return res
-//         .status(400)
-//         .json({ message: "Invalid last failed login time" });
-//     }
-
-//     const timePassed = new Date().getTime() - lastFailedLoginTime.getTime();
-//     console.log(`Time passed since last failed login: ${timePassed} ms`);
-
-//     if (timePassed < lockoutTime) {
-//       const timeRemaining = lockoutTime - timePassed;
-//       const minutesRemaining = Math.ceil(timeRemaining / 60000); // Time remaining in minutes
-//       console.log(
-//         `Account is locked. Try again in ${minutesRemaining} minute(s).`
-//       );
-//       return res.status(400).json({
-//         message: `Your account is locked. Try again in ${minutesRemaining} minute${
-//           minutesRemaining > 1 ? "s" : ""
-//         }.`,
-//         timeRemaining,
-//       });
-//     } else {
-//       // Reset failed attempts after lockout time has passed
-//       user.failedLoginAttempts = 0;
-//       user.lastFailedLogin = null;
-
-//       try {
-//         await user.save();
-//         console.log("Lockout period passed. Resetting failed attempts.");
-//       } catch (err) {
-//         console.error("Error resetting user lockout:", err);
-//         return res.status(500).json({ message: "Internal server error" });
-//       }
-//     }
-//   }
-
-//   // Check password
-//   const isMatch = await bcrypt.compare(password, user.password);
-//   if (!isMatch) {
-//     // Increment failed login attempts
-//     user.failedLoginAttempts = user.failedLoginAttempts + 1;
-//     user.lastFailedLogin = new Date();
-
-//     // Log the user data before saving for debugging
-//     console.log(
-//       "User data before save:",
-//       user.failedLoginAttempts,
-//       user.lastFailedLogin
-//     );
-
-//     try {
-//       // Ensure user is saved to the database
-//       await user.save();
-
-//       // Log the updated data after saving
-//       console.log("User data after save:", user.failedLoginAttempts);
-//     } catch (err) {
-//       console.error("Error saving user:", err);
-//       return res.status(500).json({ message: "Internal server error" });
-//     }
-
-//     return res.status(400).json({ message: "Invalid email or password" });
-//   }
-
-//   // Ensure account is active
-//   if (!user.isActive) {
-//     return res.status(400).json({ message: "Account is inactive" });
-//   }
-
-//   // Set user status to "online"
-//   user.status = "online";
-//   await user.save();
-
-//   // Generate JWT token
-//   const token = jwt.sign(
-//     { userId: user.id, role: user.role },
-//     process.env.JWT_SECRET,
-//     { expiresIn: "1h" }
-//   );
-
-//   // Log agent login in AgentLoginLog
-//   if (user.role === "agent") {
-//     await AgentLoginLog.create({
-//       userId: user.id,
-//       role: "agent",
-//       loginTime: new Date(),
-//       logoutTime: null, // Will be updated on logout
-//       totalOnlineTime: 0, // Will be calculated later
-//     });
-//     console.log(`Agent ${user.name} logged in.`);
-//   }
-
-//   res.json({
-//     message: "Login successful",
-//     token,
-//     user: {
-//       name: user.name,
-//       isActive: user.isActive,
-//       role: user.role,
-//       id: user.id,
-//     },
-//   });
-// };
-
 
 const login = async (req, res) => {
   const { email, password } = req.body;
@@ -187,7 +59,7 @@ const login = async (req, res) => {
   const token = jwt.sign(
     { userId: user.id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: "1h" }
+    { expiresIn: "24h" }
   );
 
   // Log agent login in AgentLoginLog

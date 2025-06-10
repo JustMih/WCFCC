@@ -3,7 +3,7 @@ const User = require('../../models/User');
 const FunctionData = require('../../models/FunctionData');
 const Function = require('../../models/Function');
 const Section = require('../../models/Section');
-
+const Notification = require('../../models/Notification');
 
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
@@ -147,11 +147,12 @@ const getTicketCounts = async (req, res) => {
   }
 };
 
-
 const generateTicketId = () => {
   const random = Math.floor(100000 + Math.random() * 900000);
   return `WCF-CC-${random}`;
 };
+
+
 const createTicket = async (req, res) => {
   try {
     const {
@@ -169,21 +170,35 @@ const createTicket = async (req, res) => {
       functionId,
       description,
       status,
-      subject
+      subject,
+      responsible_unit_id,
+      responsible_unit_name,
+      section,
+      sub_section
     } = req.body;
 
-    const ticketId = generateTicketId();
-    const userId = req.user.userId;
-    
+    const userId = req?.user?.userId; // Use optional chaining for safety
+
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
     }
 
-    // Validate required fields
     if (!subject) {
       return res.status(400).json({ message: "Subject is required." });
     }
 
+    const ticketId = generateTicketId();
+    const responsibleUnit = await Function.findOne({
+      where: { id: functionId || responsible_unit_id },
+      include: [
+        {
+          model: Section,
+          as: 'section'
+        }
+      ]
+    });
+
+    // Create the ticket
     const newTicket = await Ticket.create({
       ticket_id: ticketId,
       first_name: firstName,
@@ -197,12 +212,45 @@ const createTicket = async (req, res) => {
       region,
       district,
       category,
-      function_id: functionId,
+      responsible_unit_id: responsible_unit_id || functionId,
+      responsible_unit_name: responsible_unit_name || responsibleUnit?.section?.name || 'Unit',
+      section: section || responsibleUnit?.section?.name || 'Unit',
+      sub_section: sub_section || responsibleUnit?.name || '',  // Use provided sub_section or function name
+      subject: subject || '',  // Use provided subject
       description,
-      subject,
       status: status || 'Open',
       created_by: userId,
     });
+
+    // Determine who to assign the ticket to
+    let assignedUser;
+
+    if (category === 'Inquiry') {
+      assignedUser = await User.findOne({
+        where: { role: 'focal-person' },
+        order: [['id', 'ASC']]
+      });
+    } else if (['Complaint', 'Suggestion', 'Compliment', 'Social Media'].includes(category)) {
+      assignedUser = await User.findOne({
+        where: { role: 'coordinator' },
+        // order: [['id', 'ASC']]
+      });
+    }
+    console.log(assignedUser);
+    // If an assignee was found, update ticket and notify
+    if (assignedUser) {
+      await newTicket.update({ assigned_to: assignedUser.id });
+
+      await Notification.create({
+        ticket_id: newTicket.id,           // maps to ticket_id
+        sender_id: userId,                 // maps to sender_id
+        recipient_id: assignedUser.id,     // maps to recipient_id
+        message: `New ${category} ticket assigned to you: ${subject}`,
+        channel: channel,
+        status: 'unread'
+      });
+      
+    }
 
     return res.status(201).json({
       message: "Ticket created successfully",
@@ -210,148 +258,13 @@ const createTicket = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Ticket creation error:", error.stack);
-    return res.status(500).json({ message: "Internal server error", error: error.message });
+    console.error("Ticket creation error:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
   }
 };
-
-
-
-
-// const createTicket = async (req, res) => {
-//   try {
-//     console.log("Request Body:", req.body);
-
-//     let {
-//       firstName,
-//       middleName,
-//       lastName,
-//       phoneNumber,
-//       employer,
-//       title,
-//       description,
-//       priority,
-//       status,
-//       category, // New field: Complaint, Inquiry, etc.
-//       nida_number,
-//       subject,
-//       region,
-//       district
-//     } = req.body;
-
-//     const userId = req.user.userId;
-
-//     // Validate input
-//     const errors = validationResult(req);
-//     if (!errors.isEmpty()) {
-//       return res.status(400).json({ errors: errors.array() });
-//     }
-
-//     // Basic field checks
-//     const required = [];
-//     if (!firstName) required.push("firstName");
-//     if (!lastName) required.push("lastName");
-//     if (!phoneNumber) required.push("phoneNumber");
-//     if (!employer) required.push("imployer");
-//     if (!section) required.push("section");
-//     if (!category) required.push("category");
-//     if (!subject) required.push("subject");
-//     if (!description) required.push("description");
-//     if (!category) required.push("category");
-
-//     if (required.length) {
-//       return res.status(400).json({
-//         message: "Missing required fields",
-//         missingFields: required
-//       });
-//     }
-
-//     // Defaults
-//     status = status || "Open";
-//     ticket_id
-
-//     const validPriorities = ["Low", "Medium", "High", "Urgent"];
-//     const validStatuses = ["Open", "In Progress", "Carried Forward", "Closed", "Assigned"];
-
-//     if (!validPriorities.includes(priority)) {
-//       return res.status(400).json({
-//         message: "Invalid priority value",
-//         allowedValues: validPriorities
-//       });
-//     }
-
-//     if (!validStatuses.includes(status)) {
-//       return res.status(400).json({
-//         message: "Invalid status value",
-//         allowedValues: validStatuses
-//       });
-//     }
-
-//     // Create base ticket
-//     const ticket = await Ticket.create({
-//       firstName,
-//       middleName,
-//       lastName,
-//       phone_number: phoneNumber,
-//       nida_number,
-//       institution,
-//       title,
-//       description,
-//       priority,
-//       status: "Open",
-//       category,
-//       subject,
-//       region,
-//       district,
-//       userId,
-//       created_at: new Date(),
-//       updated_at: new Date()
-//     });
-
-//     // === Auto-assignment logic === //
-//     if (category === "Inquiry") {
-//       // 1. Try finding officer assigned to this user
-//       const officer = await AssignedOfficer.findOne({
-//         where: {
-//           [Op.or]: [
-//             { nida_number },
-//             { phone_number: phoneNumber }
-//           ]
-//         }
-//       });
-
-//       if (officer) {
-//         ticket.assigned_to_id = officer.assigned_to_id;
-//         ticket.status = "Assigned";
-//       } else {
-//         const focal = await User.findOne({ where: { role: "focal-person" } });
-//         if (focal) {
-//           ticket.assigned_to_id = focal.id;
-//           ticket.status = "Assigned";
-//         }
-//       }
-//       await ticket.save();
-//     }
-
-//     if (category === "Complaint") {
-//       const coordinator = await User.findOne({ where: { role: "coordinator" } });
-//       if (coordinator) {
-//         ticket.assigned_to_id = coordinator.id;
-//         ticket.status = "Assigned";
-//         await ticket.save();
-//       }
-//     }
-
-//     return res.status(201).json({
-//       message: "Ticket created successfully",
-//       ticket
-//     });
-//   } catch (error) {
-//     console.error("Error creating ticket:", error);
-//     return res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
-
 
 const getTickets = async (req, res) => {
   try {
@@ -467,7 +380,6 @@ const getOpenTickets = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 
 const getAssignedTickets = async (req, res) => {
   try {
@@ -705,7 +617,6 @@ const getClosedTickets = async (req, res) => {
   }
 };
 
-
 const getOverdueTickets = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -772,30 +683,6 @@ const getOverdueTickets = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
-// const getAllCustomersTickets = async (req, res) => {
-//   try {
-//     const tickets = await Ticket.findAll({
-//       order: [["created_at", "DESC"]],
-//       include: [
-//         {
-//           model: User,
-//           as: "creator",
-//           attributes: ["id", "name"],
-//         },
-//       ],
-//     });
-
-//     return res.status(200).json({
-//       message: "Tickets fetched successfully",
-//       totalTickets: tickets.length,
-//       tickets,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching tickets:", error.stack);
-//     return res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
 
 const getAllCustomersTickets = async (req, res) => {
   try {
@@ -1080,6 +967,120 @@ const mockComplaintWorkflow = async (req, res) => {
   }
 };
 
+const searchByPhoneNumber = async (req, res) => {
+  try {
+    const { phoneNumber } = req.params;
+
+    if (!phoneNumber) {
+      return res.status(400).json({ message: "Phone number is required" });
+    }
+
+    const tickets = await Ticket.findAll({
+      where: {
+        [Op.or]: [
+          { phone_number: phoneNumber },
+          { nida_number: phoneNumber }
+        ]
+      },
+      order: [['created_at', 'DESC']],
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'role']
+        }
+      ]
+    });
+
+    if (tickets.length === 0) {
+      return res.status(200).json({
+        found: false,
+        message: "No tickets found for this phone number"
+      });
+    }
+
+    return res.status(200).json({
+      found: true,
+      message: "Tickets found successfully",
+      tickets: tickets
+    });
+
+  } catch (error) {
+    console.error("Error searching tickets by phone number:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
+const getTicketById = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: Section,
+          as: 'responsibleSection',
+          attributes: ['id', 'name'],
+          include: [
+            {
+              model: Function,
+              as: 'functions',
+              attributes: ['id', 'name'],
+              include: [
+                {
+                  model: FunctionData,
+                  as: 'functionData',
+                  attributes: ['id', 'name']
+                }
+              ]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'attendedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'ratedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'convertedBy',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'forwardedBy',
+          attributes: ['id', 'name', 'email']
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    return res.status(200).json({ ticket });
+  } catch (error) {
+    console.error("Error fetching ticket:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1092,5 +1093,7 @@ module.exports = {
   getOverdueTickets,
   getAllTickets,
   getAllCustomersTickets,
-  mockComplaintWorkflow
+  mockComplaintWorkflow,
+  searchByPhoneNumber,
+  getTicketById
 };
