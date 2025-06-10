@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-// const auth = require('../middleware/auth');
 const PerformanceController = require('../controllers/perfomance/performanceController');
 
 // Get individual and team performance metrics for a specific agent
