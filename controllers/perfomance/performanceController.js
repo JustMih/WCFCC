@@ -1,162 +1,292 @@
-const sequelize = require("../../config/mysql_connection");
-const { DataTypes, Op, fn, col, literal } = require("sequelize");
-const moment = require("moment");
+const PerformanceScoreCard = require('../../models/PerformanceScoreCard');
+const CDR = require('../../models/CDR');
+const QueueLog = require('../../models/QueueLog');
+const { Op, Sequelize } = require('sequelize');
+const sequelize = require('../../config/database');
+const ami = require('asterisk-ami-client');
 
-const CEL = require("../../models/CEL")(sequelize, DataTypes);
-const CDR = require("../../models/CDR")(sequelize, DataTypes);
+const PerformanceController = {
+    // Get individual and team performance metrics for a specific agent
+    getAgentPerformance: async (req, res) => {
+        try {
+            const { agentId } = req.params;
+            const today = new Date();
+            const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+            const endOfDay = new Date(today.setHours(23, 59, 59, 999));
 
-// 1. Average Handling Time (AHT) - based on billsec from CDR
-async function getAverageHandlingTime(agentId) {
-  const where = agentId !== "all"
-    ? { src: agentId, disposition: "ANSWERED" }
-    : { disposition: "ANSWERED" };
+            console.log('Fetching performance data for agent:', agentId);
 
-  const result = await CDR.findOne({
-    attributes: [[fn("AVG", col("billsec")), "avg_aht"]],
-    where,
-    raw: true,
-  });
+            // Get today's performance metrics
+            const performanceData = await PerformanceScoreCard.findOne({
+                where: {
+                    agentId,
+                    date: {
+                        [Op.between]: [startOfDay, endOfDay]
+                    }
+                }
+            });
 
-  return Math.round(result?.avg_aht || 0);
-}
+            // Get queue performance
+            const queueStats = await QueueLog.findAll({
+                where: {
+                    agent: agentId,
+                    time: {
+                        [Op.between]: [startOfDay, endOfDay]
+                    }
+                },
+                attributes: [
+                    'event',
+                    [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+                ],
+                group: ['event']
+            });
 
-// 2. First Response Time (FRT) - stub
-async function getFirstResponseTime(agentId) {
-  // TODO: Implement actual response time from CHAN_START → ANSWER in CEL
-  return 45;
-}
+            // Connect to Asterisk AMI with specific credentials
+            const amiClient = new ami({
+                host: '10.52.0.19',
+                port: 5038,
+                username: 'admin',
+                password: '@Ttcl123'
+            });
 
-// 3. First Call Resolution (FCR) - % of unique dst without repeat within 24h
-async function getFirstCallResolution(agentId) {
-  const where = agentId !== "all" ? { src: agentId } : {};
+            // Get agent status and performance data
+            const getAgentData = () => {
+                return new Promise((resolve, reject) => {
+                    amiClient.connect()
+                        .then(() => {
+                            console.log('Connected to Asterisk AMI');
+                            
+                            // Get Queue Status
+                            amiClient.action({
+                                action: 'QueueStatus',
+                                queue: 'default'
+                            }, (err, res) => {
+                                if (err) {
+                                    console.error('Error getting queue status:', err);
+                                    reject(err);
+                                    return;
+                                }
+                                console.log('Queue status response:', res);
 
-  const [uniqueCallers, repeatCallers] = await Promise.all([
-    CDR.count({
-      distinct: true,
-      col: "dst",
-      where,
-    }),
-    CDR.count({
-      where: {
-        ...where,
-        calldate: {
-          [Op.gt]: moment().subtract(24, "hours").toDate(),
-        },
-      },
-    }),
-  ]);
+                                // Get Agent Status
+                                amiClient.action({
+                                    action: 'Agents',
+                                    agent: agentId
+                                }, (err, agentRes) => {
+                                    if (err) {
+                                        console.error('Error getting agent status:', err);
+                                        reject(err);
+                                        return;
+                                    }
+                                    console.log('Agent status response:', agentRes);
 
-  const repeat = Math.min(repeatCallers, uniqueCallers);
-  return uniqueCallers > 0
-    ? parseFloat(((uniqueCallers - repeat) / uniqueCallers) * 100).toFixed(1)
-    : 0;
-}
+                                    // Get Queue Summary
+                                    amiClient.action({
+                                        action: 'QueueSummary',
+                                        queue: 'default'
+                                    }, (err, summaryRes) => {
+                                        if (err) {
+                                            console.error('Error getting queue summary:', err);
+                                            reject(err);
+                                            return;
+                                        }
+                                        console.log('Queue summary response:', summaryRes);
 
-// 4. Average Speed of Answer (ASA) - stub
-async function getAverageSpeedOfAnswer(agentId) {
-  // TODO: Implement using time between RINGING and ANSWER in CEL
-  return 30;
-}
+                                        // Get Core Show Channels
+                                        amiClient.action({
+                                            action: 'CoreShowChannels'
+                                        }, (err, channelsRes) => {
+                                            if (err) {
+                                                console.error('Error getting channels:', err);
+                                                reject(err);
+                                                return;
+                                            }
+                                            console.log('Channels response:', channelsRes);
 
-// 5. Abandonment Rate (AVAR) - calls that didn't reach ANSWER
-async function getAbandonRate(agentId) {
-  const filter = agentId !== "all" ? { cid_num: agentId } : {};
+                                            amiClient.disconnect();
+                                            console.log('Disconnected from Asterisk AMI');
 
-  const [totalCalls, answeredCalls] = await Promise.all([
-    CEL.count({ where: { eventtype: "CHAN_START", ...filter } }),
-    CEL.count({ where: { eventtype: "ANSWER", ...filter } }),
-  ]);
+                                            // Process the data
+                                            const agentData = {
+                                                status: agentRes?.response?.Status || 'Unknown',
+                                                calls: {
+                                                    total: 0,
+                                                    active: 0,
+                                                    completed: 0,
+                                                    duration: 0
+                                                },
+                                                queue: {
+                                                    position: 0,
+                                                    calls: 0,
+                                                    completed: 0,
+                                                    abandoned: 0,
+                                                    holdTime: 0,
+                                                    talkTime: 0
+                                                }
+                                            };
 
-  const abandoned = totalCalls - answeredCalls;
-  return totalCalls > 0
-    ? parseFloat((abandoned / totalCalls) * 100).toFixed(1)
-    : 0;
-}
+                                            // Process queue status
+                                            if (res?.response) {
+                                                const agentInQueue = res.response.find(q => q.Name === agentId);
+                                                if (agentInQueue) {
+                                                    agentData.queue.position = agentInQueue.Position || 0;
+                                                    agentData.queue.calls = agentInQueue.Calls || 0;
+                                                }
+                                            }
 
-// 6. Unanswered Rate - from CDR disposition
-async function getUnansweredRate(agentId) {
-  const filter = agentId !== "all" ? { src: agentId } : {};
+                                            // Process queue summary
+                                            if (summaryRes?.response) {
+                                                const queueSummary = summaryRes.response.find(q => q.Queue === 'default');
+                                                if (queueSummary) {
+                                                    agentData.queue.completed = queueSummary.Completed || 0;
+                                                    agentData.queue.abandoned = queueSummary.Abandoned || 0;
+                                                    agentData.queue.holdTime = queueSummary.Holdtime || 0;
+                                                    agentData.queue.talkTime = queueSummary.TalkTime || 0;
+                                                }
+                                            }
 
-  const [total, noAnswer] = await Promise.all([
-    CDR.count({ where: filter }),
-    CDR.count({ where: { ...filter, disposition: "NO ANSWER" } }),
-  ]);
+                                            // Process active channels
+                                            if (channelsRes?.response) {
+                                                const agentChannels = channelsRes.response.filter(ch => 
+                                                    ch.Channel.includes(agentId) || 
+                                                    ch.Channel.includes(`Local/${agentId}`)
+                                                );
+                                                agentData.calls.active = agentChannels.length;
+                                                agentData.calls.total = agentData.calls.active + 
+                                                    (agentData.queue.completed || 0);
+                                            }
 
-  return total > 0 ? parseFloat((noAnswer / total) * 100).toFixed(1) : 0;
-}
+                                            resolve(agentData);
+                                        });
+                                    });
+                                });
+                            });
+                        })
+                        .catch(err => {
+                            console.error('AMI connection error:', err);
+                            reject(err);
+                        });
+                });
+            };
 
-// 7. Customer Satisfaction (CSAT) - stubbed
-async function getCustomerSatisfaction(agentId) {
-  // TODO: Pull from surveys if available
-  return 92;
-}
+            // Get real-time data from Asterisk
+            const agentData = await getAgentData();
 
-// ⬇️ Combine all metrics for an agent
-async function getIndividualMetrics(agentId) {
-  try {
-    const [aht, frt, fcr, asa, avar, unanswered, cs] = await Promise.all([
-      getAverageHandlingTime(agentId),
-      getFirstResponseTime(agentId),
-      getFirstCallResolution(agentId),
-      getAverageSpeedOfAnswer(agentId),
-      getAbandonRate(agentId),
-      getUnansweredRate(agentId),
-      getCustomerSatisfaction(agentId),
-    ]);
+            // Create default metrics if no data found
+            const defaultMetrics = {
+                averageHandlingTime: 0,
+                firstResponseTime: 0,
+                firstCallResolution: 0,
+                customerSatisfaction: 0,
+                totalCalls: 0,
+                resolvedCalls: 0,
+                abandonedCalls: 0,
+                unansweredCalls: 0
+            };
 
-    return { aht, frt, fcr, asa, avar, unanswered, cs };
-  } catch (error) {
-    console.error("Error fetching individual metrics:", error);
-    throw error;
-  }
-}
+            // If no performance data exists for today, create a new entry
+            if (!performanceData) {
+                console.log('No performance data found for today, creating new entry');
+                const newPerformanceData = await PerformanceScoreCard.create({
+                    agentId,
+                    date: new Date(),
+                    ...defaultMetrics
+                });
+                console.log('Created new performance entry:', newPerformanceData.toJSON());
+            }
 
-// ⬇️ Team average = aggregated using agentId = "all"
-async function getTeamAverageMetrics() {
-  return await getIndividualMetrics("all");
-}
-
-// ⬇️ Route handler: /api/performance/:agentId
-async function getAgentPerformance(req, res) {
-    try {
-      const { agentId } = req.params;
-      const individual = await getIndividualMetrics(agentId);
-      const team = await getTeamAverageMetrics();
-  
-      res.json({
-        success: true,
-        message: "Agent performance metrics retrieved successfully",
-        data: {
-          agentId,
-          individual,
-          team
+            res.status(200).json({
+                success: true,
+                message: 'Agent performance metrics retrieved successfully',
+                data: {
+                    agentId,
+                    performanceMetrics: performanceData?.toJSON() || defaultMetrics,
+                    realTimeMetrics: {
+                        status: agentData.status,
+                        calls: agentData.calls,
+                        queue: agentData.queue
+                    },
+                    queueMetrics: queueStats.reduce((acc, stat) => {
+                        acc[stat.event] = stat.dataValues.count;
+                        return acc;
+                    }, {})
+                }
+            });
+        } catch (error) {
+            console.error('Error in getAgentPerformance:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error retrieving agent performance metrics',
+                error: error.message
+            });
         }
-      });
-    } catch (error) {
-      console.error("Error in getAgentPerformance:", error);
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch performance metrics"
-      });
+    },
+
+    // Get team performance metrics
+    getTeamSummary: async (req, res) => {
+        try {
+            const today = new Date();
+            const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+            const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+            // Get team-wide performance metrics
+            const teamPerformance = await PerformanceScoreCard.findAll({
+                where: {
+                    date: {
+                        [Op.between]: [startOfDay, endOfDay]
+                    }
+                },
+                attributes: [
+                    [sequelize.fn('AVG', sequelize.col('averageHandlingTime')), 'avgHandlingTime'],
+                    [sequelize.fn('AVG', sequelize.col('firstResponseTime')), 'avgResponseTime'],
+                    [sequelize.fn('AVG', sequelize.col('firstCallResolution')), 'avgResolutionRate'],
+                    [sequelize.fn('AVG', sequelize.col('customerSatisfaction')), 'avgSatisfaction'],
+                    [sequelize.fn('SUM', sequelize.col('totalCalls')), 'totalTeamCalls'],
+                    [sequelize.fn('SUM', sequelize.col('resolvedCalls')), 'totalResolvedCalls']
+                ]
+            });
+
+            // Get team-wide queue statistics
+            const teamQueueStats = await QueueLog.findAll({
+                where: {
+                    time: {
+                        [Op.between]: [startOfDay, endOfDay]
+                    }
+                },
+                attributes: [
+                    'event',
+                    [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+                ],
+                group: ['event']
+            });
+
+            res.status(200).json({
+                success: true,
+                message: 'Team performance summary retrieved successfully',
+                data: {
+                    teamMetrics: teamPerformance[0]?.dataValues || {
+                        avgHandlingTime: 0,
+                        avgResponseTime: 0,
+                        avgResolutionRate: 0,
+                        avgSatisfaction: 0,
+                        totalTeamCalls: 0,
+                        totalResolvedCalls: 0
+                    },
+                    queueMetrics: teamQueueStats.reduce((acc, stat) => {
+                        acc[stat.event] = stat.dataValues.count;
+                        return acc;
+                    }, {})
+                }
+            });
+        } catch (error) {
+            console.error('Error in getTeamSummary:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error retrieving team performance summary',
+                error: error.message
+            });
+        }
     }
-  }
-  
-
-// ⬇️ Route handler: /api/performance/team/summary
-async function getTeamSummary(req, res) {
-  try {
-    const team = await getTeamAverageMetrics();
-    res.json(team);
-  } catch (error) {
-    console.error("Error in getTeamSummary:", error);
-    res.status(500).json({ error: "Failed to fetch team metrics" });
-  }
-}
-
-// ✅ Exports
-module.exports = {
-  getIndividualMetrics,
-  getTeamAverageMetrics,
-  getAgentPerformance,
-  getTeamSummary,
 };
+
+module.exports = PerformanceController; 
