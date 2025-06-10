@@ -16,6 +16,7 @@ const sectionRoutes = require("./sectionRoutes");
 const getCallsRoutes = require("./callsRoutes");
 const notificationRoutes = require("./notificationRoutes");
 const complaintWorkflowRoutes = require("./complaintWorkflowRoutes");
+const focalPersonRoutes = require("./focalPersonRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -35,4 +36,5 @@ router.use("/section", sectionRoutes);
 router.use("/calls", getCallsRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/complaints', complaintWorkflowRoutes);
+router.use('/focal-person', focalPersonRoutes);
 module.exports = router;

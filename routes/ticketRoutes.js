@@ -3,7 +3,7 @@ const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets,
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
-  mockComplaintWorkflow, searchByPhoneNumber, getTicketById
+  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -120,5 +120,8 @@ router.get('/:ticketId',
   roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getTicketById
 );
+
+// Route for coordinator to close tickets
+router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
 
 module.exports = router;
