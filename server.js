@@ -89,7 +89,7 @@ app.use("/api/livestream", livestreamRoutes);
 // Setup Socket.IO with CORS
 const io = new Server(server, {
   cors: {
-    origin:  "*",
+    origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
     methods: ["GET", "POST"],
     credentials: true
   }
