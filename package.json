@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@faker-js/faker": "^9.8.0",
+    "asterisk-ami-client": "^1.1.5",
     "asterisk-manager": "^0.2.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
