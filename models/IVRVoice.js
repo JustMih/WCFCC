@@ -3,7 +3,6 @@ const sequelize = require("../config/mysql_connection");
 
 // Import the IVRDTMFMapping model
 const IVRDTMFMapping = require("./ivr_dtmf_mappings.model");
-
 const IVRVoice = sequelize.define("IVRVoice", {
   id: {
     type: DataTypes.UUID,
@@ -17,6 +16,11 @@ const IVRVoice = sequelize.define("IVRVoice", {
   file_path: {
     type: DataTypes.STRING,
     allowNull: false,
+  },
+  language: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: "swahili", // or "english"
   },
 });
 
