@@ -20,32 +20,36 @@ const IVRVoice = require("../../models/IVRVoice");
 //     res.status(500).json({ error: error.message });
 //   }
 // };
+ 
 const createVoice = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
 
-  const { file_name, language } = req.body;
-  const extension = path.extname(req.file.originalname).toLowerCase(); // preserve .wav or .mp3
-  const targetFileName = `${file_name}${extension}`;
-  const finalPath = path.join(__dirname, "..", "..", "public", "voice", targetFileName); // assuming express.static serves /public
+  const { file_name, language, dtmf_digit, menu_context } = req.body;
+  if (!file_name || !language || !dtmf_digit || !menu_context) {
+    return res.status(400).json({ error: "file_name, language, dtmf_digit, and menu_context are required" });
+  }
+
+  const file_path = `/voice/${req.file.filename}`; // e.g., /voice/1749549545079.wav
 
   try {
-    // Move and rename uploaded file
-    fs.renameSync(req.file.path, finalPath);
+    // Create IVRVoice entry
+    const voice = await IVRVoice.create({ file_name, file_path, language });
 
-    const voice = await IVRVoice.create({
-      file_name,
-      file_path: `/voice/${targetFileName}`,
+    // Create IVRDTMFMappings entry
+    await IVRDTMFMappings.create({
+      dtmf_digit,
+      menu_context,
       language,
+      ivr_voice_id: voice.id,
     });
 
-    res.status(201).json(voice);
+    res.status(201).json({ voice, mapping: { dtmf_digit, menu_context, language } });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
-
 
 // Get All Voices
 const getAllVoices = async (req, res) => {
