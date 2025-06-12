@@ -1,5 +1,5 @@
 const sequelize = require('../../config/database');
-const { DataTypes, Op, fn, col } = require('sequelize');
+const { DataTypes, Op, fn, col, where, literal } = require('sequelize');
 const moment = require('moment');
 const AsteriskManager = require('asterisk-manager');
 
@@ -17,10 +17,12 @@ const PerformanceController = {
       const startOfDay = moment().startOf('day').toDate();
       const endOfDay = moment().endOf('day').toDate();
 
+      const dstPattern = `PJSIP/${agentId}-%`;
+
       const ahtResult = await CDR.findOne({
         attributes: [[fn('AVG', col('billsec')), 'avgAHT']],
         where: {
-          src: agentId,
+          dstchannel: { [Op.like]: dstPattern },
           disposition: 'ANSWERED',
           cdrstarttime: { [Op.between]: [startOfDay, endOfDay] }
         },
@@ -29,9 +31,9 @@ const PerformanceController = {
       const aht = parseInt(ahtResult?.avgAHT || 0);
 
       const [totalCalls, resolvedCalls, unansweredCalls] = await Promise.all([
-        CDR.count({ where: { src: agentId, cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } }),
-        CDR.count({ where: { src: agentId, disposition: 'ANSWERED', cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } }),
-        CDR.count({ where: { src: agentId, disposition: 'NO ANSWER', cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } })
+        CDR.count({ where: { dstchannel: { [Op.like]: dstPattern }, cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } }),
+        CDR.count({ where: { dstchannel: { [Op.like]: dstPattern }, disposition: 'ANSWERED', cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } }),
+        CDR.count({ where: { dstchannel: { [Op.like]: dstPattern }, disposition: 'NO ANSWER', cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } })
       ]);
 
       const [chanStart, answerEvents] = await Promise.all([
@@ -41,8 +43,8 @@ const PerformanceController = {
       const abandonedCalls = Math.max(chanStart - answerEvents, 0);
 
       const [uniqueDst, repeatCalls] = await Promise.all([
-        CDR.count({ distinct: true, col: 'dst', where: { src: agentId, cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } }),
-        CDR.count({ where: { src: agentId, cdrstarttime: { [Op.gt]: moment().subtract(24, 'hours').toDate() } } })
+        CDR.count({ distinct: true, col: 'src', where: { dstchannel: { [Op.like]: dstPattern }, cdrstarttime: { [Op.between]: [startOfDay, endOfDay] } } }),
+        CDR.count({ where: { dstchannel: { [Op.like]: dstPattern }, cdrstarttime: { [Op.gt]: moment().subtract(24, 'hours').toDate() } } })
       ]);
       const repeat = Math.min(repeatCalls, uniqueDst);
       const fcr = uniqueDst > 0 ? parseFloat(((uniqueDst - repeat) / uniqueDst) * 100).toFixed(1) : 0;
@@ -142,7 +144,7 @@ const PerformanceController = {
         error: error.message
       });
     }
-  }, // ✅ <- COMMA ADDED HERE
+  },
 
   getTeamSummary: async (req, res) => {
     try {

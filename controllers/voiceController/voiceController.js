@@ -3,18 +3,43 @@ const fs = require("fs");
 const IVRVoice = require("../../models/IVRVoice");
 
 // Create Voice Entry (with file upload)
+// const createVoice = async (req, res) => {
+//   if (!req.file) {
+//     return res.status(400).json({ error: "No file uploaded" });
+//   }
+
+//   const { file_name } = req.body;
+//   const file_path = `/voice/${req.file.filename}`;
+//   const { language } = req.body;
+// // Then include `language` in the model creation
+
+//   try {
+//     const voice = await IVRVoice.create({ file_name, file_path,language });
+//     res.status(201).json(voice);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// };
 const createVoice = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
 
-  const { file_name } = req.body;
-  const file_path = `/voice/${req.file.filename}`;
-  const { language } = req.body;
-// Then include `language` in the model creation
+  const { file_name, language } = req.body;
+  const extension = path.extname(req.file.originalname).toLowerCase(); // preserve .wav or .mp3
+  const targetFileName = `${file_name}${extension}`;
+  const finalPath = path.join(__dirname, "..", "..", "public", "voice", targetFileName); // assuming express.static serves /public
 
   try {
-    const voice = await IVRVoice.create({ file_name, file_path,language });
+    // Move and rename uploaded file
+    fs.renameSync(req.file.path, finalPath);
+
+    const voice = await IVRVoice.create({
+      file_name,
+      file_path: `/voice/${targetFileName}`,
+      language,
+    });
+
     res.status(201).json(voice);
   } catch (error) {
     res.status(500).json({ error: error.message });
