@@ -697,6 +697,7 @@ const getOverdueTickets = async (req, res) => {
   }
 };
 
+
 const getAllCustomersTickets = async (req, res) => {
   try {
     const tickets = await Ticket.findAll({
@@ -741,29 +742,17 @@ const getAllCustomersTickets = async (req, res) => {
           as: 'ratedBy',
           attributes: ['id', 'name', 'email']
         },
-        {
-          model: User,
-          as: 'convertedBy',
-          attributes: ['id', 'name', 'email']
-        },
-        {
-          model: User,
-          as: 'forwardedBy',
-          attributes: ['id', 'name', 'email']
-        }
-      ],
-      attributes: [
-        'id', 'ticket_id', 'first_name', 'middle_name', 'last_name',
-        'phone_number', 'nida_number', 'requester', 'institution',
-        'region', 'district', 'subject', 'category', 'sub_section',
-        'section', 'channel', 'description', 'complaint_type',
-        'converted_to', 'status', 'request_registered_date',
-        'date_of_resolution', 'date_of_feedback', 'date_of_review_resolution',
-        'resolution_details', 'aging_days', 'responsible_unit_name',
-        'converted_at', 'forwarded_at', 'assigned_to_role',
-        'created_at', 'updated_at', 'created_by', 'assigned_to_id',
-        'attended_by_id', 'rated_by_id', 'converted_by_id', 'forwarded_by_id',
-        'responsible_unit_id'
+        // Commented out for simplicity (can be re-added if needed)
+        // {
+        //   model: User,
+        //   as: 'convertedBy',
+        //   attributes: ['id', 'name', 'email']
+        // },
+        // {
+        //   model: User,
+        //   as: 'forwardedBy',
+        //   attributes: ['id', 'name', 'email']
+        // }
       ]
     });
 
@@ -777,6 +766,7 @@ const getAllCustomersTickets = async (req, res) => {
     return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
 
 const getAllTickets = async (req, res) => {
   try {
