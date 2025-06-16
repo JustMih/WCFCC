@@ -182,7 +182,7 @@ const createTicket = async (req, res) => {
     } = req.body;
 
     const userId = req?.user?.userId;
-
+    console.log("userId", userId);
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
     }
@@ -240,7 +240,7 @@ const createTicket = async (req, res) => {
       subject: subject || '',
       description,
       status: initialStatus,
-      created_by: userId,
+      userId: userId,
       assigned_to: assignedUser.id
     };
 

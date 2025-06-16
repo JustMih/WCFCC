@@ -418,10 +418,8 @@ const getTicketsByCategoryAndType = async (req, res) => {
       case "new":
         switch (type) {
           case "complaints":
-            whereClause = { category: "Complaint" };
-            break;
-          case "tickets":
-            whereClause = { status: "Open" };
+            whereClause [Op.and] = { category: "Complaint" };
+            { status: "Open" };
             break;
           case "escalated":
             whereClause = { status: "Escalated" };
