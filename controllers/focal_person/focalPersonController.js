@@ -3,7 +3,7 @@ const User = require("../../models/User");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { Op, Sequelize } = require("sequelize");
 
-const getFocalPersonTickets = async (req, res) => {
+ const getFocalPersonTickets = async (req, res) => {
   try {
     const inquiries = await Ticket.findAll({
       where: {

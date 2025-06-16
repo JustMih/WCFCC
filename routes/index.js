@@ -17,6 +17,7 @@ const getCallsRoutes = require("./callsRoutes");
 const notificationRoutes = require("./notificationRoutes");
 const complaintWorkflowRoutes = require("./complaintWorkflowRoutes");
 const focalPersonRoutes = require("./focalPersonRoutes");
+const instagramComments = require("./instagramWebhookRoutes");
 const router = express.Router();
 
 router.use("/users", userRoutes);
@@ -37,4 +38,6 @@ router.use("/calls", getCallsRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/complaints', complaintWorkflowRoutes);
 router.use('/focal-person', focalPersonRoutes);
+router.use('/', instagramComments);
+
 module.exports = router;
