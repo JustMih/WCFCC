@@ -6,22 +6,24 @@ const bcrypt = require('bcryptjs');
 
 module.exports = {
   async up(queryInterface) {
-    // const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID;
-    // // const now = new Date();
-    // const users = [
-    //   { name: 'Anna Agent', email: 'agent@wcf.go.tz', phone_number: '0712000001', role: 'agent' },
-    //   { name: 'Ben Attendee', email: 'attendee@wcf.go.tz', phone_number: '0712000002', role: 'attendee' },
-    //   { name: 'Juma Attendee', email: 'attendeejuma@wcf.go.tz', phone_number: '0712000012', role: 'attendee' },
-    //   { name: 'Amina Attendee', email: 'attendeeamina@wcf.go.tz', phone_number: '0712000202', role: 'attendee' },
-    //   { name: 'Caroline Focal', email: 'focal@wcf.go.tz', phone_number: '0712003003', role: 'focal-person' },
-    //   { name: 'John Attendee', email: 'attendeejohn@wcf.go.tz', phone_number: '0712020002', role: 'attendee' },
-    //   { name: 'Hawa Attendee', email: 'attendeehawa@wcf.go.tz', phone_number: '0712029002', role: 'attendee' },
-    //   { name: 'David Director', email: 'director@wcf.go.tz', phone_number: '0712000004', role: 'director' },
-    //   { name: 'Emily Manager', email: 'manager@wcf.go.tz', phone_number: '0712000005', role: 'manager' },
-    //   { name: 'Frank Head', email: 'headofunit@wcf.go.tz', phone_number: '0712000006', role: 'head-of-unit' },
-    //   { name: 'Grace Coordinator', email: 'coordinator@wcf.go.tz', phone_number: '0712000007', role: 'coordinator' },
-    //   { name: 'Henry DG', email: 'dg@wcf.go.tz', phone_number: '0712000008', role: 'director-general' },
-    // ];
+    const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID;
+    // const now = new Date();
+    const users = [
+      { name: 'Anna Agent', email: 'agent@wcf.go.tz', phone_number: '0712000001', role: 'agent' },
+      { name: 'Ben Attendee', email: 'attendee@wcf.go.tz', phone_number: '0712000002', role: 'attendee' },
+      { name: 'Juma Attendee', email: 'attendeejuma@wcf.go.tz', phone_number: '0712000012', role: 'attendee' },
+      { name: 'Amina Attendee', email: 'attendeeamina@wcf.go.tz', phone_number: '0712000202', role: 'attendee' },
+      { name: 'Rehema Focal', email: 'rehema.said3@ttcl.co.tz', phone_number: '0673554743', role: 'focal-person' },
+      { name: 'Caroline Focal', email: 'focal@wcf.go.tz', phone_number: '0712003003', role: 'focal-person' },
+      { name: 'John Attendee', email: 'attendeejohn@wcf.go.tz', phone_number: '0712020002', role: 'attendee' },
+      { name: 'Hawa Attendee', email: 'attendeehawa@wcf.go.tz', phone_number: '0712029002', role: 'attendee' },
+      { name: 'David Director', email: 'director@wcf.go.tz', phone_number: '0712000004', role: 'director' },
+      { name: 'Emily Manager', email: 'manager@wcf.go.tz', phone_number: '0712000005', role: 'manager' },
+      { name: 'Frank Head', email: 'headofunit@wcf.go.tz', phone_number: '0712000006', role: 'head-of-unit' },
+      { name: 'Grace Coordinator', email: 'coordinator@wcf.go.tz', phone_number: '0712000007', role: 'coordinator' },
+      { name: 'Henry DG', email: 'dg@wcf.go.tz', phone_number: '0712000008', role: 'director-general' },
+      { name: 'George Supervisor', email: 'supervisor@wcf.go.tz', phone_number: '0712000048', role: 'supervisor' },
+    ];
 
     // const hashedPassword = await bcrypt.hash('user12345', 10);
 

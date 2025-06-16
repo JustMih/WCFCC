@@ -33,6 +33,13 @@ module.exports = {
       type: Sequelize.DATE,
       allowNull: true
     });
+
+    await queryInterface.addColumn('Tickets', 'responsible_unit_name', {
+      type: Sequelize.STRING,
+      allowNull: true,
+      after: 'responsible_unit_id'
+    });
+
   },
 
   async down(queryInterface, Sequelize) {
@@ -40,5 +47,6 @@ module.exports = {
     await queryInterface.removeColumn('Tickets', 'forwarded_at');
     await queryInterface.removeColumn('Tickets', 'converted_by_id');
     await queryInterface.removeColumn('Tickets', 'converted_at');
+    await queryInterface.removeColumn('Tickets', 'responsible_unit_name');
   }
 };

@@ -4,6 +4,8 @@ const FunctionData = require('../../models/FunctionData');
 const Function = require('../../models/Function');
 const Section = require('../../models/Section');
 const Notification = require('../../models/Notification');
+const { sendTicketEmail } = require('../../services/emailService');
+
 
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
@@ -170,10 +172,16 @@ const createTicket = async (req, res) => {
       functionId,
       description,
       status,
-      subject
+      subject,
+      responsible_unit_id,
+      responsible_unit_name,
+      section,
+      sub_section,
+      shouldClose,
+      resolution_details
     } = req.body;
 
-    const userId = req?.user?.userId; // Use optional chaining for safety
+    const userId = req?.user?.userId;
 
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
@@ -183,10 +191,36 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ message: "Subject is required." });
     }
 
-    const ticketId = generateTicketId();
+    // Find the assignee based on ticket category
+    let assignedUser;
+    if (category === 'Inquiry') {
+      assignedUser = await User.findOne({
+        where: { role: 'focal-person' },
+        attributes: ['id', 'name'],
+        order: [['id', 'ASC']]
+      });
+    } else if (['Complaint', 'Suggestion', 'Compliment'].includes(category)) {
+      assignedUser = await User.findOne({
+        where: { role: 'coordinator' },
+        attributes: ['id', 'name']
+      });
+    }
 
-    // Create the ticket
-    const newTicket = await Ticket.create({
+    if (!assignedUser) {
+      return res.status(400).json({ 
+        message: `No ${category === 'Inquiry' ? 'focal person' : 'coordinator'} found to assign the ticket to.` 
+      });
+    }
+
+    const ticketId = generateTicketId();
+    const responsibleUnit = await Function.findOne({
+      where: { id: functionId || responsible_unit_id },
+      include: [{ model: Section, as: 'section' }]
+    });
+
+    // Determine initial status and additional fields
+    const initialStatus = shouldClose ? 'Closed' : (status || 'Open');
+    const ticketData = {
       ticket_id: ticketId,
       first_name: firstName,
       middle_name: middleName || '',
@@ -199,45 +233,39 @@ const createTicket = async (req, res) => {
       region,
       district,
       category,
-      function_id: functionId,
+      responsible_unit_id: responsible_unit_id || functionId,
+      responsible_unit_name: responsible_unit_name || responsibleUnit?.section?.name || 'Unit',
+      section: section || responsibleUnit?.section?.name || 'Unit',
+      sub_section: sub_section || responsibleUnit?.name || '',
+      subject: subject || '',
       description,
-      subject,
-      status: status || 'Open',
+      status: initialStatus,
       created_by: userId,
+      assigned_to: assignedUser.id
+    };
+
+    // Add resolution details if closing immediately
+    if (shouldClose) {
+      ticketData.resolution_details = resolution_details || 'Ticket resolved during creation';
+      ticketData.date_of_resolution = new Date();
+      ticketData.attended_by_id = userId;
+    }
+
+    // Create the ticket
+    const newTicket = await Ticket.create(ticketData);
+
+    // Create notification for assignee
+    await Notification.create({
+      ticket_id: newTicket.id,
+      sender_id: userId,
+      recipient_id: assignedUser.id,
+      message: `New ${category} ticket ${shouldClose ? '(Closed)' : ''} assigned to you: ${subject}`,
+      channel: channel,
+      status: 'unread'
     });
 
-    // Determine who to assign the ticket to
-    let assignedUser;
-
-    if (category === 'Inquiry') {
-      assignedUser = await User.findOne({
-        where: { role: 'focal-person' },
-        order: [['id', 'ASC']]
-      });
-    } else if (['Complaint', 'Suggestion', 'Compliment', 'Social Media'].includes(category)) {
-      assignedUser = await User.findOne({
-        where: { role: 'coordinator' },
-        // order: [['id', 'ASC']]
-      });
-    }
-    console.log(assignedUser);
-    // If an assignee was found, update ticket and notify
-    if (assignedUser) {
-      await newTicket.update({ assigned_to: assignedUser.id });
-
-      await Notification.create({
-        ticket_id: newTicket.id,           // maps to ticket_id
-        sender_id: userId,                 // maps to sender_id
-        recipient_id: assignedUser.id,     // maps to recipient_id
-        message: `New ${category} ticket assigned to you: ${subject}`,
-        channel: channel,
-        status: 'unread'
-      });
-      
-    }
-
     return res.status(201).json({
-      message: "Ticket created successfully",
+      message: `Ticket created successfully${shouldClose ? ' and closed' : ''}`,
       ticket: newTicket
     });
 
@@ -249,6 +277,7 @@ const createTicket = async (req, res) => {
     });
   }
 };
+
 
 const getTickets = async (req, res) => {
   try {
@@ -1065,6 +1094,166 @@ const getTicketById = async (req, res) => {
   }
 };
 
+const closeTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { resolution_details, userId } = req.body;
+
+    if (!ticketId) {
+      return res.status(400).json({ message: "Ticket ID is required" });
+    }
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name']
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Update ticket status and add resolution details
+    await ticket.update({
+      status: 'Closed',
+      resolution_details: resolution_details || 'Ticket closed by agent',
+      date_of_resolution: new Date(),
+      attended_by_id: userId
+    });
+
+    // Create notification for ticket creator
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: ticket.created_by,
+      message: `Your ticket ${ticket.ticket_id} has been closed`,
+      status: 'unread'
+    });
+
+    return res.status(200).json({
+      message: "Ticket closed successfully",
+      ticket
+    });
+
+  } catch (error) {
+    console.error("Error closing ticket:", error);
+    return res.status(500).json({
+      message: "Failed to close ticket",
+      error: error.message
+    });
+  }
+};
+
+const closeCoordinatorTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { 
+      resolution_details,
+      userId,
+      resolution_type // e.g., 'Resolved', 'Not Applicable', 'Duplicate'
+    } = req.body;
+
+    // Validate inputs
+    if (!ticketId || !userId || !resolution_details) {
+      return res.status(400).json({ 
+        message: "Ticket ID, user ID, and resolution details are required" 
+      });
+    }
+
+    // Find the ticket and include relevant associations
+    const ticket = await Ticket.findOne({
+      where: { 
+        id: ticketId,
+        category: {
+          [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] // Allow all coordinator-managed categories
+        }
+      },
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name']
+        },
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'role']
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ 
+        message: "Ticket not found or not a coordinator-managed ticket type" 
+      });
+    }
+
+    // Check if the user is authorized (must be a coordinator)
+    const coordinator = await User.findOne({
+      where: { 
+        id: userId,
+        role: 'coordinator'
+      }
+    });
+
+    if (!coordinator) {
+      return res.status(403).json({ 
+        message: "Only coordinators can close these types of tickets" 
+      });
+    }
+
+    // Update the ticket
+    await ticket.update({
+      status: 'Closed',
+      resolution_details,
+      resolution_type: resolution_type || 'Resolved',
+      date_of_resolution: new Date(),
+      attended_by_id: userId
+    });
+
+    // Create notification for the ticket creator
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: ticket.created_by,
+      message: `Your ${ticket.category.toLowerCase()} ticket ${ticket.ticket_id} has been resolved and closed`,
+      status: 'unread'
+    });
+
+    // If there was a focal person or other assignee involved, notify them too
+    if (ticket.assigned_to && ticket.assigned_to !== userId) {
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: ticket.assigned_to,
+        message: `${ticket.category} ticket ${ticket.ticket_id} has been resolved and closed by coordinator`,
+        status: 'unread'
+      });
+    }
+
+    return res.status(200).json({
+      message: `${ticket.category} closed successfully`,
+      ticket: {
+        ...ticket.toJSON(),
+        resolution_date: new Date(),
+        resolved_by: coordinator.name
+      }
+    });
+
+  } catch (error) {
+    console.error("Error closing ticket:", error);
+    return res.status(500).json({
+      message: "Failed to close ticket",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1079,5 +1268,7 @@ module.exports = {
   getAllCustomersTickets,
   mockComplaintWorkflow,
   searchByPhoneNumber,
-  getTicketById
+  getTicketById,
+  closeTicket,
+  closeCoordinatorTicket
 };
