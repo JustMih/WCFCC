@@ -45,6 +45,10 @@ const Ticket = sequelize.define(
       type: DataTypes.ENUM('Inquiry', 'Complaint', 'Suggestion', 'Compliment', 'Congrats'),
       allowNull: false
     },
+    inquiry_type: {
+      type: DataTypes.ENUM('Claims', 'Compliance'),
+      allowNull: true
+    },
     sub_section: DataTypes.STRING(100),
     section: DataTypes.STRING(100),
     channel: { type: DataTypes.STRING(50), allowNull: false },

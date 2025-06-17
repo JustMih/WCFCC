@@ -169,6 +169,7 @@ const createTicket = async (req, res) => {
       region,
       district,
       category,
+      inquiry_type,
       functionId,
       description,
       status,
@@ -191,14 +192,33 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ message: "Subject is required." });
     }
 
-    // Find the assignee based on ticket category
+    // Validate inquiry_type for Inquiry category
+    if (category === 'Inquiry' && !inquiry_type) {
+      return res.status(400).json({ message: "Inquiry type (Claims or Compliance) is required for Inquiry category." });
+    }
+
+    // Find the assignee based on ticket category and inquiry type
     let assignedUser;
     if (category === 'Inquiry') {
-      assignedUser = await User.findOne({
-        where: { role: 'focal-person' },
-        attributes: ['id', 'name'],
-        order: [['id', 'ASC']]
-      });
+      if (inquiry_type === 'Claims') {
+        // Find Claims Checklist User (focal person for Claims section)
+        assignedUser = await User.findOne({
+          where: { 
+            role: 'focal-person',
+            section: 'Claims'
+          },
+          attributes: ['id', 'name']
+        });
+      } else if (inquiry_type === 'Compliance') {
+        // Find Compliance Officer for the employer
+        assignedUser = await User.findOne({
+          where: { 
+            role: 'attendee',
+            section: 'Compliance'
+          },
+          attributes: ['id', 'name']
+        });
+      }
     } else if (['Complaint', 'Suggestion', 'Compliment'].includes(category)) {
       assignedUser = await User.findOne({
         where: { role: 'coordinator' },
@@ -208,7 +228,7 @@ const createTicket = async (req, res) => {
 
     if (!assignedUser) {
       return res.status(400).json({ 
-        message: `No ${category === 'Inquiry' ? 'focal person' : 'coordinator'} found to assign the ticket to.` 
+        message: `No appropriate user found to assign the ${category} ticket to.` 
       });
     }
 
@@ -233,6 +253,7 @@ const createTicket = async (req, res) => {
       region,
       district,
       category,
+      inquiry_type,
       responsible_unit_id: responsible_unit_id || functionId,
       responsible_unit_name: responsible_unit_name || responsibleUnit?.section?.name || 'Unit',
       section: section || responsibleUnit?.section?.name || 'Unit',
@@ -1244,6 +1265,28 @@ const closeCoordinatorTicket = async (req, res) => {
   }
 };
 
+
+
+const getClaimsWithValidNumbers = async (req, res) => {
+  try {
+    const response = await axios.get("https://demomspapi.wcf.go.tz/api/v1/search/details");
+
+    // Filter entries where claim_number is NOT null
+    const filteredClaims = response.data.filter(item => item.firstname !== null);
+
+    res.status(200).json({
+      message: "Filtered claims fetched successfully",
+      total: filteredClaims.length,
+      data: filteredClaims,
+    });
+
+  } catch (error) {
+    console.error("Error fetching claims:", error.message);
+    res.status(500).json({ message: "Failed to fetch claims", error: error.message });
+  }
+};
+
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1260,5 +1303,6 @@ module.exports = {
   searchByPhoneNumber,
   getTicketById,
   closeTicket,
-  closeCoordinatorTicket
+  closeCoordinatorTicket,
+  getClaimsWithValidNumbers
 };
