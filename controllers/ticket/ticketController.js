@@ -178,7 +178,7 @@ const createTicket = async (req, res) => {
       subject,
       responsible_unit_id,
       responsible_unit_name,
-      section,
+      section: inputSection,
       sub_section,
       shouldClose,
       resolution_details,
@@ -212,10 +212,12 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ message: "Inquiry type (Claims or Compliance) is required for Inquiry category." });
     }
 
+   
+
     // --- Assignment Logic ---
     let assignedUser = null;
-    // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.finance';
+    let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    // let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.finance';
    
     if (category === 'Inquiry') {
       // Claims or Compliance
@@ -230,7 +232,7 @@ const createTicket = async (req, res) => {
         assignedUser = await User.findOne({
           where: {
             role: 'focal-person',
-            unit_section: section || responsible_unit_name // Use section/unit if available
+            unit_section: finalSection || responsible_unit_name // Use section/unit if available
           },
           attributes: ['id', 'name', 'email', 'role', 'unit_section']
         });
@@ -281,7 +283,14 @@ const createTicket = async (req, res) => {
       ticketPhoneNumber = requesterPhoneNumber;
       requesterFullName = requesterName;
     }
+
+
+    let finalSection = inputSection;
+    if (finalSection === 'Unit') {
+      finalSection = sub_section;
+    }
     const ticketData = {
+      
       ticket_id: ticketId,
       first_name: firstName,
       middle_name: middleName || '',
@@ -296,8 +305,8 @@ const createTicket = async (req, res) => {
       category,
       inquiry_type,
       responsible_unit_id: responsible_unit_id || functionId,
-      responsible_unit_name: responsible_unit_name || responsibleUnit?.section?.name || 'Unit',
-      section: section || responsibleUnit?.section?.name || 'Unit',
+      responsible_unit_name: responsible_unit_name || finalSection,
+      section: finalSection || responsibleUnit?.section?.name || 'Unit',
       sub_section: sub_section || responsibleUnit?.name || '',
       subject: subject || '',
       description,
