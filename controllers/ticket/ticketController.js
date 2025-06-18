@@ -4,7 +4,6 @@ const FunctionData = require('../../models/FunctionData');
 const Function = require('../../models/Function');
 const Section = require('../../models/Section');
 const Notification = require('../../models/Notification');
-const { sendTicketEmail } = require('../../services/emailService');
 const AgentLoginLog = require("../../models/agent_activity_logs");
 const ChatMassage = require("../../models/chart_message")
 const bcrypt = require("bcryptjs");
@@ -202,69 +201,62 @@ const createTicket = async (req, res) => {
     } = req.body;
 
     const userId = req?.user?.userId;
-    console.log("userId", userId);
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
     }
-
     if (!subject) {
       return res.status(400).json({ message: "Subject is required." });
     }
-
     // Validate inquiry_type for Inquiry category
     if (category === 'Inquiry' && !inquiry_type) {
       return res.status(400).json({ message: "Inquiry type (Claims or Compliance) is required for Inquiry category." });
     }
 
-    // Find the assignee based on ticket category and inquiry type
-    let assignedUser;
+    // --- Assignment Logic ---
+    let assignedUser = null;
+    // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.finance';
+   
     if (category === 'Inquiry') {
-      if (inquiry_type === 'Claims') {
-        // Find Claims Checklist User (focal person for Claims section)
+      // Claims or Compliance
+      if (allocatedUserUsername) {
         assignedUser = await User.findOne({
-          where: { 
-            role: 'focal-person',
-            section: 'Claims'
-          },
-          attributes: ['id', 'name', 'email'] // Include email for notifications
-        });
-      } else if (inquiry_type === 'Compliance') {
-        // Find Compliance Officer for the employer
-        assignedUser = await User.findOne({
-          where: { 
-            role: 'attendee',
-            section: 'Compliance'
-          },
-          attributes: ['id', 'name', 'email'] // Include email for notifications
+          where: { username: allocatedUserUsername },
+          attributes: ['id', 'name', 'email', 'role', 'unit_section']
         });
       }
-    } else if (['Complaint', 'Suggestion', 'Compliment'].includes(category)) {
+      if (!assignedUser) {
+        // Fallback to focal person for the section/unit
+        assignedUser = await User.findOne({
+          where: {
+            role: 'focal-person',
+            unit_section: section || responsible_unit_name // Use section/unit if available
+          },
+          attributes: ['id', 'name', 'email', 'role', 'unit_section']
+        });
+      }
+    } else if (["Complaint", "Suggestion", "Compliment"].includes(category)) {
+      // Assign to coordinator
       assignedUser = await User.findOne({
         where: { role: 'coordinator' },
-        attributes: ['id', 'name', 'email'] // Include email for notifications
+        attributes: ['id', 'name', 'email', 'role', 'unit_section']
       });
     }
-
     if (!assignedUser) {
-      return res.status(400).json({ 
-        message: `No appropriate user found to assign the ${category} ticket to.` 
-      });
+      return res.status(400).json({ message: `No appropriate user found to assign the ${category} ticket to.` });
     }
 
+    // --- Ticket Data Preparation ---
     const ticketId = generateTicketId();
     const responsibleUnit = await Function.findOne({
       where: { id: functionId || responsible_unit_id },
       include: [{ model: Section, as: 'section' }]
     });
-
-    // Determine initial status and additional fields
     const initialStatus = shouldClose ? 'Closed' : (status || 'Open');
-    
     let ticketEmployerId = null;
     let ticketPhoneNumber = phoneNumber;
     let ticketInstitution = institution;
     let requesterFullName = `${firstName} ${lastName || ''}`;
-
     // Handle Employer details and association
     if (requester === 'Employer') {
       let employer = await Employer.findOne({ where: { registration_number: employerRegistrationNumber } });
@@ -282,23 +274,22 @@ const createTicket = async (req, res) => {
         });
       }
       ticketEmployerId = employer.id;
-      ticketPhoneNumber = employerPhone; // Use employer's phone for ticket
-      ticketInstitution = employerName; // Use employer's name for institution
-      requesterFullName = employerName; // Use employer name for notifications
+      ticketPhoneNumber = employerPhone;
+      ticketInstitution = employerName;
+      requesterFullName = employerName;
     } else if (requester === 'Representative') {
-      ticketPhoneNumber = requesterPhoneNumber; // Use representative's phone for ticket
-      requesterFullName = requesterName; // Use representative name for notifications
+      ticketPhoneNumber = requesterPhoneNumber;
+      requesterFullName = requesterName;
     }
-
     const ticketData = {
       ticket_id: ticketId,
       first_name: firstName,
       middle_name: middleName || '',
       last_name: lastName,
-      phone_number: ticketPhoneNumber, // Use the determined phone number
+      phone_number: ticketPhoneNumber,
       nida_number: nidaNumber,
       requester,
-      institution: ticketInstitution, // Use the determined institution
+      institution: ticketInstitution,
       channel,
       region,
       district,
@@ -313,20 +304,16 @@ const createTicket = async (req, res) => {
       status: initialStatus,
       userId: userId,
       assigned_to: assignedUser.id,
-      employerId: ticketEmployerId, // Link to employer if applicable
+      employerId: ticketEmployerId,
     };
-
-    // Add resolution details if closing immediately
     if (shouldClose) {
       ticketData.resolution_details = resolution_details || 'Ticket resolved during creation';
       ticketData.date_of_resolution = new Date();
       ticketData.attended_by_id = userId;
     }
-
-    // Create the ticket
+    // --- Ticket Creation ---
     const newTicket = await Ticket.create(ticketData);
-
-    // If requester is a representative, save their details
+    // Save representative details if applicable
     if (requester === 'Representative') {
       await RequesterDetails.create({
         ticketId: newTicket.id,
@@ -337,24 +324,41 @@ const createTicket = async (req, res) => {
         relationshipToEmployee: relationshipToEmployee,
       });
     }
+    // --- SMS Notification ---
+    // let smsRecipient = String(ticketPhoneNumber || '').replace(/^"+/, '').replace(/^0/, '255');
+    // const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+    // if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
+    //   const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+    //   try {
+    //     // await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+    //     await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+    //     console.log("SMS sent (test) to 255673554743");
+    //   } catch (smsError) {
+    //     console.error("Error sending SMS:", smsError.message);
+    //     console.error("Error sending SMS:", smsError.message);
+    //   }
+    // }
 
-    // Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
-    let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
-    const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+    
 
-    if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
-      const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
-      try {
-        await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
-        console.log("SMS sent successfully to", smsRecipient);
-      } catch (smsError) {
-        console.error("Error sending SMS:", smsError.message);
-      }
-    } else {
-      console.log('Not sending SMS, invalid phone:', smsRecipient);
-    }
+// Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
+let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
+const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
 
-    // Send email notification to the assigned user
+if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
+  const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+  try {
+    await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+    console.log("SMS sent successfully to", smsRecipient);
+  } catch (smsError) {
+    console.error("Error sending SMS:", smsError.message);
+  }
+} else {
+  console.log('Not sending SMS, invalid phone:', smsRecipient);
+}
+
+    // --- Email Notification to Assignee ---
+    let emailWarning = '';
     if (assignedUser.email) {
       const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
@@ -373,15 +377,15 @@ const createTicket = async (req, res) => {
         <p>WCF Customer Care System</p>
       `;
       try {
-        // Use hardcoded email for dev, assignedUser.email for prod
-        await sendEmail({ to:'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
-        console.log("Email sent successfully to", 'rehema.said3@ttcl.co.tz');
+        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
       } catch (emailError) {
-        console.error("Error sending email:", emailError.message);
+        // console.error("Error sending email:", emailError.message);
+        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+        emailWarning += ' (Warning: Failed to send email to assignee.)';
       }
     }
-
-    // Create notification for assignee
+    // --- Notification for Assignee ---
     await Notification.create({
       ticket_id: newTicket.id,
       sender_id: userId,
@@ -390,12 +394,30 @@ const createTicket = async (req, res) => {
       channel: channel,
       status: 'unread'
     });
-
+    // --- Email to Supervisor if Closed on Creation ---
+    if (shouldClose) {
+      const supervisor = await User.findOne({
+        where: {
+          role: 'supervisor',
+          unit_section: newTicket.section
+        },
+        attributes: ['id', 'name', 'email']
+      });
+      if (supervisor && supervisor.email) {
+        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        const emailBody = `The following ticket has been closed by the agent: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        try {
+          await sendEmail({ to: supervisor.email, subject: emailSubject, htmlBody: emailBody });
+        } catch (emailError) {
+          console.error("Error sending email to supervisor:", emailError.message);
+          emailWarning += ' (Warning: Failed to send email to supervisor.)';
+        }
+      }
+    }
     return res.status(201).json({
-      message: `Ticket created successfully${shouldClose ? ' and closed' : ''}`,
+      message: `Ticket created successfully${shouldClose ? ' and closed' : ''}${emailWarning}`,
       ticket: newTicket
     });
-
   } catch (error) {
     console.error("Ticket creation error:", error);
     return res.status(500).json({
@@ -1208,6 +1230,23 @@ const getTicketById = async (req, res) => {
   }
 };
 
+// Helper to notify all users with a given role
+async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, message) {
+  const users = await User.findAll({ where: { role: roles } });
+  for (const user of users) {
+    if (user.email) {
+      await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+    }
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: senderId,
+      recipient_id: user.id,
+      message,
+      status: 'unread'
+    });
+  }
+}
+
 const closeTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
@@ -1240,14 +1279,11 @@ const closeTicket = async (req, res) => {
       attended_by_id: userId
     });
 
-    // Create notification for ticket creator
-    await Notification.create({
-      ticket_id: ticketId,
-      sender_id: userId,
-      recipient_id: ticket.created_by,
-      message: `Your ticket ${ticket.ticket_id} has been closed`,
-      status: 'unread'
-    });
+    // Notify all coordinators and supervisors
+    const notifySubject = `Ticket Closed: ${ticket.subject}`;
+    const notifyHtml = `<p>The following ticket has been closed: ${ticket.subject} (ID: ${ticket.ticket_id})</p>`;
+    const notifyMsg = `Ticket ${ticket.ticket_id} has been closed.`;
+    await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject, notifyHtml, ticketId, userId, notifyMsg);
 
     return res.status(200).json({
       message: "Ticket closed successfully",
@@ -1330,14 +1366,11 @@ const closeCoordinatorTicket = async (req, res) => {
       attended_by_id: userId
     });
 
-    // Create notification for the ticket creator
-    await Notification.create({
-      ticket_id: ticketId,
-      sender_id: userId,
-      recipient_id: ticket.created_by,
-      message: `Your ${ticket.category.toLowerCase()} ticket ${ticket.ticket_id} has been resolved and closed`,
-      status: 'unread'
-    });
+    // Notify all coordinators and supervisors
+    const notifySubject2 = `Ticket Closed: ${ticket.subject}`;
+    const notifyHtml2 = `<p>The following ticket has been closed: ${ticket.subject} (ID: ${ticket.ticket_id})</p>`;
+    const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed.`;
+    await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject2, notifyHtml2, ticketId, userId, notifyMsg2);
 
     // If there was a focal person or other assignee involved, notify them too
     if (ticket.assigned_to && ticket.assigned_to !== userId) {

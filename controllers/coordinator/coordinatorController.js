@@ -1029,6 +1029,38 @@ const channelComplaint = async (req, res) => {
   }
 };
 
+// Coordinator closes a ticket
+const closeCoordinatorTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { resolution_details } = req.body;
+    const coordinatorId = req.user.userId;
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    await ticket.update({
+      status: 'Closed',
+      resolution_details: resolution_details || 'Ticket closed by coordinator',
+      date_of_resolution: new Date(),
+      attended_by_id: coordinatorId
+    });
+
+    res.status(200).json({
+      message: "Ticket closed successfully by coordinator",
+      ticket
+    });
+  } catch (error) {
+    console.error("Error closing ticket by coordinator:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   getAllCoordinatorComplaints,
   rateAndRegisterComplaint,
@@ -1044,5 +1076,6 @@ module.exports = {
   getCarriedForwardTickets,
   getClosedTickets,
   getOverdueTickets,
-  getTicketsByStatus
+  getTicketsByStatus,
+  closeCoordinatorTicket
 };
