@@ -338,10 +338,11 @@ const createTicket = async (req, res) => {
       });
     }
 
-    // Format phone number for SMS: remove leading +, replace leading 0 with 255
+    // Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
     let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
+    const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
 
-    if ((requester === 'Employee' || requester === 'Representative') && smsRecipient) {
+    if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
       const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
       try {
         await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
@@ -349,6 +350,8 @@ const createTicket = async (req, res) => {
       } catch (smsError) {
         console.error("Error sending SMS:", smsError.message);
       }
+    } else {
+      console.log('Not sending SMS, invalid phone:', smsRecipient);
     }
 
     // Send email notification to the assigned user

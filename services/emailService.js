@@ -8,7 +8,7 @@ const transporter = nodemailer.createTransport({
     user: process.env.MAIL_USERNAME || 'noreply.mac@wcf.go.tz',
     pass: process.env.MAIL_PASSWORD || '@Wcf.2023!!',
   },
-  tls: {
+    tls: {
     rejectUnauthorized: false, // Accept self-signed certs if any
   },
 });
@@ -31,10 +31,10 @@ const sendEmail = async ({ to, subject, htmlBody }) => {
     });
     console.log('Email sent:', info.messageId);
     return info;
-  } catch (error) {
+        } catch (error) {
     console.error('Email send error:', error);
-    throw error;
-  }
+        throw error;
+    }
 };
 
 module.exports = { sendEmail }; 
