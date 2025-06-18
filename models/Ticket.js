@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/mysql_connection');
+const Employer = require('./Employer'); // Import the Employer model
 
 const Ticket = sequelize.define(
   'Ticket',
@@ -18,6 +19,14 @@ const Ticket = sequelize.define(
       allowNull: true,
       field: 'created_by'
     },
+    employerId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'Employers',
+        key: 'id',
+      },
+    },
     assigned_to_id: DataTypes.UUID,
     attended_by_id: DataTypes.UUID,
     rated_by_id: DataTypes.UUID,
@@ -29,9 +38,9 @@ const Ticket = sequelize.define(
     assigned_officer_id: DataTypes.UUID,
 
     // Personal Information
-    first_name: { type: DataTypes.STRING(50), allowNull: false },
-    middle_name: DataTypes.STRING(50),
-    last_name: { type: DataTypes.STRING(50), allowNull: false },
+    first_name: { type: DataTypes.STRING(50), allowNull: true },
+    middle_name: { type: DataTypes.STRING(50), allowNull: true },
+    last_name: { type: DataTypes.STRING(50), allowNull: true },
     phone_number: { type: DataTypes.STRING(20), allowNull: false },
     nida_number: DataTypes.STRING(20),
     requester: { type: DataTypes.STRING(100), allowNull: false },
@@ -108,6 +117,7 @@ Ticket.associate = (models) => {
   Ticket.belongsTo(models.User, { foreignKey: 'converted_by_id', as: 'convertedBy' });
   Ticket.belongsTo(models.User, { foreignKey: 'forwarded_by_id', as: 'forwardedBy' });
   Ticket.belongsTo(models.User, { foreignKey: 'assigned_by', as: 'assignedBy' });
+  Ticket.belongsTo(models.Employer, { foreignKey: 'employerId', as: 'employer' });
 
   Ticket.belongsTo(models.Section, { foreignKey: 'responsible_unit_id', as: 'responsibleSection' });
   Ticket.belongsTo(models.Function, { foreignKey: 'responsible_unit_id', as: 'responsibleUnit' });

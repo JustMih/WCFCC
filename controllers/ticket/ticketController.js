@@ -5,11 +5,15 @@ const Function = require('../../models/Function');
 const Section = require('../../models/Section');
 const Notification = require('../../models/Notification');
 const { sendTicketEmail } = require('../../services/emailService');
-
-
+const AgentLoginLog = require("../../models/agent_activity_logs");
+const ChatMassage = require("../../models/chart_message")
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
 const { Op } = require("sequelize");
+const { sendQuickSms } = require("../../services/smsService");
+const { sendEmail } = require('../../services/emailService');
+const RequesterDetails = require("../../models/RequesterDetails");
+const Employer = require("../../models/Employer");
 
 const getTicketCounts = async (req, res) => {
   try {
@@ -154,7 +158,6 @@ const generateTicketId = () => {
   return `WCF-CC-${random}`;
 };
 
-
 const createTicket = async (req, res) => {
   try {
     const {
@@ -179,7 +182,23 @@ const createTicket = async (req, res) => {
       section,
       sub_section,
       shouldClose,
-      resolution_details
+      resolution_details,
+      // New fields for representative
+      requesterName,
+      requesterPhoneNumber,
+      requesterEmail,
+      requesterAddress,
+      relationshipToEmployee,
+      // New fields for employer (when requester is Employer)
+      employerRegistrationNumber,
+      employerName,
+      employerTin,
+      employerPhone,
+      employerEmail,
+      employerStatus,
+      employerAllocatedStaffId,
+      employerAllocatedStaffName,
+      employerAllocatedStaffUsername,
     } = req.body;
 
     const userId = req?.user?.userId;
@@ -207,7 +226,7 @@ const createTicket = async (req, res) => {
             role: 'focal-person',
             section: 'Claims'
           },
-          attributes: ['id', 'name']
+          attributes: ['id', 'name', 'email'] // Include email for notifications
         });
       } else if (inquiry_type === 'Compliance') {
         // Find Compliance Officer for the employer
@@ -216,13 +235,13 @@ const createTicket = async (req, res) => {
             role: 'attendee',
             section: 'Compliance'
           },
-          attributes: ['id', 'name']
+          attributes: ['id', 'name', 'email'] // Include email for notifications
         });
       }
     } else if (['Complaint', 'Suggestion', 'Compliment'].includes(category)) {
       assignedUser = await User.findOne({
         where: { role: 'coordinator' },
-        attributes: ['id', 'name']
+        attributes: ['id', 'name', 'email'] // Include email for notifications
       });
     }
 
@@ -240,15 +259,46 @@ const createTicket = async (req, res) => {
 
     // Determine initial status and additional fields
     const initialStatus = shouldClose ? 'Closed' : (status || 'Open');
+    
+    let ticketEmployerId = null;
+    let ticketPhoneNumber = phoneNumber;
+    let ticketInstitution = institution;
+    let requesterFullName = `${firstName} ${lastName || ''}`;
+
+    // Handle Employer details and association
+    if (requester === 'Employer') {
+      let employer = await Employer.findOne({ where: { registration_number: employerRegistrationNumber } });
+      if (!employer) {
+        employer = await Employer.create({
+          registration_number: employerRegistrationNumber,
+          name: employerName,
+          tin: employerTin,
+          phone: employerPhone,
+          email: employerEmail,
+          employer_status: employerStatus,
+          allocated_staff_id: employerAllocatedStaffId,
+          allocated_staff_name: employerAllocatedStaffName,
+          allocated_staff_username: employerAllocatedStaffUsername,
+        });
+      }
+      ticketEmployerId = employer.id;
+      ticketPhoneNumber = employerPhone; // Use employer's phone for ticket
+      ticketInstitution = employerName; // Use employer's name for institution
+      requesterFullName = employerName; // Use employer name for notifications
+    } else if (requester === 'Representative') {
+      ticketPhoneNumber = requesterPhoneNumber; // Use representative's phone for ticket
+      requesterFullName = requesterName; // Use representative name for notifications
+    }
+
     const ticketData = {
       ticket_id: ticketId,
       first_name: firstName,
       middle_name: middleName || '',
       last_name: lastName,
-      phone_number: phoneNumber,
+      phone_number: ticketPhoneNumber, // Use the determined phone number
       nida_number: nidaNumber,
       requester,
-      institution,
+      institution: ticketInstitution, // Use the determined institution
       channel,
       region,
       district,
@@ -262,7 +312,8 @@ const createTicket = async (req, res) => {
       description,
       status: initialStatus,
       userId: userId,
-      assigned_to: assignedUser.id
+      assigned_to: assignedUser.id,
+      employerId: ticketEmployerId, // Link to employer if applicable
     };
 
     // Add resolution details if closing immediately
@@ -274,6 +325,58 @@ const createTicket = async (req, res) => {
 
     // Create the ticket
     const newTicket = await Ticket.create(ticketData);
+
+    // If requester is a representative, save their details
+    if (requester === 'Representative') {
+      await RequesterDetails.create({
+        ticketId: newTicket.id,
+        name: requesterName,
+        phoneNumber: requesterPhoneNumber,
+        email: requesterEmail,
+        address: requesterAddress,
+        relationshipToEmployee: relationshipToEmployee,
+      });
+    }
+
+    // Format phone number for SMS: remove leading +, replace leading 0 with 255
+    let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
+
+    if ((requester === 'Employee' || requester === 'Representative') && smsRecipient) {
+      const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+      try {
+        await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+        console.log("SMS sent successfully to", smsRecipient);
+      } catch (smsError) {
+        console.error("Error sending SMS:", smsError.message);
+      }
+    }
+
+    // Send email notification to the assigned user
+    if (assignedUser.email) {
+      const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedUser.name},</p>
+        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${newTicket.subject}</li>
+          <li><strong>Category:</strong> ${newTicket.category}</li>
+          <li><strong>Description:</strong> ${newTicket.description}</li>
+          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+          <li><strong>Channel:</strong> ${newTicket.channel}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        // Use hardcoded email for dev, assignedUser.email for prod
+        await sendEmail({ to:'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+        console.log("Email sent successfully to", 'rehema.said3@ttcl.co.tz');
+      } catch (emailError) {
+        console.error("Error sending email:", emailError.message);
+      }
+    }
 
     // Create notification for assignee
     await Notification.create({
@@ -298,7 +401,6 @@ const createTicket = async (req, res) => {
     });
   }
 };
-
 
 const getTickets = async (req, res) => {
   try {
@@ -718,7 +820,6 @@ const getOverdueTickets = async (req, res) => {
   }
 };
 
-
 const getAllCustomersTickets = async (req, res) => {
   try {
     const tickets = await Ticket.findAll({
@@ -787,7 +888,6 @@ const getAllCustomersTickets = async (req, res) => {
     return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 
 const getAllTickets = async (req, res) => {
   try {
@@ -1265,8 +1365,6 @@ const closeCoordinatorTicket = async (req, res) => {
   }
 };
 
-
-
 const getClaimsWithValidNumbers = async (req, res) => {
   try {
     const response = await axios.get("https://demomspapi.wcf.go.tz/api/v1/search/details");
@@ -1285,7 +1383,6 @@ const getClaimsWithValidNumbers = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch claims", error: error.message });
   }
 };
-
 
 module.exports = {
   createTicket,
