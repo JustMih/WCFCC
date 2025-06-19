@@ -6,9 +6,10 @@ const Unit = require("../../models/FunctionData");
 const FunctionModel = require("../../models/Function");
 const Section = require("../../models/Section");
 const { Op, Sequelize } = require("sequelize");
+const TicketAssignment = require("../../models/TicketAssignment");
 
 
-const getAllCoordinatorComplaints = async (req, res) => {
+const getAllCoordinatorTickets = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
@@ -22,9 +23,8 @@ const getAllCoordinatorComplaints = async (req, res) => {
               { status: 'Open' }
             ]
           },
-          { converted_to: null },
-          { responsible_unit_name: null },
-          { complaint_type: null }
+          // { converted_to: null },
+          // { responsible_unit_name: null }
         ]
       }
     });
@@ -227,35 +227,41 @@ const convertOrForwardTicket = async (req, res) => {
 
 const getCoordinatorDashboardCounts = async (req, res) => {
   try {
-    const tenDaysAgo = new Date();
-    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
     const baseNewTicketConditions = [
       { responsible_unit_name: null },
       { complaint_type: { [Op.is]: null } },
       { [Op.or]: [{ status: null }, { status: "Open" }] },
       { converted_to: null },
-      { created_at: { [Op.gte]: tenDaysAgo } }
+      { created_at: { [Op.gte]: threeDaysAgo } }
     ];
 
     const complaintsCount = await Ticket.count({
       where: {
         category: "Complaint",
-        [Op.and]: baseNewTicketConditions
+        [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
+        ]
       }
     });
 
     const suggestionsCount = await Ticket.count({
       where: {
         category: "Suggestion",
-        [Op.and]: baseNewTicketConditions
+        [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
+        ]
       }
     });
 
     const complementsCount = await Ticket.count({
       where: {
         category: "Compliment",
-        [Op.and]: baseNewTicketConditions
+        [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
+        ]
       }
     });
 
@@ -265,10 +271,10 @@ const getCoordinatorDashboardCounts = async (req, res) => {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
         [Op.and]: [
           { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { converted_to: { [Op.is]: null } },
-          { responsible_unit_name: { [Op.is]: null } },
-          { complaint_type: { [Op.is]: null } },
-          { created_at: { [Op.gte]: tenDaysAgo } }
+          // { converted_to: { [Op.is]: null } },
+          // { responsible_unit_name: { [Op.is]: null } },
+          // { complaint_type: { [Op.is]: null } },
+          // { created_at: { [Op.gte]: threeDaysAgo } }
         ]
       }
     });
@@ -282,7 +288,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
           { converted_to: null },
           { responsible_unit_name: null },
           { complaint_type: { [Op.is]: null } },
-          { created_at: { [Op.lt]: tenDaysAgo } }
+          { created_at: { [Op.lt]: threeDaysAgo } }
         ]
       }
     });
@@ -292,11 +298,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { converted_to: null },
-          { responsible_unit_name: null },
-          { complaint_type: { [Op.is]: null } }
-          // No date filter!
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
         ]
       }
     });
@@ -380,7 +382,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
         convertedTickets: {
           Complaints: complaintsCount,
           Suggestions: suggestionsCount,
-          Complements: complementsCount
+          Compliments: complementsCount
         },
         channeledTickets: {
           Directorate: directorateCount,
@@ -418,13 +420,20 @@ const getTicketsByCategoryAndType = async (req, res) => {
       case "new":
         switch (type) {
           case "complaints":
-            whereClause = { category: "Complaint" };
-            break;
-          case "tickets":
-            whereClause = { status: "Open" };
+            whereClause = {
+              category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+              [Op.and]: [
+                { [Op.or]: [{ status: null }, { status: "Open" }] },
+                // { converted_to: { [Op.is]: null } },
+                // { responsible_unit_name: { [Op.is]: null } },
+                // { complaint_type: { [Op.is]: null } },
+                // { created_at: { [Op.gte]: threeDaysAgo } }
+              ]
+            };
             break;
           case "escalated":
-            whereClause = { status: "Escalated" };
+            whereClause = {  created_at: { [Op.gte]: threeDaysAgo } ,
+            category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] }, };
             break;
         }
         break;
@@ -535,11 +544,11 @@ const getTicketsByCategoryAndType = async (req, res) => {
 //   let whereClause = {};
 
 //   if (isOverdue) {
-//     const tenDaysAgo = new Date();
-//     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+//     const threeDaysAgo = new Date();
+//     threeDaysAgo.setDate(threeDaysAgo.getDate() - 10);
 //     whereClause = {
 //       status: 'Open',
-//       created_at: { [Op.lt]: tenDaysAgo }
+//       created_at: { [Op.lt]: threeDaysAgo }
 //     };
 //   } else {
 //     whereClause = { status };
@@ -741,15 +750,7 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { converted_to: { [Op.is]: null } },
-          { responsible_unit_name: { [Op.is]: null } },
-          { complaint_type: { [Op.is]: null } },
-          {
-            created_at: {
-              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
-            }
-          }
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
         ];
         break;
       case "escalated":
@@ -768,55 +769,25 @@ const getTicketsByStatus = async (req, res) => {
           }
         ];
         break;
-        case "complaints":
-        whereClause.category = {
-          [Op.in]: ["Complaint"]
-        };
+      case "complaints":
+        whereClause.category = { [Op.in]: ["Complaint"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { converted_to: { [Op.is]: null } },
-          { responsible_unit_name: { [Op.is]: null } },
-          { complaint_type: { [Op.is]: null } },
-          {
-            created_at: {
-              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
-            }
-          }
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
         ];
         break;
-        case "suggestions":
-        whereClause.category = {
-          [Op.in]: ["Suggestion"]
-        };
+      case "suggestions":
+        whereClause.category = { [Op.in]: ["Suggestion"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { converted_to: { [Op.is]: null } },
-          { responsible_unit_name: { [Op.is]: null } },
-          { complaint_type: { [Op.is]: null } },
-          {
-            created_at: {
-              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
-            }
-          }
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
         ];
         break;
-        case "complements":
-        whereClause.category = {
-          [Op.in]: ["Compliment"]
-        };
+      case "complements":
+        whereClause.category = { [Op.in]: ["Compliment"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }] },
-          { converted_to: { [Op.is]: null } },
-          { responsible_unit_name: { [Op.is]: null } },
-          { complaint_type: { [Op.is]: null } },
-          {
-            created_at: {
-              [Op.gte]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // < 10 days
-            }
-          }
+          { [Op.or]: [{ status: null }, { status: "Open" }] }
         ];
         break;
-        case "directorate":
+      case "directorate":
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
@@ -1031,8 +1002,51 @@ const channelComplaint = async (req, res) => {
   }
 };
 
+// Coordinator closes a ticket
+const closeCoordinatorTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { resolution_details } = req.body;
+    const coordinatorId = req.user.userId;
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    await ticket.update({
+      status: 'Closed',
+      resolution_details: resolution_details || 'Ticket closed by coordinator',
+      date_of_resolution: new Date(),
+      attended_by_id: coordinatorId
+    });
+
+    // Record in Ticket_assignments
+    await TicketAssignment.create({
+      ticket_id: ticket.id,
+      assigned_by_id: coordinatorId,
+      assigned_to_id: coordinatorId,
+      assigned_to_role: 'coordinator',
+      action: 'Closed',
+      reason: resolution_details || 'Ticket closed by coordinator',
+      created_at: new Date()
+    });
+
+    res.status(200).json({
+      message: "Ticket closed successfully by coordinator",
+      ticket
+    });
+  } catch (error) {
+    console.error("Error closing ticket by coordinator:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
-  getAllCoordinatorComplaints,
+  getAllCoordinatorTickets,
   rateAndRegisterComplaint,
   convertToInquiry,
   channelComplaint,
@@ -1046,5 +1060,6 @@ module.exports = {
   getCarriedForwardTickets,
   getClosedTickets,
   getOverdueTickets,
-  getTicketsByStatus
+  getTicketsByStatus,
+  closeCoordinatorTicket
 };

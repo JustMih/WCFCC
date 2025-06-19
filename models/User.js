@@ -62,6 +62,14 @@ const User = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    username: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    unit_section: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
   },
   {
     timestamps: true,

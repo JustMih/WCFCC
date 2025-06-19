@@ -1,11 +1,16 @@
 const express = require("express");
+const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+require("dotenv").config();
 const cors = require("cors");
-const dotenv = require("dotenv");
 const sequelize = require("./config/mysql_connection.js");
 const routes = require("./routes");
 const { registerSuperAdmin } = require("./controllers/auth/authController");
-const recordingRoutes = require('./routes/recordingRoutes');
+const recordingRoutes = require("./routes/recordingRoutes");
+const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
 const ChatMassage = require("./models/chart_message");
+const InstagramComment = require("./models/instagram_comment");;
 const { Server } = require("socket.io");
 const http = require("http");
 const monitorRoutes = require('./routes/monitorRoutes');
@@ -21,7 +26,7 @@ const path = require("path");
 const fs = require("fs");
 const VoiceNote = require('./models/voice_notes.model'); // ✅ Add this at the top
  
-dotenv.config();
+// Initialize Express
 const app = express();
 const server = http.createServer(app);
 
@@ -131,18 +136,31 @@ io.on("connection", (socket) => {
         delete users[id];
       }
     }
+    }
+  });
+
+  socket.on("callStatusUpdate", (callData) => {
+    const { callId, status } = callData;
+    if (status === "Idle" || status === "Ended") {
+      liveCalls.delete(callId);
+    } else {
+      liveCalls.set(callId, callData);
+    }
+    io.emit("dashboardUpdate", Array.from(liveCalls.values()));
   });
 });
 
-// Start the server and sync database
+// Start the server after DB sync
 sequelize.sync({ force: false, alter: false }).then(() => {
-  console.log("Database synced");
-  registerSuperAdmin(); // Ensure Super Admin is created at startup
-  
+  console.log("✅ Database synced");
+  registerSuperAdmin();
+
   const PORT = process.env.PORT || 5070;
-  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  server.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
 }).catch(error => {
-  console.error("Database sync failed:", error);
+  console.error("❌ Database sync failed:", error);
   process.exit(1);
 });
 
