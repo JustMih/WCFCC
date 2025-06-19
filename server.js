@@ -11,8 +11,10 @@ const http = require("http");
 const monitorRoutes = require('./routes/monitorRoutes');
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
+// const livestreamRoutes = require("./routes/livestreamRoutes");
 const livestreamRoutes = require("./routes/livestreamRoutes");
 const { setupSocket } = require("./controllers/livestream/livestreamController");
+ 
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const path = require("path");
@@ -76,10 +78,13 @@ app.use("/api", recordingRoutes);
 app.use("/api/holidays", holidayRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/reports", reportsRoutes);
-app.use("/api/live-streaming", livestreamRoutes);
+// app.use("/api/live-streaming", livestreamRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
- 
+
+app.use("/api/livestream", livestreamRoutes); 
+
+
 
 // Setup Socket.IO with CORS
 const io = new Server(server, {
@@ -89,7 +94,7 @@ const io = new Server(server, {
     credentials: true
   }
 });
-
+global._io = io;
 setupSocket(io); 
 
 // Private message sockets
@@ -129,15 +134,17 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start server after DB sync
-sequelize.sync({ force: false, alter: false })
-  .then(() => {
-    console.log("✅ Database synced");
-    registerSuperAdmin();
-    const PORT = process.env.PORT || 5070;
-    server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-  })
-  .catch(err => {
-    console.error("❌ DB sync error:", err);
-    process.exit(1);
-  });
+// Start the server and sync database
+sequelize.sync({ force: false, alter: false }).then(() => {
+  console.log("Database synced");
+  registerSuperAdmin(); // Ensure Super Admin is created at startup
+  
+  const PORT = process.env.PORT || 5070;
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(error => {
+  console.error("Database sync failed:", error);
+  process.exit(1);
+});
+
+ 
+

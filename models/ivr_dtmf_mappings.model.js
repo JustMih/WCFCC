@@ -4,7 +4,8 @@ const sequelize = require("../config/mysql_connection");
 
 const IVRDTMFMapping = sequelize.define('IVRDTMFMapping', {
   id: {
-    type: DataTypes.CHAR(36),
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
   },
   dtmf_digit: {
@@ -28,9 +29,15 @@ const IVRDTMFMapping = sequelize.define('IVRDTMFMapping', {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  language: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: "english", // Optional default
+  },
 }, {
   tableName: 'IVRDTMFMappings',
   timestamps: false,
 });
  
 module.exports = IVRDTMFMapping;
+

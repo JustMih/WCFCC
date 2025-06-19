@@ -128,7 +128,7 @@ const getAllRecordedAudio = async (req, res) => {
 
     const data = rows.map(row => ({
       ...row,
-      url: `/api/recorded-audio/${encodeURIComponent(row.filename)}`
+      url: `/recorded-audio/${encodeURIComponent(row.filename)}`
     }));
 
     res.json(data);

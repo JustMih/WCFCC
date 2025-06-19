@@ -10,8 +10,11 @@ const createVoice = async (req, res) => {
 
   const { file_name } = req.body;
   const file_path = `/voice/${req.file.filename}`;
+  const { language } = req.body;
+// Then include `language` in the model creation
+
   try {
-    const voice = await IVRVoice.create({ file_name, file_path });
+    const voice = await IVRVoice.create({ file_name, file_path,language });
     res.status(201).json(voice);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -42,7 +45,7 @@ const getVoiceById = async (req, res) => {
 
 // Update Voice
 const updateVoice = async (req, res) => {
-  const { file_name, file_path } = req.body;
+  const { file_name, file_path,language } = req.body;
 
   try {
     const voice = await IVRVoice.findByPk(req.params.id);
@@ -50,6 +53,7 @@ const updateVoice = async (req, res) => {
 
     voice.file_name = file_name;
     voice.file_path = file_path;
+    voice.language= language;
     await voice.save();
 
     res.status(200).json(voice);
