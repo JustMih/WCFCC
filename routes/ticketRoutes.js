@@ -1,9 +1,9 @@
 const express = require("express");
 const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
-  getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets,
+  getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
-  mockComplaintWorkflow, searchByPhoneNumber, getTicketById
+  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -120,5 +120,13 @@ router.get('/:ticketId',
   roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
   getTicketById
 );
+
+// Route for coordinator to close tickets
+router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
+
+// Route to get claims with valid numbers
+router.get('/claims-with-valid-numbers', 
+  authMiddleware,
+  getClaimsWithValidNumbers);
 
 module.exports = router;

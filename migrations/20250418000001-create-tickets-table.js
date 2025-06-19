@@ -55,7 +55,7 @@ module.exports = {
       },
       first_name: {
         type: Sequelize.STRING(50),
-        allowNull: false
+        allowNull: true
       },
       middle_name: {
         type: Sequelize.STRING(50),
@@ -63,7 +63,7 @@ module.exports = {
       },
       last_name: {
         type: Sequelize.STRING(50),
-        allowNull: false
+        allowNull: true
       },
       phone_number: {
         type: Sequelize.STRING(20),
