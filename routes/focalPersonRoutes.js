@@ -5,7 +5,7 @@ const {
     reassignTicket,
     completeAssignment,
     getFocalPersonDashboardCounts
-} = require("../controllers/focal_person/FocalPersonController");
+} = require("../controllers/focal_person/focalPersonController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
 

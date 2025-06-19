@@ -13,6 +13,7 @@ const { sendQuickSms } = require("../../services/smsService");
 const { sendEmail } = require('../../services/emailService');
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
+const TicketAssignment = require("../../models/TicketAssignment");
 
 const getTicketCounts = async (req, res) => {
   try {
@@ -200,6 +201,12 @@ const createTicket = async (req, res) => {
       employerAllocatedStaffUsername,
     } = req.body;
 
+    // Initialize finalSection before any use
+    let finalSection = inputSection;
+    if (finalSection === 'Unit') {
+      finalSection = sub_section;
+    }
+
     const userId = req?.user?.userId;
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
@@ -216,8 +223,8 @@ const createTicket = async (req, res) => {
 
     // --- Assignment Logic ---
     let assignedUser = null;
-    let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    // let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.finance';
+    // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    let allocatedUserUsername = employerAllocatedStaffUsername || 'attendee.hr1';
    
     if (category === 'Inquiry') {
       // Claims or Compliance
@@ -284,11 +291,6 @@ const createTicket = async (req, res) => {
       requesterFullName = requesterName;
     }
 
-
-    let finalSection = inputSection;
-    if (finalSection === 'Unit') {
-      finalSection = sub_section;
-    }
     const ticketData = {
       
       ticket_id: ticketId,
@@ -305,7 +307,7 @@ const createTicket = async (req, res) => {
       category,
       inquiry_type,
       responsible_unit_id: responsible_unit_id || functionId,
-      responsible_unit_name: responsible_unit_name || finalSection,
+      responsible_unit_name: responsible_unit_name  || finalSection,
       section: finalSection || responsibleUnit?.section?.name || 'Unit',
       sub_section: sub_section || responsibleUnit?.name || '',
       subject: subject || '',
@@ -333,22 +335,27 @@ const createTicket = async (req, res) => {
         relationshipToEmployee: relationshipToEmployee,
       });
     }
-    // --- SMS Notification ---
-    // let smsRecipient = String(ticketPhoneNumber || '').replace(/^"+/, '').replace(/^0/, '255');
-    // const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
-    // if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
-    //   const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
-    //   try {
-    //     // await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
-    //     await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
-    //     console.log("SMS sent (test) to 255673554743");
-    //   } catch (smsError) {
-    //     console.error("Error sending SMS:", smsError.message);
-    //     console.error("Error sending SMS:", smsError.message);
-    //   }
-    // }
+    // --- Create Notification for Assigned User ---
+    await Notification.create({
+      ticket_id: newTicket.id,
+      sender_id: userId,
+      recipient_id: assignedUser.id,
+      message: `New ${category} ticket assigned to you: ${subject}`,
+      channel: channel,
+      status: 'unread',
+      category: category
+    });
 
-    
+    // --- Create Ticket Assignment Record ---
+    await TicketAssignment.create({
+      ticket_id: newTicket.id,
+      assigned_by_id: userId,
+      assigned_to_id: assignedUser.id,
+      assigned_to_role: assignedUser.role,
+      action: 'Assigned',
+      reason: description,
+      created_at: new Date()
+    });
 
 // Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
 let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
@@ -464,6 +471,14 @@ const getTickets = async (req, res) => {
         attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]]
       });
+    } else if (user.role === "focal-person") {
+      // Focal person: Fetch tickets for their section/unit
+      tickets = await Ticket.findAll({
+        where: { section: user.unit_section ,
+           status:{[Op.ne]: "Closed"}},
+        attributes: { exclude: ["userId"] },
+        order: [["created_at", "DESC"]]
+      });
     } else {
       // Fetch only tickets created by this agent
       tickets = await Ticket.findAll({
@@ -553,59 +568,54 @@ const getOpenTickets = async (req, res) => {
 
 const getAssignedTickets = async (req, res) => {
   try {
-    const { userId } = req.params; // Get userId from URL
-
+    const { userId } = req.params;
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
-
     console.log("Fetching Assigned tickets for user ID:", userId);
-
-    // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"] // Fetch ID, Name & Role
+      attributes: ["id", "name", "role"]
     });
-
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-
     let tickets;
-
     if (user.role === "super-admin") {
-      // Super admin: Fetch all OPEN tickets
+      // Super admin: Fetch all tickets with assignments
       tickets = await Ticket.findAll({
-        where: { status: "Assigned" }, // Filter by status
-        attributes: { exclude: ["userId"] },
+        include: [{
+          model: TicketAssignment,
+          as: 'assignments',
+        }],
         order: [["created_at", "DESC"]]
       });
     } else {
-      // Agent: Fetch only OPEN tickets created by this agent
+      // Fetch tickets assigned to this user (via TicketAssignment)
       tickets = await Ticket.findAll({
-        where: { userId, status: "Assigned" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [{
+          model: TicketAssignment,
+          as: 'assignments',
+          where: { assigned_to_id: userId },
+          required: true
+        }],
         order: [["created_at", "DESC"]]
       });
     }
-
-    if (tickets.length === 0) {
+    if (!tickets || tickets.length === 0) {
       return res.status(404).json({ message: "No assigned tickets found." });
     }
-
-    // Modify response to include created_by (user.name)
     const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
-
     res.status(200).json({
       message: "Assigned tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error("Error fetching open tickets:", error);
+    console.error("Error fetching assigned tickets:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

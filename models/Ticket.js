@@ -128,6 +128,8 @@ Ticket.associate = (models) => {
     onUpdate: 'CASCADE',
     onDelete: 'SET NULL'
   });
+
+  Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
 };
 
 module.exports = Ticket;

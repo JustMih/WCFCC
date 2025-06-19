@@ -55,7 +55,7 @@ const createNotification = async (req, res) => {
       message: default_message,
       comment: message,
       channel,
-      status: 'Pending',
+      status: 'Unread',
       category: category
     });
 

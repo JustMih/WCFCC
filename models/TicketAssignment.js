@@ -45,4 +45,8 @@ const TicketAssignment = sequelize.define('TicketAssignment', {
   timestamps: false
 });
 
+TicketAssignment.associate = (models) => {
+  TicketAssignment.belongsTo(models.Ticket, { foreignKey: 'ticket_id', as: 'ticket' });
+};
+
 module.exports = TicketAssignment; 

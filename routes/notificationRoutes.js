@@ -29,7 +29,9 @@ router.patch('/read/:notificationId',
   markAsRead);
 
 // Get unread notification count for a user
-router.get('/unread-count/:userId', getUnreadCount);
+router.get('/unread-count/:userId', 
+  authMiddleware,
+  getUnreadCount);
 
 // Get single notification
 router.get('/:notificationId', getNotificationById);
