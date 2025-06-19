@@ -2,6 +2,7 @@ const Notification = require("../../models/Notification");
 const User = require("../../models/User");
 const { Op } = require("sequelize");
 const Ticket = require("../../models/Ticket");
+const { sendEmail } = require('../../services/emailService');
 
 // Create a notification
 const createNotification = async (req, res) => {
@@ -57,6 +58,32 @@ const createNotification = async (req, res) => {
       status: 'Pending',
       category: category
     });
+
+    // Send email to the recipient
+    if (assignedUser.email) {
+      let ticketInfo = '';
+      if (ticket_id) {
+        const ticket = await Ticket.findByPk(ticket_id);
+        if (ticket) {
+          ticketInfo = `<br/><strong>Ticket Subject:</strong> ${ticket.subject || ''}<br/><strong>Category:</strong> ${ticket.category || ''}`;
+        }
+      }
+      const emailSubject = `New Notification: ${category}`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedUser.name},</p>
+        <p>${default_message}</p>
+        <p>${message}</p>
+        ${ticketInfo}
+        <p>Please log in to the system for more details.</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+      } catch (emailError) {
+        console.error('Error sending notification email:', emailError.message);
+      }
+    }
 
     return res.status(201).json({
       message: "Notification created.",
