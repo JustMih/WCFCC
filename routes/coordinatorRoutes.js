@@ -1,6 +1,6 @@
 const express = require("express");
 const {
-    getAllCoordinatorComplaints,
+    getAllCoordinatorTickets,
     rateTickets,
     convertOrForwardTicket,
     getCoordinatorDashboardCounts,
@@ -13,7 +13,8 @@ const {
     getTicketsByStatus,
     rateAndRegisterComplaint,
     convertToInquiry,
-    channelComplaint
+    channelComplaint,
+    closeCoordinatorTicket
 } = require("../controllers/coordinator/coordinatorController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -91,10 +92,10 @@ router.get(
   );
   
 // Get complaints tickets
-router.get('/complaints',
+router.get('/all-tickets',
     authMiddleware,
     roleMiddleware(['coordinator', 'super-admin']),
-    getAllCoordinatorComplaints
+    getAllCoordinatorTickets
 );
 
 // Rate and register complaint
@@ -119,6 +120,14 @@ router.post(
   authMiddleware,
   roleMiddleware(['coordinator']),
   channelComplaint
+);
+
+// Coordinator closes a ticket
+router.post(
+  "/complaints/:ticketId/close",
+  authMiddleware,
+  roleMiddleware(['coordinator']),
+  closeCoordinatorTicket
 );
 
 module.exports = router;

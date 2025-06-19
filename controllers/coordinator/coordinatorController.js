@@ -9,7 +9,7 @@ const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
 
 
-const getAllCoordinatorComplaints = async (req, res) => {
+const getAllCoordinatorTickets = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
@@ -23,8 +23,8 @@ const getAllCoordinatorComplaints = async (req, res) => {
               { status: 'Open' }
             ]
           },
-          { converted_to: null },
-          { responsible_unit_name: null }
+          // { converted_to: null },
+          // { responsible_unit_name: null }
         ]
       }
     });
@@ -1046,7 +1046,7 @@ const closeCoordinatorTicket = async (req, res) => {
 };
 
 module.exports = {
-  getAllCoordinatorComplaints,
+  getAllCoordinatorTickets,
   rateAndRegisterComplaint,
   convertToInquiry,
   channelComplaint,
