@@ -1137,16 +1137,25 @@ const mockComplaintWorkflow = async (req, res) => {
 
 const searchByPhoneNumber = async (req, res) => {
   try {
-    const { phoneNumber } = req.params;
-
+    let { phoneNumber } = req.params;
     if (!phoneNumber) {
       return res.status(400).json({ message: "Phone number is required" });
     }
-
+    // Normalize phone number for Tanzanian format
+    let normalized = phoneNumber.replace(/[^0-9]/g, "");
+    if (normalized.startsWith("0")) normalized = "255" + normalized.slice(1);
+    if (normalized.length === 9) normalized = "255" + normalized;
+    const plusFormat = "+255" + normalized.slice(-9);
+    const plainFormat = "255" + normalized.slice(-9);
+    // Search for all common formats
     const tickets = await Ticket.findAll({
       where: {
         [Op.or]: [
           { phone_number: phoneNumber },
+          { phone_number: normalized },
+          { phone_number: plusFormat },
+          { phone_number: plainFormat },
+          { phone_number: { [Op.like]: `%${normalized.slice(-9)}` } },
           { nida_number: phoneNumber }
         ]
       },
@@ -1159,20 +1168,17 @@ const searchByPhoneNumber = async (req, res) => {
         }
       ]
     });
-
     if (tickets.length === 0) {
       return res.status(200).json({
         found: false,
         message: "No tickets found for this phone number"
       });
     }
-
     return res.status(200).json({
       found: true,
       message: "Tickets found successfully",
       tickets: tickets
     });
-
   } catch (error) {
     console.error("Error searching tickets by phone number:", error);
     return res.status(500).json({ message: "Internal server error", error: error.message });
