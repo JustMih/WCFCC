@@ -87,7 +87,7 @@ router.put('/:id/convert-or-forward-ticket',
 router.get(
     '/tickets',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['coordinator', 'super-admin', 'focal-person']),
     getTicketsByStatus
   );
   

@@ -224,7 +224,9 @@ const createTicket = async (req, res) => {
     // --- Assignment Logic ---
     let assignedUser = null;
     // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    let allocatedUserUsername = employerAllocatedStaffUsername || 'attendee.hr1';
+    let allocatedUserUsername = employerAllocatedStaffUsername || 'focalrehema.hr';
+    
+    // attendee.hr1
    
     if (category === 'Inquiry') {
       // Claims or Compliance

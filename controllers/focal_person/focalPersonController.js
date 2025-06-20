@@ -5,33 +5,75 @@ const { Op, Sequelize } = require("sequelize");
 
 const getFocalPersonTickets = async (req, res) => {
   try {
-    const userId = req.user.userId; // or get from req.params if needed
+    const userId = req.user.userId;
     const user = await User.findByPk(userId);
+    const section = user.unit_section;
+    const statusParam = req.query.status ? req.query.status.toLowerCase() : 'new';
+    let where = {
+      section,
+      [Op.or]: [
+        { category: "Inquiry" },
+        { converted_to: "Inquiry" }
+      ]
+    };
+
+    switch (statusParam) {
+      case 'new':
+        where = {
+          ...where,
+          [Op.or]: [
+            { status: null },
+            { status: 'Open' }
+          ]
+        };
+        break;
+      case 'escalated':
+        where = {
+          ...where,
+          is_escalated: true
+        };
+        break;
+      case 'open':
+        where = {
+          ...where,
+          status: 'Open'
+        };
+        break;
+      case 'in-progress':
+        where = {
+          ...where,
+          status: 'In Progress'
+        };
+        break;
+      case 'closed':
+        where = {
+          ...where,
+          status: 'Closed'
+        };
+        break;
+      default:
+        // fallback to new
+        where = {
+          ...where,
+          [Op.or]: [
+            { status: null },
+            { status: 'Open' }
+          ]
+        };
+    }
+
     const inquiries = await Ticket.findAll({
-      where: {
-        section: user.unit_section,
-        [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ],
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { status: 'Open' },
-              { status: null },
-            ]
-          }
-        ]
-      },
+      where,
       order: [['created_at', 'DESC']]
     });
 
     res.status(200).json({
-      message: inquiries.length ? "Inquiry tickets fetched successfully." : "No tickets found.",
-      inquiries
+      message: inquiries.length ? "Tickets fetched successfully." : "No tickets found.",
+      inquiries,
+      count: inquiries.length
     });
   } catch (error) {
-    console.error("Error fetching Focal person tickets Inquiry:", error);
+    console.error("Error fetching Focal person tickets:", error);
     res.status(500).json({
       message: "Server error",
       error: error.message
