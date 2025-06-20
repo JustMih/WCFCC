@@ -34,7 +34,7 @@ const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
 const livestreamRoutes = require("./routes/livestreamRoutes");
-const { setupSocket } = require("./controllers/livestream/livestreamController");
+// const { setupSocket } = require("./controllers/livestream/livestreamController");
 const { startCELWatcher } = require("./controllers/livestream/celLiveEmitter");
 startCELWatcher(); // 🔁 Start CEL live call background loop
 

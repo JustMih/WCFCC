@@ -1,11 +1,4 @@
-<<<<<<< HEAD
-'use strict';
-
-/* ----------------------------- MODULE IMPORTS ----------------------------- */
-const sequelize = require("../../config/mysql_connection");
-=======
  const sequelize = require("../../config/mysql_connection");
->>>>>>> 9b7e08de91a54b7d5de358b851206ba499785a90
 const { DataTypes, Op } = require("sequelize");
 const moment = require("moment");
 
@@ -31,16 +24,8 @@ const setupSocket = (io) => {
   });
 };
 
-<<<<<<< HEAD
-/* --------------------------- SOCKET EMIT (INTERNAL) --------------------------- */
-/**
- * Emit live call updates to all connected clients using internal reference
- */
-const emitLiveCall = async (callData) => {
-=======
 // Socket emitter
 const emitLiveCall = (callData) => {
->>>>>>> 9b7e08de91a54b7d5de358b851206ba499785a90
   if (!ioInstance) return;
 
   if (callData.call_start && !callData.call_end) {
@@ -51,16 +36,8 @@ const emitLiveCall = (callData) => {
   console.log("📡 Emitted live_call_update:", callData);
 };
 
-<<<<<<< HEAD
-/* --------------------------- SOCKET EMIT (GLOBAL) --------------------------- */
-/**
- * Emit live call update using global _io reference (for external use)
- */
-exports.emitLiveCall = (call) => {
-=======
 // Global emit support
 exports.emitLiveCall = (callData) => {
->>>>>>> 9b7e08de91a54b7d5de358b851206ba499785a90
   if (global._io) {
     global._io.emit("live_call_update", callData);
     console.log("📡 Emitted live call globally:", callData);
@@ -80,11 +57,7 @@ const getAllLiveCalls = async (req, res) => {
         eventtype: ['CHAN_START', 'ANSWER', 'HANGUP', 'APP_START', 'APP_END'],
         eventtime: { [Op.gte]: moment().subtract(5, 'minutes').toDate() }
       },
-<<<<<<< HEAD
-      order: [['eventtime', 'DESC']]
-=======
       order: [['eventtime', 'ASC']]
->>>>>>> 9b7e08de91a54b7d5de358b851206ba499785a90
     });
 
     const calls = {};
@@ -111,57 +84,6 @@ const getAllLiveCalls = async (req, res) => {
         };
       }
 
-<<<<<<< HEAD
-      switch (row.eventtype) {
-        case 'CHAN_START':
-          if (!calls[key].call_start) {
-            calls[key].call_start = row.eventtime;
-            calls[key].queue_entry_time = row.eventtime;
-          }
-          calls[key].status = 'calling';
-          break;
-
-        case 'ANSWER':
-          if (!calls[key].call_answered) {
-            calls[key].call_answered = row.eventtime;
-            calls[key].status = 'active';
-          }
-          break;
-
-        case 'HANGUP':
-          calls[key].call_end = row.eventtime;
-          if (!calls[key].call_answered) {
-            calls[key].missed = true;
-            calls[key].status = 'dropped';
-          } else {
-            calls[key].status = 'ended';
-          }
-          break;
-
-        case 'APP_START':
-          if (row.appname === 'Queue') {
-            calls[key].queue_entry_time = row.eventtime;
-          }
-          if (row.appname === 'VoiceMail') {
-            calls[key].voicemail_path = `/recorded/voicemails/${key}.wav`;
-          }
-          break;
-      }
-    });
-
-    // Post-processing: compute durations and wait times
-    for (const key in calls) {
-      const c = calls[key];
-
-      if (c.call_start && c.call_end) {
-        c.duration_secs = Math.floor((new Date(c.call_end) - new Date(c.call_start)) / 1000);
-      }
-
-      if (c.queue_entry_time && c.call_answered) {
-        c.estimated_wait_time = Math.floor((new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000);
-      }
-
-=======
       const c = calls[key];
 
       // inside for (const row of events) { ... }
@@ -228,7 +150,6 @@ if (c.call_end) c.call_end = moment(c.call_end).format('YYYY-MM-DD HH:mm:ss');
 if (c.queue_entry_time) c.queue_entry_time = moment(c.queue_entry_time).format('YYYY-MM-DD HH:mm:ss');
 
       // Default voicemail path
->>>>>>> 9b7e08de91a54b7d5de358b851206ba499785a90
       if (c.missed && !c.voicemail_path) {
         c.voicemail_path = `/recorded/voicemails/${key}.wav`;
       }
@@ -251,11 +172,7 @@ if (c.queue_entry_time) c.queue_entry_time = moment(c.queue_entry_time).format('
   }
 };
 
-<<<<<<< HEAD
-/* ----------------------------- EXPORT MODULES ----------------------------- */
-=======
 // Exports
->>>>>>> 9b7e08de91a54b7d5de358b851206ba499785a90
 module.exports = {
   setupSocket,
   emitLiveCall,
