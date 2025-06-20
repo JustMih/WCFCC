@@ -34,6 +34,10 @@ const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
 const livestreamRoutes = require("./routes/livestreamRoutes");
+const { setupSocket } = require("./controllers/livestream/livestreamController");
+const { startCELWatcher } = require("./controllers/livestream/celLiveEmitter");
+startCELWatcher(); // 🔁 Start CEL live call background loop
+
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
