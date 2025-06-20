@@ -1,11 +1,20 @@
+'use strict';
+
+/* ----------------------------- MODULE IMPORTS ----------------------------- */
 const sequelize = require("../../config/mysql_connection");
 const { DataTypes, Op } = require("sequelize");
 const moment = require("moment");
+
+/* ----------------------------- MODEL IMPORTS ----------------------------- */
 const CEL = require("../../models/CEL")(sequelize, DataTypes);
 
+/* ------------------------------ SOCKET STATE ------------------------------ */
 let ioInstance = null;
 
-// Socket.IO setup
+/* ------------------------------ SOCKET SETUP ------------------------------ */
+/**
+ * Initialize Socket.IO and listen for connection/disconnection events
+ */
 const setupSocket = (io) => {
   ioInstance = io;
   io.on("connection", (socket) => {
@@ -17,7 +26,10 @@ const setupSocket = (io) => {
   });
 };
 
-// Emit call to clients
+/* --------------------------- SOCKET EMIT (INTERNAL) --------------------------- */
+/**
+ * Emit live call updates to all connected clients using internal reference
+ */
 const emitLiveCall = async (callData) => {
   if (!ioInstance) return;
 
@@ -28,7 +40,10 @@ const emitLiveCall = async (callData) => {
   ioInstance.emit("live_call_update", callData);
 };
 
-// For global emit support
+/* --------------------------- SOCKET EMIT (GLOBAL) --------------------------- */
+/**
+ * Emit live call update using global _io reference (for external use)
+ */
 exports.emitLiveCall = (call) => {
   if (global._io) {
     global._io.emit("live_call_update", call);
@@ -38,7 +53,10 @@ exports.emitLiveCall = (call) => {
   }
 };
 
-// REST: Fetch processed CEL call states
+/* ----------------------------- CEL CALL TRACKER ----------------------------- */
+/**
+ * REST: Get structured live call data from CEL events within the past 5 minutes
+ */
 const getAllLiveCalls = async (req, res) => {
   try {
     const events = await CEL.findAll({
@@ -46,9 +64,8 @@ const getAllLiveCalls = async (req, res) => {
         eventtype: ['CHAN_START', 'ANSWER', 'HANGUP', 'APP_START', 'APP_END'],
         eventtime: { [Op.gte]: moment().subtract(5, 'minutes').toDate() }
       },
-      order: [['eventtime', 'DESC']] // This shows the newest calls first
+      order: [['eventtime', 'DESC']]
     });
-    
 
     const calls = {};
 
@@ -110,23 +127,18 @@ const getAllLiveCalls = async (req, res) => {
       }
     });
 
-    // Post-processing: duration and ETA
+    // Post-processing: compute durations and wait times
     for (const key in calls) {
       const c = calls[key];
 
       if (c.call_start && c.call_end) {
-        c.duration_secs = Math.floor(
-          (new Date(c.call_end) - new Date(c.call_start)) / 1000
-        );
+        c.duration_secs = Math.floor((new Date(c.call_end) - new Date(c.call_start)) / 1000);
       }
 
       if (c.queue_entry_time && c.call_answered) {
-        c.estimated_wait_time = Math.floor(
-          (new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000
-        );
+        c.estimated_wait_time = Math.floor((new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000);
       }
 
-      // Default voicemail if missed and ended
       if (c.missed && !c.voicemail_path) {
         c.voicemail_path = `/recorded/voicemails/${key}.wav`;
       }
@@ -138,87 +150,10 @@ const getAllLiveCalls = async (req, res) => {
     res.status(500).json({ error: "Failed to process CEL data" });
   }
 };
- 
-// const getAllLiveCalls = async (req, res) => {
-//   try {
-//     const events = await CEL.findAll({
-//       where: {
-//         eventtype: ['CHAN_START', 'ANSWER', 'HANGUP'],
-//         eventtime: {
-//           [Op.gte]: moment().subtract(5, 'minutes').toDate()
-//         }
-//       },
-//       order: [['eventtime', 'ASC']]
-//     });
 
-//     const callMap = {};
-
-//     events.forEach(event => {
-//       const id = event.linkedid || event.uniqueid;
-
-//       if (!callMap[id]) {
-//         callMap[id] = {
-//           caller: event.cid_num,
-//           callee: event.cid_dnid || event.peer || "-", // fallback logic
-//           linkedid: id,
-//           call_start: null,
-//           call_answered: null,
-//           call_end: null,
-//           status: 'unknown',
-//           duration_secs: null,
-//           queue_entry_time: null,
-//           estimated_wait_time: null,
-//           voicemail_path: null
-//         };
-//       }
-
-//       if (event.eventtype === 'CHAN_START') {
-//         callMap[id].call_start = event.eventtime;
-//         callMap[id].queue_entry_time = event.eventtime;
-//         callMap[id].status = 'calling';
-//       }
-
-//       if (event.eventtype === 'ANSWER') {
-//         callMap[id].call_answered = event.eventtime;
-//         callMap[id].status = 'active';
-//       }
-
-//       if (event.eventtype === 'HANGUP') {
-//         callMap[id].call_end = event.eventtime;
-//         callMap[id].status = 'ended';
-//       }
-//     });
-
-//     // Filter for active calls only (ANSWERED but NOT yet HANGUP)
-//     const activeCalls = Object.values(callMap).filter(call =>
-//       call.call_answered && !call.call_end
-//     );
-
-//     // Optionally compute estimated wait time and duration
-//     activeCalls.forEach(call => {
-//       if (call.call_answered && call.call_start) {
-//         call.estimated_wait_time = Math.floor(
-//           (new Date(call.call_answered) - new Date(call.call_start)) / 1000
-//         );
-//       }
-
-//       // Live duration so far
-//       call.duration_secs = Math.floor(
-//         (new Date() - new Date(call.call_answered)) / 1000
-//       );
-//     });
-
-//     res.status(200).json(activeCalls);
-//   } catch (err) {
-//     console.error("❌ Error fetching active CEL calls:", err);
-//     res.status(500).json({ error: "Failed to fetch active calls" });
-//   }
-// };
-
-module.exports = { getAllLiveCalls };
-
+/* ----------------------------- EXPORT MODULES ----------------------------- */
 module.exports = {
   setupSocket,
   emitLiveCall,
-  getAllLiveCalls
+  getAllLiveCalls,
 };

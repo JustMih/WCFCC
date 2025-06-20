@@ -1,38 +1,45 @@
 'use strict';
 
+/* ------------------------------ ENV & MODULES ------------------------------ */
+require("dotenv").config();
 const express = require("express");
-const axios = require("axios");
+const http = require("http");
+const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-require("dotenv").config();
-const cors = require("cors");
-const http = require("http");
+const axios = require("axios");
 const { Server } = require("socket.io");
 
+/* ------------------------------ CONFIG & DB ------------------------------ */
 const sequelize = require("./config/mysql_connection.js");
-const routes = require("./routes");
+
+/* ------------------------------ EXPRESS INIT ------------------------------ */
+const app = express();
+const server = http.createServer(app);
+
+/* ------------------------------ MODELS ------------------------------ */
+const ChatMassage = require("./models/chart_message");
+const InstagramComment = require("./models/instagram_comment");
+const VoiceNote = require('./models/voice_notes.model');
+
+/* ------------------------------ CONTROLLERS ------------------------------ */
 const { registerSuperAdmin } = require("./controllers/auth/authController");
+const { setupSocket } = require("./controllers/livestream/livestreamController");
+
+/* ------------------------------ ROUTES ------------------------------ */
+const routes = require("./routes");
 const recordingRoutes = require("./routes/recordingRoutes");
 const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
-const monitorRoutes = require('./routes/monitorRoutes');
+// const monitorRoutes = require('./routes/monitorRoutes');
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
 const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
+const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
 
-const ChatMassage = require("./models/chart_message");
-const InstagramComment = require("./models/instagram_comment");
-const VoiceNote = require('./models/voice_notes.model');
-const { setupSocket } = require("./controllers/livestream/livestreamController");
-
-// Initialize Express
-const app = express();
-const server = http.createServer(app);
-
-// Middleware
+/* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());
-
 app.use(cors({
   origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -40,7 +47,8 @@ app.use(cors({
   credentials: true
 }));
 
-// Serve voice note audio files
+/* ------------------------------ STATIC FILES ------------------------------ */
+// Voice note audio files
 app.get("/api/voice-notes/:id/audio", async (req, res) => {
   const { id } = req.params;
   try {
@@ -66,7 +74,7 @@ app.get("/api/voice-notes/:id/audio", async (req, res) => {
   }
 });
 
-// Serve static voice and recording files
+// Static folders for voice and recorded audio
 app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.wav')) {
@@ -74,12 +82,11 @@ app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
     }
   }
 }));
-
 app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
 
-// Routes
+/* ------------------------------ API ROUTES ------------------------------ */
 app.use("/api", routes);
-app.use("/api", require("./routes/ivr-dtmf-routes"));
+app.use("/api", ivrDtmfRoutes);
 app.use("/api", recordingRoutes);
 app.use("/api/holidays", holidayRoutes);
 app.use("/api/emergency", emergencyRoutes);
@@ -88,7 +95,7 @@ app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use("/api/livestream", livestreamRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
 
-// Socket.IO setup
+/* ------------------------------ SOCKET.IO ------------------------------ */
 const io = new Server(server, {
   cors: {
     origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
@@ -99,7 +106,7 @@ const io = new Server(server, {
 global._io = io;
 setupSocket(io);
 
-// Private message socket logic
+// Private messaging and live call socket logic
 const users = {};
 const liveCalls = new Map();
 
@@ -136,6 +143,14 @@ io.on("connection", (socket) => {
     io.emit("dashboardUpdate", Array.from(liveCalls.values()));
   });
 
+  socket.on("queueStatusUpdate", (data) => {
+    console.log("📥 Received queue status via socket:", data);
+    // Broadcast to others
+    io.emit("queueStatusUpdate", data);
+
+    // (Optional) Save to DB here
+  });
+
   socket.on("disconnect", () => {
     for (const id in users) {
       if (users[id] === socket.id) {
@@ -146,7 +161,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start the server
+/* ------------------------------ SERVER START ------------------------------ */
 sequelize.sync({ force: false, alter: false }).then(() => {
   console.log("✅ Database synced");
   registerSuperAdmin();
