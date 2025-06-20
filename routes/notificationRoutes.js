@@ -19,13 +19,19 @@ router.post('/notify',
      createNotification);
 
 // List notifications for a user
-router.get('/user/:userId', listNotifications);
+router.get('/user/:userId',
+  authMiddleware,
+  listNotifications);
 
 // Mark a notification as read
-router.patch('/read/:notificationId', markAsRead);
+router.patch('/read/:notificationId', 
+  authMiddleware,
+  markAsRead);
 
 // Get unread notification count for a user
-router.get('/unread-count/:userId', getUnreadCount);
+router.get('/unread-count/:userId', 
+  authMiddleware,
+  getUnreadCount);
 
 // Get single notification
 router.get('/:notificationId', getNotificationById);

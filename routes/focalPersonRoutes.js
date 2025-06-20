@@ -5,7 +5,7 @@ const {
     reassignTicket,
     completeAssignment,
     getFocalPersonDashboardCounts
-} = require("../controllers/focal_person/FocalPersonController");
+} = require("../controllers/focal_person/focalPersonController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
 
@@ -64,6 +64,8 @@ router.post("/focal-person-tickets/:ticketId/complete",
     roleMiddleware(["focal-person"]), 
     completeAssignment
 );
+
+
 
 module.exports = router;
 

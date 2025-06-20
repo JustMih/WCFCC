@@ -1,16 +1,12 @@
-// services/amiService.js
 const AsteriskManager = require('asterisk-manager');
 const mysql = require('mysql2/promise');
+let ioInstance = null;
 
-// AMI connection
+// Setup AMI
 const ami = new AsteriskManager(5038, '127.0.0.1', 'admin', '@Ttcl123', true);
 ami.keepConnected();
 
-let queueCache = [];
-let liveCallsCache = [];
-let isPollingQueue = false;
-
-// MySQL connection
+// Setup MySQL pool
 const db = mysql.createPool({
   host: '127.0.0.1',
   user: 'asterisk',
@@ -18,133 +14,76 @@ const db = mysql.createPool({
   database: 'asterisk'
 });
 
-// Poll AMI for queue status
-const pollQueueStatus = () => {
-  if (isPollingQueue) return;
-  isPollingQueue = true;
+// Caches
+const queueCache = {};
 
-  const tempQueue = [];
+// Setup Socket.IO
+const setupSocket = (io) => {
+  ioInstance = io;
+  global._io = io;
 
-  const handler = async (event) => {
-    if (event.Event === 'QueueEntry') {
-      const entry = {
-        time: new Date(),
-        callid: event.Uniqueid,
-        queuename: event.Queue,
-        event: 'QueueEntry',
-        data1: event.CallerIDNum || '',
-        data2: event.Position || '',
-        data3: event.Wait || '',
-        data4: null,
-        data5: null
-      };
+  io.on('connection', (socket) => {
+    console.log('📡 Client connected:', socket.id);
 
-      tempQueue.push({
-        queue: entry.queuename,
-        position: entry.data2,
-        callerID: entry.data1,
-        waitTime: parseInt(entry.data3, 10),
-      });
+    socket.emit('live_queue_update', Object.values(queueCache));
 
-      try {
-        const [existing] = await db.execute(
-          `SELECT 1 FROM queue_log WHERE callid = ? AND event = 'QueueEntry' LIMIT 1`,
-          [entry.callid]
-        );
-
-        if (existing.length === 0) {
-          await db.execute(`
-            INSERT INTO queue_log
-              (time, callid, queuename, agent, event, data1, data2, data3, data4, data5)
-            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
-          `, [
-            entry.time,
-            entry.callid,
-            entry.queuename,
-            entry.event,
-            entry.data1,
-            entry.data2,
-            entry.data3,
-            entry.data4,
-            entry.data5
-          ]);
-        }
-      } catch (err) {
-        console.error('❌ queue_log insert error:', err);
-      }
-    }
-
-    if (event.Event === 'QueueStatusComplete') {
-      ami.removeListener('managerevent', handler);
-      queueCache = tempQueue;
-      isPollingQueue = false;
-
-      try {
-        await db.execute(`DELETE FROM queue_log WHERE time < NOW() - INTERVAL 30 DAY`);
-      } catch (err) {
-        console.error('⚠️ Queue cleanup error:', err);
-      }
-    }
-  };
-
-  ami.on('managerevent', handler);
-
-  ami.action({ Action: 'QueueStatus' }, (err) => {
-    if (err) {
-      ami.removeListener('managerevent', handler);
-      isPollingQueue = false;
-      console.error('❌ AMI QueueStatus error:', err);
-    }
+    socket.on('disconnect', () => {
+      console.log('📴 Client disconnected:', socket.id);
+    });
   });
-
-  setTimeout(() => {
-    if (isPollingQueue) {
-      ami.removeListener('managerevent', handler);
-      queueCache = tempQueue;
-      isPollingQueue = false;
-      console.warn('⚠️ AMI QueueStatus timeout fallback');
-    }
-  }, 3000);
 };
 
-// Poll CEL for live calls
-const pollLiveCalls = async () => {
-  try {
-    const [rows] = await db.execute(`
-      SELECT uniqueid, cid_num, channame AS channel, peer, eventtime, eventtype
-      FROM cel
-      WHERE eventtype IN ('CHAN_START', 'ANSWER')
-        AND eventtime >= NOW() - INTERVAL 2 MINUTE
-      ORDER BY eventtime DESC
-    `);
-
-    const active = {};
-
-    rows.forEach((row) => {
-      if (!active[row.uniqueid]) {
-        active[row.uniqueid] = {
-          channel: row.channel,
-          peer: row.peer,
-          caller: row.cid_num,
-          status: row.eventtype,
-          startedAt: row.eventtime,
-        };
-      }
-    });
-
-    liveCallsCache = Object.values(active);
-  } catch (err) {
-    console.error('❌ CEL live call polling error:', err);
+// Emit queue update
+const emitQueue = () => {
+  if (ioInstance) {
+    ioInstance.emit('live_queue_update', Object.values(queueCache));
   }
 };
 
-// Start polling both sources
-setInterval(pollQueueStatus, 10000);
-setInterval(pollLiveCalls, 10000);
-pollQueueStatus();
-pollLiveCalls();
+// AMI Event Handlers
+ami.on('managerevent', async (event) => {
+  if (event.Event === 'QueueCallerJoin') {
+    const id = event.Uniqueid;
+    queueCache[id] = {
+      caller: event.CallerIDNum || 'unknown',
+      queue: event.Queue,
+      position: event.Position || '-',
+      joinedAt: new Date()
+    };
 
+    // Insert into queue_log table
+    try {
+      await db.execute(`
+        INSERT INTO queue_log (time, callid, queuename, agent, event, data1, data2, data3, data4, data5)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, NULL, NULL)
+      `, [
+        new Date(),
+        id,
+        event.Queue,
+        'QueueCallerJoin',
+        event.CallerIDNum || '',
+        event.Position || ''
+      ]);
+    } catch (err) {
+      console.error('❌ Error inserting into queue_log:', err);
+    }
+
+    emitQueue();
+  }
+
+  if (event.Event === 'QueueCallerLeave') {
+    const id = event.Uniqueid;
+    delete queueCache[id];
+
+    emitQueue();
+  }
+});
+
+// Getters
+const getQueueCache = () => Object.values(queueCache);
+
+// Export only real-time functions
 module.exports = {
-  getQueueCache: () => queueCache,
-  getLiveCallsCache: () => liveCallsCache
+  setupSocket,
+  getQueueCache
 };

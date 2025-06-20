@@ -13,6 +13,7 @@ const { sendQuickSms } = require("../../services/smsService");
 const { sendEmail } = require('../../services/emailService');
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
+const TicketAssignment = require("../../models/TicketAssignment");
 
 const getTicketCounts = async (req, res) => {
   try {
@@ -212,7 +213,11 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ message: "Inquiry type (Claims or Compliance) is required for Inquiry category." });
     }
 
-   
+    // Initialize finalSection before assignment logic
+    let finalSection = inputSection;
+    if (finalSection === 'Unit') {
+      finalSection = sub_section;
+    }
 
     // --- Assignment Logic ---
     let assignedUser = null;
@@ -284,11 +289,6 @@ const createTicket = async (req, res) => {
       requesterFullName = requesterName;
     }
 
-
-    let finalSection = inputSection;
-    if (finalSection === 'Unit') {
-      finalSection = sub_section;
-    }
     const ticketData = {
       
       ticket_id: ticketId,
@@ -305,7 +305,7 @@ const createTicket = async (req, res) => {
       category,
       inquiry_type,
       responsible_unit_id: responsible_unit_id || functionId,
-      responsible_unit_name: responsible_unit_name || finalSection,
+      responsible_unit_name: responsible_unit_name  || finalSection,
       section: finalSection || responsibleUnit?.section?.name || 'Unit',
       sub_section: sub_section || responsibleUnit?.name || '',
       subject: subject || '',
@@ -333,22 +333,27 @@ const createTicket = async (req, res) => {
         relationshipToEmployee: relationshipToEmployee,
       });
     }
-    // --- SMS Notification ---
-    // let smsRecipient = String(ticketPhoneNumber || '').replace(/^"+/, '').replace(/^0/, '255');
-    // const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
-    // if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
-    //   const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
-    //   try {
-    //     // await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
-    //     await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
-    //     console.log("SMS sent (test) to 255673554743");
-    //   } catch (smsError) {
-    //     console.error("Error sending SMS:", smsError.message);
-    //     console.error("Error sending SMS:", smsError.message);
-    //   }
-    // }
+    // --- Create Notification for Assigned User ---
+    await Notification.create({
+      ticket_id: newTicket.id,
+      sender_id: userId,
+      recipient_id: assignedUser.id,
+      message: `New ${category} ticket assigned to you: ${subject}`,
+      channel: channel,
+      status: 'unread',
+      category: category
+    });
 
-    
+    // --- Create Ticket Assignment Record ---
+    await TicketAssignment.create({
+      ticket_id: newTicket.id,
+      assigned_by_id: userId,
+      assigned_to_id: assignedUser.id,
+      assigned_to_role: assignedUser.role,
+      action: 'Assigned',
+      reason: description,
+      created_at: new Date()
+    });
 
 // Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
 let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
@@ -464,6 +469,14 @@ const getTickets = async (req, res) => {
         attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]]
       });
+    } else if (user.role === "focal-person") {
+      // Focal person: Fetch tickets for their section/unit
+      tickets = await Ticket.findAll({
+        where: { section: user.unit_section ,
+           status:{[Op.ne]: "Closed"}},
+        attributes: { exclude: ["userId"] },
+        order: [["created_at", "DESC"]]
+      });
     } else {
       // Fetch only tickets created by this agent
       tickets = await Ticket.findAll({
@@ -553,59 +566,54 @@ const getOpenTickets = async (req, res) => {
 
 const getAssignedTickets = async (req, res) => {
   try {
-    const { userId } = req.params; // Get userId from URL
-
+    const { userId } = req.params;
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
-
     console.log("Fetching Assigned tickets for user ID:", userId);
-
-    // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"] // Fetch ID, Name & Role
+      attributes: ["id", "name", "role"]
     });
-
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-
     let tickets;
-
     if (user.role === "super-admin") {
-      // Super admin: Fetch all OPEN tickets
+      // Super admin: Fetch all tickets with assignments
       tickets = await Ticket.findAll({
-        where: { status: "Assigned" }, // Filter by status
-        attributes: { exclude: ["userId"] },
+        include: [{
+          model: TicketAssignment,
+          as: 'assignments',
+        }],
         order: [["created_at", "DESC"]]
       });
     } else {
-      // Agent: Fetch only OPEN tickets created by this agent
+      // Fetch tickets assigned to this user (via TicketAssignment)
       tickets = await Ticket.findAll({
-        where: { userId, status: "Assigned" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [{
+          model: TicketAssignment,
+          as: 'assignments',
+          where: { assigned_to_id: userId },
+          required: true
+        }],
         order: [["created_at", "DESC"]]
       });
     }
-
-    if (tickets.length === 0) {
+    if (!tickets || tickets.length === 0) {
       return res.status(404).json({ message: "No assigned tickets found." });
     }
-
-    // Modify response to include created_by (user.name)
     const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
       created_by: user.name
     }));
-
     res.status(200).json({
       message: "Assigned tickets fetched successfully",
       totalTickets: tickets.length,
       tickets: response
     });
   } catch (error) {
-    console.error("Error fetching open tickets:", error);
+    console.error("Error fetching assigned tickets:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -1127,16 +1135,25 @@ const mockComplaintWorkflow = async (req, res) => {
 
 const searchByPhoneNumber = async (req, res) => {
   try {
-    const { phoneNumber } = req.params;
-
+    let { phoneNumber } = req.params;
     if (!phoneNumber) {
       return res.status(400).json({ message: "Phone number is required" });
     }
-
+    // Normalize phone number for Tanzanian format
+    let normalized = phoneNumber.replace(/[^0-9]/g, "");
+    if (normalized.startsWith("0")) normalized = "255" + normalized.slice(1);
+    if (normalized.length === 9) normalized = "255" + normalized;
+    const plusFormat = "+255" + normalized.slice(-9);
+    const plainFormat = "255" + normalized.slice(-9);
+    // Search for all common formats
     const tickets = await Ticket.findAll({
       where: {
         [Op.or]: [
           { phone_number: phoneNumber },
+          { phone_number: normalized },
+          { phone_number: plusFormat },
+          { phone_number: plainFormat },
+          { phone_number: { [Op.like]: `%${normalized.slice(-9)}` } },
           { nida_number: phoneNumber }
         ]
       },
@@ -1149,20 +1166,17 @@ const searchByPhoneNumber = async (req, res) => {
         }
       ]
     });
-
     if (tickets.length === 0) {
       return res.status(200).json({
         found: false,
         message: "No tickets found for this phone number"
       });
     }
-
     return res.status(200).json({
       found: true,
       message: "Tickets found successfully",
       tickets: tickets
     });
-
   } catch (error) {
     console.error("Error searching tickets by phone number:", error);
     return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -1429,6 +1443,74 @@ const getClaimsWithValidNumbers = async (req, res) => {
   }
 };
 
+// Assign ticket to attendee by username (for focal person)
+const assignTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { assignedToUsername, assignedById, reason } = req.body;
+    if (!ticketId || !assignedToUsername || !assignedById) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const assignedTo = await User.findOne({ where: { username: assignedToUsername } });
+    if (!assignedTo) {
+      return res.status(404).json({ message: "Attendee not found" });
+    }
+    // Update ticket assignment
+    await Ticket.update(
+      { assigned_to_id: assignedTo.id, status: 'Assigned' },
+      { where: { id: ticketId } }
+    );
+    // Track assignment
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: assignedById,
+      assigned_to_id: assignedTo.id,
+      assigned_to_role: assignedTo.role,
+      action: 'Assigned',
+      reason,
+      created_at: new Date()
+    });
+    // Send email to assigned attendee (if email exists)
+    if (assignedTo.email) {
+      const ticket = await Ticket.findOne({ where: { id: ticketId } });
+      const emailSubject = `Ticket Assigned: ${ticket.subject || ''} (ID: ${ticket.ticket_id || ticketId})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedTo.name || assignedTo.username},</p>
+        <p>You have been assigned a ticket. Details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || ''}</li>
+          <li><strong>Description:</strong> ${ticket.description || ''}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        // await sendEmail({ to: assignedTo.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+      } catch (emailError) {
+        console.error("Error sending assignment email:", emailError.message);
+      }
+    }
+    return res.json({ message: 'Ticket assigned successfully' });
+  } catch (error) {
+    console.error('Error assigning ticket:', error);
+    return res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+};
+
+const getAllAttendee = async (req, res) => {
+  try {
+    const attendee = await User.findAll({
+      where: { role: "attendee" },
+    });
+    res.status(200).json({ attendees: attendee });
+  } catch (error) {
+    res.status(500).json({ message: "server error", error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1446,5 +1528,7 @@ module.exports = {
   getTicketById,
   closeTicket,
   closeCoordinatorTicket,
-  getClaimsWithValidNumbers
+  getClaimsWithValidNumbers,
+  assignTicket,
+  getAllAttendee,
 };
