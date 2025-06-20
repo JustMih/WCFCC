@@ -41,9 +41,13 @@ const getFocalPersonTickets = async (req, res) => {
 
 const getFocalPersonDashboardCounts = async (req, res) => {
   try {
+    const userId = req.user.userId;
+    const user = await User.findByPk(userId);
+    const section = user.unit_section;
     // Get new inquiries (status is null or Open)
     const newInquiries = await Ticket.count({
       where: {
+        section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
@@ -58,10 +62,10 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         ]
       }
     });
-
     // Get escalated inquiries
     const escalatedInquiries = await Ticket.count({
       where: {
+        section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
@@ -69,20 +73,20 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         // is_escalated: true
       }
     });
-
     // Get total inquiries
     const totalInquiries = await Ticket.count({
       where: {
+        section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
         ]
       }
     });
-
     // Get resolved (closed) inquiries
     const resolvedInquiries = await Ticket.count({
       where: {
+        section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
@@ -90,10 +94,10 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         status: 'Closed'
       }
     });
-
     // Get open inquiries
     const openInquiries = await Ticket.count({
       where: {
+        section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
@@ -101,13 +105,12 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         status: 'Open'
       }
     });
-
     // Get closed inquiries (same as resolved)
     const closedInquiries = resolvedInquiries;
-
     // Get in progress inquiries
     const inProgressInquiries = await Ticket.count({
       where: {
+        section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
@@ -115,7 +118,6 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         status: 'In Progress'
       }
     });
-
     res.status(200).json({
       success: true,
       newInquiries,
@@ -126,7 +128,6 @@ const getFocalPersonDashboardCounts = async (req, res) => {
       closedInquiries,
       inProgressInquiries
     });
-
   } catch (error) {
     console.error("Error fetching dashboard counts:", error);
     res.status(500).json({

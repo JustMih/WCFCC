@@ -1258,6 +1258,12 @@ const getTicketById = async (req, res) => {
 // Helper to notify all users with a given role
 async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, message) {
   const users = await User.findAll({ where: { role: roles } });
+  // Fetch sender's role for channel
+  let senderRole = 'system';
+  if (senderId) {
+    const senderUser = await User.findOne({ where: { id: senderId } });
+    if (senderUser && senderUser.role) senderRole = senderUser.role;
+  }
   for (const user of users) {
     if (user.email) {
       await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
@@ -1267,7 +1273,8 @@ async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, m
       sender_id: senderId,
       recipient_id: user.id,
       message,
-      status: 'unread'
+      status: 'unread',
+      channel: senderRole
     });
   }
 }
@@ -1310,9 +1317,19 @@ const closeTicket = async (req, res) => {
     const notifyMsg = `Ticket ${ticket.ticket_id} has been closed.`;
     await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject, notifyHtml, ticketId, userId, notifyMsg);
 
+    // Fetch attended_by user name
+    let attended_by_name = null;
+    if (userId) {
+      const attendedByUser = await User.findOne({ where: { id: userId } });
+      attended_by_name = attendedByUser ? attendedByUser.name : null;
+    }
+
     return res.status(200).json({
       message: "Ticket closed successfully",
-      ticket
+      ticket: {
+        ...ticket.toJSON(),
+        attended_by_name
+      }
     });
 
   } catch (error) {
