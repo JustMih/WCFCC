@@ -6,7 +6,7 @@ const { DataTypes } = require('sequelize');
 const LiveCall = require('../models/LiveCall')(sequelize, DataTypes);
 
 const db = mysql.createPool({
-  host: 'localhost',
+  host: '10.52.0.19',
   user: 'asterisk',
   password: '@Ttcl123',
   database: 'asterisk'

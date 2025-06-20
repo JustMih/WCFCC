@@ -1,4 +1,3 @@
-// models/MissedCall.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/mysql_connection.js");
 
@@ -18,6 +17,11 @@ const MissedCall = sequelize.define("MissedCall", {
   },
   agentId: {
     type: DataTypes.STRING, // or UUID if you use that format
+    allowNull: false,
+  },
+  status: {
+    type: DataTypes.ENUM('pending', 'called_back', 'ignored'),
+    defaultValue: 'pending',
     allowNull: false,
   },
 }, {

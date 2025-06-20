@@ -1,0 +1,18 @@
+module.exports = (sequelize, DataTypes) => {
+  const AgentAssignment = sequelize.define('AgentAssignment', {
+    user_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    voice_note_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    assigned_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+  });
+
+  return AgentAssignment;
+};
