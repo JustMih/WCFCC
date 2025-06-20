@@ -41,8 +41,7 @@ const getAllAttendee = async (req, res) => {
     const attendee = await User.findAll({
       where: { role: "attendee" },
     });
-    const attendeeCount = attendee.length;
-    res.status(200).json({ attendeeCount });
+    res.status(200).json({ attendees: attendee });
   } catch (error) {
     res.status(500).json({ message: "server error", error: error.message });
   }

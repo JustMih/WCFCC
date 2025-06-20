@@ -3,10 +3,13 @@ const User = require("../../models/User");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { Op, Sequelize } = require("sequelize");
 
- const getFocalPersonTickets = async (req, res) => {
+const getFocalPersonTickets = async (req, res) => {
   try {
+    const userId = req.user.userId; // or get from req.params if needed
+    const user = await User.findByPk(userId);
     const inquiries = await Ticket.findAll({
       where: {
+        section: user.unit_section,
         [Op.or]: [
           { category: "Inquiry" },
           { converted_to: "Inquiry" }
@@ -23,7 +26,6 @@ const { Op, Sequelize } = require("sequelize");
       order: [['created_at', 'DESC']]
     });
 
-    // Always return 200 with the inquiries array (even if empty)
     res.status(200).json({
       message: inquiries.length ? "Inquiry tickets fetched successfully." : "No tickets found.",
       inquiries
