@@ -33,14 +33,14 @@ const emitLiveCall = (callData) => {
   }
 
   ioInstance.emit("live_call_update", callData);
-  console.log("📡 Emitted live_call_update:", callData);
+  // console.log("📡 Emitted live_call_update:", callData);
 };
 
 // Global emit support
 exports.emitLiveCall = (callData) => {
   if (global._io) {
     global._io.emit("live_call_update", callData);
-    console.log("📡 Emitted live call globally:", callData);
+    // console.log("📡 Emitted live call globally:", callData);
   } else {
     console.warn("⚠️ Socket.IO not initialized");
   }

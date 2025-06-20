@@ -1,12 +1,23 @@
 const express = require("express");
 const router = express.Router();
-const { QueueStatus } = require("../models/queuestatus.js"); // Adjust path if needed
+const db = require("../models");
+
+const QueueStatus = db.QueueStatus;
+
+// 🛡 Defensive check to catch missing model
+if (!QueueStatus) {
+  console.error("❌ QueueStatus model is undefined. Check your model registration.");
+}
 
 // ✅ GET: Fetch the latest saved queue snapshot
 router.get("/", async (req, res) => {
+  if (!QueueStatus) {
+    return res.status(500).json({ error: "QueueStatus model is not loaded" });
+  }
+
   try {
     const data = await QueueStatus.findAll({
-      order: [["queue", "ASC"]]
+      order: [["queue", "ASC"]],
     });
     res.status(200).json(data);
   } catch (error) {
@@ -17,6 +28,10 @@ router.get("/", async (req, res) => {
 
 // ✅ POST: Save and broadcast live queue status
 router.post("/", async (req, res) => {
+  if (!QueueStatus) {
+    return res.status(500).json({ error: "QueueStatus model is not loaded" });
+  }
+
   const queueData = req.body;
 
   if (!Array.isArray(queueData)) {
@@ -24,13 +39,13 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    // Clear existing data (keeping it as a one-row snapshot model)
+    // Clear existing snapshot
     await QueueStatus.destroy({ where: {} });
 
-    // Insert the new snapshot
+    // Insert new data
     await QueueStatus.bulkCreate(queueData);
 
-    // Emit via global socket to all listeners
+    // Emit via socket
     if (global._io) {
       global._io.emit("queueStatusUpdate", queueData);
       console.log("📡 Broadcasted + saved queue status:", queueData);

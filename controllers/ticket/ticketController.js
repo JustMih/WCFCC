@@ -201,6 +201,12 @@ const createTicket = async (req, res) => {
       employerAllocatedStaffUsername,
     } = req.body;
 
+    // Initialize finalSection before any use
+    let finalSection = inputSection;
+    if (finalSection === 'Unit') {
+      finalSection = sub_section;
+    }
+
     const userId = req?.user?.userId;
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
@@ -213,16 +219,12 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ message: "Inquiry type (Claims or Compliance) is required for Inquiry category." });
     }
 
-    // Initialize finalSection before assignment logic
-    let finalSection = inputSection;
-    if (finalSection === 'Unit') {
-      finalSection = sub_section;
-    }
+   
 
     // --- Assignment Logic ---
     let assignedUser = null;
-    let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    // let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.finance';
+    // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.said';
    
     if (category === 'Inquiry') {
       // Claims or Compliance
