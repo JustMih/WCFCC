@@ -14,6 +14,7 @@ const { sendEmail } = require('../../services/emailService');
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
+const AssignedOfficer = require("../../models/AssignedOfficer");
 
 const getTicketCounts = async (req, res) => {
   try {
@@ -224,7 +225,9 @@ const createTicket = async (req, res) => {
     // --- Assignment Logic ---
     let assignedUser = null;
     // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.said';
+    let allocatedUserUsername = employerAllocatedStaffUsername || 'attendee.hr1';
+    
+    // attendee.hr1
    
     if (category === 'Inquiry') {
       // Claims or Compliance
@@ -1258,6 +1261,12 @@ const getTicketById = async (req, res) => {
 // Helper to notify all users with a given role
 async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, message) {
   const users = await User.findAll({ where: { role: roles } });
+  // Fetch sender's role for channel
+  let senderRole = 'system';
+  if (senderId) {
+    const senderUser = await User.findOne({ where: { id: senderId } });
+    if (senderUser && senderUser.role) senderRole = senderUser.role;
+  }
   for (const user of users) {
     if (user.email) {
       await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
@@ -1267,7 +1276,8 @@ async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, m
       sender_id: senderId,
       recipient_id: user.id,
       message,
-      status: 'unread'
+      status: 'unread',
+      channel: senderRole
     });
   }
 }
@@ -1310,9 +1320,19 @@ const closeTicket = async (req, res) => {
     const notifyMsg = `Ticket ${ticket.ticket_id} has been closed.`;
     await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject, notifyHtml, ticketId, userId, notifyMsg);
 
+    // Fetch attended_by user name
+    let attended_by_name = null;
+    if (userId) {
+      const attendedByUser = await User.findOne({ where: { id: userId } });
+      attended_by_name = attendedByUser ? attendedByUser.name : null;
+    }
+
     return res.status(200).json({
       message: "Ticket closed successfully",
-      ticket
+      ticket: {
+        ...ticket.toJSON(),
+        attended_by_name
+      }
     });
 
   } catch (error) {
@@ -1513,6 +1533,36 @@ const getAllAttendee = async (req, res) => {
   }
 };
 
+// Get all assignment/reassignment actions for a ticket
+const getTicketAssignments = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [["createdAt", "ASC"]]
+    });
+    res.json(assignments);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch ticket assignments", error: error.message });
+  }
+};
+
+// Get all assigned officers for a ticket
+const getAssignedOfficers = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const officers = await AssignedOfficer.findAll({
+      where: { ticket_id: ticketId },
+      order: [["assigned_at", "ASC"]]
+    });
+    res.json(officers);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch assigned officers", error: error.message });
+  }
+};
+
+
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1533,4 +1583,6 @@ module.exports = {
   getClaimsWithValidNumbers,
   assignTicket,
   getAllAttendee,
+  getTicketAssignments,
+  getAssignedOfficers,
 };
