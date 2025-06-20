@@ -1445,6 +1445,74 @@ const getClaimsWithValidNumbers = async (req, res) => {
   }
 };
 
+// Assign ticket to attendee by username (for focal person)
+const assignTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { assignedToUsername, assignedById, reason } = req.body;
+    if (!ticketId || !assignedToUsername || !assignedById) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const assignedTo = await User.findOne({ where: { username: assignedToUsername } });
+    if (!assignedTo) {
+      return res.status(404).json({ message: "Attendee not found" });
+    }
+    // Update ticket assignment
+    await Ticket.update(
+      { assigned_to_id: assignedTo.id, status: 'Assigned' },
+      { where: { id: ticketId } }
+    );
+    // Track assignment
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: assignedById,
+      assigned_to_id: assignedTo.id,
+      assigned_to_role: assignedTo.role,
+      action: 'Assigned',
+      reason,
+      created_at: new Date()
+    });
+    // Send email to assigned attendee (if email exists)
+    if (assignedTo.email) {
+      const ticket = await Ticket.findOne({ where: { id: ticketId } });
+      const emailSubject = `Ticket Assigned: ${ticket.subject || ''} (ID: ${ticket.ticket_id || ticketId})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedTo.name || assignedTo.username},</p>
+        <p>You have been assigned a ticket. Details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || ''}</li>
+          <li><strong>Description:</strong> ${ticket.description || ''}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        // await sendEmail({ to: assignedTo.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+      } catch (emailError) {
+        console.error("Error sending assignment email:", emailError.message);
+      }
+    }
+    return res.json({ message: 'Ticket assigned successfully' });
+  } catch (error) {
+    console.error('Error assigning ticket:', error);
+    return res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+};
+
+const getAllAttendee = async (req, res) => {
+  try {
+    const attendee = await User.findAll({
+      where: { role: "attendee" },
+    });
+    res.status(200).json({ attendees: attendee });
+  } catch (error) {
+    res.status(500).json({ message: "server error", error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1462,5 +1530,7 @@ module.exports = {
   getTicketById,
   closeTicket,
   closeCoordinatorTicket,
-  getClaimsWithValidNumbers
+  getClaimsWithValidNumbers,
+  assignTicket,
+  getAllAttendee,
 };

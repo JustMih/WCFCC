@@ -3,7 +3,8 @@ const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
-  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers
+  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers,
+  assignTicket, getAllAttendee
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -128,5 +129,21 @@ router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
 router.get('/claims-with-valid-numbers', 
   authMiddleware,
   getClaimsWithValidNumbers);
+
+// Add after other ticket routes
+router.post(
+  '/:ticketId/assign',
+  authMiddleware,
+  roleMiddleware(['focal-person', 'super-admin', 'coordinator']),
+  assignTicket
+);
+
+// Add after other ticket routes
+router.get(
+  '/admin/attendee',
+  authMiddleware,
+  roleMiddleware(['focal-person', 'super-admin', 'coordinator', 'admin']),
+  getAllAttendee
+);
 
 module.exports = router;
