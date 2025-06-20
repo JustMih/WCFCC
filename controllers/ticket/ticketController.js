@@ -14,6 +14,7 @@ const { sendEmail } = require('../../services/emailService');
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
+const AssignedOfficer = require("../../models/AssignedOfficer");
 
 const getTicketCounts = async (req, res) => {
   try {
@@ -1532,6 +1533,36 @@ const getAllAttendee = async (req, res) => {
   }
 };
 
+// Get all assignment/reassignment actions for a ticket
+const getTicketAssignments = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [["createdAt", "ASC"]]
+    });
+    res.json(assignments);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch ticket assignments", error: error.message });
+  }
+};
+
+// Get all assigned officers for a ticket
+const getAssignedOfficers = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const officers = await AssignedOfficer.findAll({
+      where: { ticket_id: ticketId },
+      order: [["assigned_at", "ASC"]]
+    });
+    res.json(officers);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch assigned officers", error: error.message });
+  }
+};
+
+
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1552,4 +1583,6 @@ module.exports = {
   getClaimsWithValidNumbers,
   assignTicket,
   getAllAttendee,
+  getTicketAssignments,
+  getAssignedOfficers,
 };

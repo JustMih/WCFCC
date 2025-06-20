@@ -4,7 +4,7 @@ const {
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
   mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers,
-  assignTicket, getAllAttendee, closeTicket
+  assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -118,7 +118,7 @@ router.get(
 // Get ticket by ID
 router.get('/:ticketId', 
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person"]),
   getTicketById
 );
 
@@ -153,5 +153,9 @@ router.post(
   roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', 'focal-person']),
   closeTicket
 );
+
+router.get('/:ticketId/assignments', authMiddleware, getTicketAssignments);
+router.get('/:ticketId/assigned-officers', authMiddleware, getAssignedOfficers);
+
 
 module.exports = router;

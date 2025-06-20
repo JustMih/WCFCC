@@ -23,7 +23,7 @@ const getFocalPersonTickets = async (req, res) => {
           ...where,
           [Op.or]: [
             { status: null },
-            { status: 'Open' }
+            { status: 'Open' },
           ]
         };
         break;
@@ -36,15 +36,16 @@ const getFocalPersonTickets = async (req, res) => {
       case 'open':
         where = {
           ...where,
-          status: 'Open'
+          // status: 'Open',
+          status:'Assigned'
         };
         break;
-      case 'in-progress':
-        where = {
-          ...where,
-          status: 'In Progress'
-        };
-        break;
+      // case 'in-progress':
+      //   where = {
+      //     ...where,
+      //     status: 'In Progress'
+      //   };
+      //   break;
       case 'closed':
         where = {
           ...where,
@@ -258,6 +259,7 @@ const reassignTicket = async (req, res) => {
       phone_number,
       employer_id,
       assigned_to_id,
+      assigned_to_role,
       notes,
       reassignment_reason
     } = req.body;
@@ -313,6 +315,7 @@ const reassignTicket = async (req, res) => {
       phone_number,
       employer_id,
       assigned_to_id,
+      assigned_to_role,
       notes,
       status: 'Active',
       assigned_at: new Date(),
@@ -332,7 +335,8 @@ const reassignTicket = async (req, res) => {
     // Update ticket
     await ticket.update({
       status: 'Reassigned',
-      assigned_officer_id: newAssignedOfficer.id
+      assigned_officer_id: newAssignedOfficer.id,
+      assigned_to_role
     });
 
     res.json({
