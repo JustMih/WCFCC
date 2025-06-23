@@ -224,9 +224,9 @@ const createTicket = async (req, res) => {
 
     // --- Assignment Logic ---
     let assignedUser = null;
-    // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    let allocatedUserUsername = employerAllocatedStaffUsername || 'focalrehema.hr';
-    
+    let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    // let allocatedUserUsername = employerAllocatedStaffUsername;
+    // console.log(allocatedUserUsername);
     // attendee.hr1
    
     if (category === 'Inquiry') {
@@ -396,11 +396,11 @@ if ((requester === 'Employee' || requester === 'Representative') && isValidTzPho
         <p>WCF Customer Care System</p>
       `;
       try {
-        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        // await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
       } catch (emailError) {
-        // console.error("Error sending email:", emailError.message);
-        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+        console.error("Error sending email:", emailError.message);
+        // console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
         emailWarning += ' (Warning: Failed to send email to assignee.)';
       }
     }
@@ -1269,7 +1269,7 @@ async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, m
   }
   for (const user of users) {
     if (user.email) {
-      await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+      await sendEmail({ to: user.email, subject, htmlBody });
     }
     await Notification.create({
       ticket_id: ticketId,
