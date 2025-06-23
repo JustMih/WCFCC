@@ -180,8 +180,8 @@ const createTicket = async (req, res) => {
       subject,
       responsible_unit_id,
       responsible_unit_name,
-      section: inputSection,
-      sub_section,
+      section,
+      sub_section:inputSection,
       shouldClose,
       resolution_details,
       // New fields for representative
@@ -224,9 +224,9 @@ const createTicket = async (req, res) => {
 
     // --- Assignment Logic ---
     let assignedUser = null;
-    // let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
-    let allocatedUserUsername = employerAllocatedStaffUsername || 'attendee.hr1';
-    
+    let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    // let allocatedUserUsername = employerAllocatedStaffUsername;
+    // console.log(allocatedUserUsername);
     // attendee.hr1
    
     if (category === 'Inquiry') {
@@ -310,9 +310,9 @@ const createTicket = async (req, res) => {
       category,
       inquiry_type,
       responsible_unit_id: responsible_unit_id || functionId,
-      responsible_unit_name: responsible_unit_name  || finalSection,
-      section: finalSection || responsibleUnit?.section?.name || 'Unit',
-      sub_section: sub_section || responsibleUnit?.name || '',
+      responsible_unit_name: responsible_unit_name,
+      section: responsibleUnit?.section?.name || 'Unit',
+      sub_section: responsibleUnit?.name || finalSection,
       subject: subject || '',
       description,
       status: initialStatus,
@@ -396,11 +396,11 @@ if ((requester === 'Employee' || requester === 'Representative') && isValidTzPho
         <p>WCF Customer Care System</p>
       `;
       try {
-        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        // await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
       } catch (emailError) {
-        // console.error("Error sending email:", emailError.message);
-        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+        console.error("Error sending email:", emailError.message);
+        // console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
         emailWarning += ' (Warning: Failed to send email to assignee.)';
       }
     }
@@ -1222,7 +1222,7 @@ const getTicketById = async (req, res) => {
         {
           model: User,
           as: 'assignee',
-          attributes: ['id', 'name', 'email']
+          attributes: ['id', 'name', 'email', 'role']
         },
         {
           model: User,
@@ -1258,7 +1258,7 @@ const getTicketById = async (req, res) => {
   }
 };
 
-// Helper to notify all users with a given role
+// Helper to notify all users with a given role when ticket closed
 async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, message) {
   const users = await User.findAll({ where: { role: roles } });
   // Fetch sender's role for channel
@@ -1269,7 +1269,7 @@ async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, m
   }
   for (const user of users) {
     if (user.email) {
-      await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+      await sendEmail({ to: user.email, subject, htmlBody });
     }
     await Notification.create({
       ticket_id: ticketId,
@@ -1561,7 +1561,60 @@ const getAssignedOfficers = async (req, res) => {
   }
 };
 
+// Get tickets assigned to user and notified
+const getAssignedNotifiedTickets = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { notificationStatus } = req.query; // e.g., "unread", "read", or undefined
 
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Build notification where clause
+    const notificationWhere = { recipient_id: userId };
+    if (notificationStatus) {
+      notificationWhere.status = notificationStatus;
+    }
+
+    // Find notifications for tickets assigned to user, with ticket and assignee info
+    const notifications = await Notification.findAll({
+      where: notificationWhere,
+      include: [
+        {
+          model: Ticket,
+          as: "ticket",
+          where: {
+            assigned_to_id: userId,
+            status: { [Op.in]: ["Open", "Assigned"] }
+          },
+          include: [
+            {
+              model: User,
+              as: "assignee",
+              attributes: ["id", "name", "email"]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: "sender",
+          attributes: ["id", "name"]
+        }
+      ],
+      order: [["created_at", "DESC"]]
+    });
+
+    res.status(200).json({
+      message: "Assigned and notified tickets fetched successfully",
+      notificationCount: notifications.length,
+      notifications
+    });
+  } catch (error) {
+    console.error("Error fetching assigned and notified tickets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 module.exports = {
   createTicket,
@@ -1585,4 +1638,5 @@ module.exports = {
   getAllAttendee,
   getTicketAssignments,
   getAssignedOfficers,
+  getAssignedNotifiedTickets,
 };
