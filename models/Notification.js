@@ -50,6 +50,10 @@ Notification.associate = (models) => {
     foreignKey: 'ticket_id',
     as: 'ticket'
   });
+  Notification.belongsTo(models.User, {
+    foreignKey: 'sender_id',
+    as: 'sender'
+  });
 };
 
 module.exports = Notification; 
