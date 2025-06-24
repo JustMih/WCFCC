@@ -1,3 +1,4 @@
+const { Client } = require("ldapts");
 const User = require("../../models/User");
 const AgentLoginLog = require("../../models/agent_activity_logs");
 const AgentStatus = require("../../models/agents_status");
@@ -30,190 +31,122 @@ const registerSuperAdmin = async () => {
   }
 };
 
-// const login = async (req, res) => {
-//   const { email, password } = req.body;
+const authenticateActiveDirectory = async (username, password) => {
+  const url = "ldap://10.0.7.78";
+  const baseDN = "dc=ttcl,dc=co,dc=tz";
+  const bindDN = `TTCLHQ\\${username}`;
+  const client = new Client({ url });
 
-//   // Find user by email
-//   const user = await User.findOne({ where: { email } });
-//   if (!user) {
-//     return res.status(400).json({ message: "Invalid email or password" });
-//   }
+  try {
+    // LDAP bind (authenticate user)
+    await client.bind(bindDN, password);
+    console.log(`LDAP bind successful for ${username}`);
 
-//   // Initialize failed login attempts if not set
-//   if (!user.failedLoginAttempts || isNaN(user.failedLoginAttempts)) {
-//     user.failedLoginAttempts = 0; // Initialize if undefined or NaN
-//   }
+    // LDAP search for user
+    const { searchEntries } = await client.search(baseDN, {
+      scope: "sub",
+      filter: `(sAMAccountName=${username})`,
+      attributes: ["employeeID", "mail"],
+    });
 
-//   console.log(
-//     `User before incrementing: Failed login attempts = ${user.failedLoginAttempts}`
-//   );
+    if (searchEntries.length === 0) {
+      throw new Error("User not found in LDAP.");
+    }
 
-//   // Check if user is locked out
-//   if (user.failedLoginAttempts >= 3) {
-//     const lockoutTime = 5 * 60 * 1000; // 5 minutes in milliseconds
-//     const lastFailedLoginTime = new Date(user.lastFailedLogin);
-
-//     // Check if lastFailedLogin is a valid date
-//     if (isNaN(lastFailedLoginTime.getTime())) {
-//       return res
-//         .status(400)
-//         .json({ message: "Invalid last failed login time" });
-//     }
-
-//     const timePassed = new Date().getTime() - lastFailedLoginTime.getTime();
-//     console.log(`Time passed since last failed login: ${timePassed} ms`);
-
-//     if (timePassed < lockoutTime) {
-//       const timeRemaining = lockoutTime - timePassed;
-//       const minutesRemaining = Math.ceil(timeRemaining / 60000); // Time remaining in minutes
-//       console.log(
-//         `Account is locked. Try again in ${minutesRemaining} minute(s).`
-//       );
-//       return res.status(400).json({
-//         message: `Your account is locked. Try again in ${minutesRemaining} minute${
-//           minutesRemaining > 1 ? "s" : ""
-//         }.`,
-//         timeRemaining,
-//       });
-//     } else {
-//       // Reset failed attempts after lockout time has passed
-//       user.failedLoginAttempts = 0;
-//       user.lastFailedLogin = null;
-
-//       try {
-//         await user.save();
-//         console.log("Lockout period passed. Resetting failed attempts.");
-//       } catch (err) {
-//         console.error("Error resetting user lockout:", err);
-//         return res.status(500).json({ message: "Internal server error" });
-//       }
-//     }
-//   }
-
-//   // Check password
-//   const isMatch = await bcrypt.compare(password, user.password);
-//   if (!isMatch) {
-//     // Increment failed login attempts
-//     user.failedLoginAttempts = user.failedLoginAttempts + 1;
-//     user.lastFailedLogin = new Date();
-
-//     // Log the user data before saving for debugging
-//     console.log(
-//       "User data before save:",
-//       user.failedLoginAttempts,
-//       user.lastFailedLogin
-//     );
-
-//     try {
-//       // Ensure user is saved to the database
-//       await user.save();
-
-//       // Log the updated data after saving
-//       console.log("User data after save:", user.failedLoginAttempts);
-//     } catch (err) {
-//       console.error("Error saving user:", err);
-//       return res.status(500).json({ message: "Internal server error" });
-//     }
-
-//     return res.status(400).json({ message: "Invalid email or password" });
-//   }
-
-//   // Ensure account is active
-//   if (!user.isActive) {
-//     return res.status(400).json({ message: "Account is inactive" });
-//   }
-
-//   // Set user status to "online"
-//   user.status = "online";
-//   await user.save();
-
-//   // Generate JWT token
-//   const token = jwt.sign(
-//     { userId: user.id, role: user.role },
-//     process.env.JWT_SECRET,
-//     { expiresIn: "1h" }
-//   );
-
-//   // Log agent login in AgentLoginLog
-//   if (user.role === "agent") {
-//     await AgentLoginLog.create({
-//       userId: user.id,
-//       role: "agent",
-//       loginTime: new Date(),
-//       logoutTime: null, // Will be updated on logout
-//       totalOnlineTime: 0, // Will be calculated later
-//     });
-//     console.log(`Agent ${user.name} logged in.`);
-//   }
-
-//   res.json({
-//     message: "Login successful",
-//     token,
-//     user: {
-//       name: user.name,
-//       isActive: user.isActive,
-//       role: user.role,
-//       id: user.id,
-//     },
-//   });
-// };
-
+    const ldapUser = searchEntries[0];
+    return ldapUser; // Successfully found user in Active Directory
+  } catch (error) {
+    console.error("LDAP error:", error);
+    throw new Error("Failed to authenticate user in Active Directory.");
+  } finally {
+    await client.unbind();
+  }
+};
 
 const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
-  // Find user by email
-  const user = await User.findOne({ where: { email } });
-  if (!user) {
-    return res.status(400).json({ message: "Invalid email or password" });
-  }
+  try {
+    let user;
 
-  // Check password
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) {
-    return res.status(400).json({ message: "Invalid email or password" });
-  }
+    // Step 1: Check if username is superadmin
+    if (username === "superadmin@wcf.go.tz") {
+      // Authenticate directly from the local database
+      user = await User.findOne({
+        where: { email: username },
+      });
 
-  // Ensure account is active
-  if (!user.isActive) {
-    return res.status(400).json({ message: "Account is inactive" });
-  }
+      if (!user) {
+        return res.status(400).json({
+          message: "Super Admin not found in the database.",
+        });
+      }
 
-  // Set user status to "online"
-  user.status = "online";
-  await user.save();
+      // Check password for super admin (can be skipped if hashed)
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(400).json({ message: "Invalid password" });
+      }
+    } else {
+      // Step 2: Authenticate against Active Directory for other users
+      const ldapUser = await authenticateActiveDirectory(username, password);
 
-  // Generate JWT token
-  const token = jwt.sign(
-    { userId: user.id, name: user.name, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: "24h" }
-  );
+      // Step 3: Check if user exists in the local database
+      user = await User.findOne({
+        where: { email: `${username}@wcf.go.tz` },
+      });
 
-  // Log agent login in AgentLoginLog
-  if (user.role === "agent") {
-    await AgentLoginLog.create({
-      userId: user.id,
-      role: "agent",
-      loginTime: new Date(),
-      logoutTime: null, // Will be updated on logout
-      totalOnlineTime: 0, // Will be calculated later
+      if (!user) {
+        // If user doesn't exist, create a new user with inactive status
+        user = await User.create({
+          name: username, // Set name as the username from input
+          email: `${username}@wcf.go.tz`, // Set email as username@wcf.go.tz
+          password: "wcf12345", // Password will be updated later by the super admin
+          extension: null,
+          role: "agent",
+          isActive: false, // Set as inactive initially
+        });
+        console.log(`User ${username} created with inactive status.`);
+      }
+
+      // Step 4: Check if the account is active
+      if (user.isActive === false) {
+        return res.status(400).json({
+          message:
+            "Your account is inactive. Please wait for the super admin to activate it.",
+        });
+      }
+    }
+
+    // Set user status to "online"
+    user.status = "online";
+    await user.save();
+
+    // Step 5: Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+
+    // Step 6: Return successful response
+    res.json({
+      message: "Login successful",
+      token,
+      user: {
+        name: user.name,
+        isActive: user.isActive,
+        role: user.role,
+        id: user.id,
+        extension: user.extension,
+      },
     });
-    console.log(`Agent ${user.name} logged in.`);
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(400).json({ message: error.message });
   }
-
-  res.json({
-    message: "Login successful",
-    token,
-    user: {
-      name: user.name,
-      isActive: user.isActive,
-      role: user.role,
-      id: user.id,
-      extension: user.extension,
-    },
-  });
 };
+
 const logout = async (req, res) => {
   const { userId } = req.body;
 
@@ -228,32 +161,32 @@ const logout = async (req, res) => {
   await user.save();
 
   // Find the latest login entry where logoutTime is NULL
-  if (user.role === "agent") {
-    const agentLog = await AgentLoginLog.findOne({
-      where: { userId, logoutTime: null },
-      order: [["loginTime", "DESC"]],
-    });
+  // if (user.role === "agent") {
+  //   const agentLog = await AgentLoginLog.findOne({
+  //     where: { userId, logoutTime: null },
+  //     order: [["loginTime", "DESC"]],
+  //   });
 
-    if (!agentLog) {
-      return res
-        .status(400)
-        .json({ message: "No active login session found." });
-    }
+  //   if (!agentLog) {
+  //     return res
+  //       .status(400)
+  //       .json({ message: "No active login session found." });
+  //   }
 
-    // Calculate online duration
-    const logoutTime = new Date();
-    const onlineDuration = Math.floor((logoutTime - agentLog.loginTime) / 1000); // Convert to seconds
+  //   // Calculate online duration
+  //   const logoutTime = new Date();
+  //   const onlineDuration = Math.floor((logoutTime - agentLog.loginTime) / 1000); // Convert to seconds
 
-    // Update logout time and totalOnlineTime
-    await agentLog.update({
-      logoutTime: logoutTime,
-      totalOnlineTime: onlineDuration,
-    });
+  //   // Update logout time and totalOnlineTime
+  //   await agentLog.update({
+  //     logoutTime: logoutTime,
+  //     totalOnlineTime: onlineDuration,
+  //   });
 
-    console.log(
-      `Agent ${userId} logged out at ${logoutTime}. Total time online: ${onlineDuration} seconds.`
-    );
-  }
+  //   console.log(
+  //     `Agent ${userId} logged out at ${logoutTime}. Total time online: ${onlineDuration} seconds.`
+  //   );
+  // }
 
   res.json({ message: "Logged out successfully" });
 };

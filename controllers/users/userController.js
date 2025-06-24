@@ -1,6 +1,6 @@
 const User = require("../../models/User");
 const AgentLoginLog = require("../../models/agent_activity_logs");
-const ChatMassage = require("../../models/chart_message")
+const ChatMassage = require("../../models/chart_message");
 const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
@@ -87,6 +87,51 @@ const getSupervisor = async (req, res) => {
   }
 };
 
+// get admin
+const getAdmin = async (req, res) => {
+  try {
+    const admins = await User.findAll({
+      where: { role: "admin" },
+    });
+    const adminsCount = admins.length;
+    res.status(200).json({
+      admins,
+      count: adminsCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// get users by role
+// "attendee",
+// "coordinator",
+// "focal-person",
+// "director-general",
+// "directorate of operations",
+// "directorate of assessment services",
+// "directorate of finance, planning and investment",
+// "legal unit",
+// "ict unit",
+// "actuarial statistics and risk management",
+// "public relation unit",
+// "procurement management unit",
+// "human resource management and attachment unit"
+
+const getUsersByRole = async (req, res) => {
+  const { role } = req.params;
+  try {
+    const users = await User.findAll({
+      where: { role },
+    });
+    const userCount = users.length;
+    res.status(200).json({ users, count: userCount });
+  } catch (error) {
+    console.error("Error fetching users by role:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 const getMessage = async (req, res) => {
   const { user1, user2 } = req.params;
 
@@ -124,7 +169,6 @@ const getMessage = async (req, res) => {
   }
 };
 
-
 const getAgentOnline = async (req, res) => {
   try {
     const agents = await User.findAll({
@@ -155,8 +199,6 @@ const updateAgentStatus = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
-
 
 const getAgentIdle = async (req, res) => {
   try {
@@ -246,20 +288,20 @@ const getAgentOffline = async (req, res) => {
 };
 
 const GetAgentLogs = async (req, res) => {
-   const { userId } = req.params;
+  const { userId } = req.params;
 
-   try {
-     const logs = await AgentLoginLog.findAll({
-       where: { userId: userId },
-       order: [["loginTime", "DESC"]],
-     });
+  try {
+    const logs = await AgentLoginLog.findAll({
+      where: { userId: userId },
+      order: [["loginTime", "DESC"]],
+    });
 
-     res.json({ logs });
-   } catch (error) {
-     console.error("Error fetching agent logs:", error);
-     res.status(500).json({ message: "Internal server error" });
-   }
-}
+    res.json({ logs });
+  } catch (error) {
+    console.error("Error fetching agent logs:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 const deleteUser = async (req, res) => {
   const userId = req.params.id;
 
@@ -312,7 +354,7 @@ const deactivateUser = async (req, res) => {
 
 const updateUser = async (req, res) => {
   const userId = req.params.id;
-  const { name, email, password, role, extension } = req.body;
+  const { name, email, password, role, isActive, extension } = req.body;
 
   try {
     // Find the user by ID
@@ -344,6 +386,8 @@ const updateUser = async (req, res) => {
       user.password = hashedPassword;
     }
     if (role) user.role = role; // Optional: Only allow certain roles for admins
+    if (extension) user.extension = extension;
+    if (isActive) user.isActive = isActive;
 
     // Save updated user to the database
     await user.save();
@@ -364,6 +408,29 @@ const updateUser = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+// Update the user status by ID
+const updateUserStatus = async (req, res) => {
+  const { userId } = req.params; // Get userId from the request params
+  const { status } = req.body; // Get the new status from the request body
+
+  try {
+    // Check if the status value is valid (you can adjust this validation as per your requirements)
+    const validStatuses = ["online", "offline", "idle", "pause", "active", "force-pause", "mission"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    // Update the status for the user with the given userId
+    await User.update({ status }, { where: { id: userId } });
+
+    res.status(200).json({ message: "User status updated successfully" });
+  } catch (error) {
+    console.error("Error updating status:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 
 const resetUserPassword = async (req, res) => {
   const userId = req.params.id;
@@ -417,4 +484,6 @@ module.exports = {
   getSupervisor,
   getMessage,
   updateAgentStatus,
+  updateUserStatus,
+  getUsersByRole,
 };

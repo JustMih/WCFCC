@@ -1,81 +1,139 @@
+'use strict';
+
+/* ------------------------------ ENV & MODULES ------------------------------ */
+require("dotenv").config();
 const express = require("express");
-const axios = require("axios");
+const http = require("http");
+const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-require("dotenv").config();
-const cors = require("cors");
-const sequelize = require("./config/mysql_connection.js");
-const routes = require("./routes");
-const { registerSuperAdmin } = require("./controllers/auth/authController");
-const recordingRoutes = require("./routes/recordingRoutes");
-const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
-const ChatMassage = require("./models/chart_message");
-const InstagramComment = require("./models/instagram_comment");
+const axios = require("axios");
 const { Server } = require("socket.io");
-const http = require("http");
-const monitorRoutes = require('./routes/monitorRoutes');
 
+/* ------------------------------ CONFIG & DB ------------------------------ */
+const sequelize = require("./config/mysql_connection.js");
 
-// Initialize Express
+/* ------------------------------ EXPRESS INIT ------------------------------ */
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {});
 
-// Middleware
+/* ------------------------------ MODELS ------------------------------ */
+const ChatMassage = require("./models/chart_message");
+const InstagramComment = require("./models/instagram_comment");
+const VoiceNote = require('./models/voice_notes.model');
+
+/* ------------------------------ CONTROLLERS ------------------------------ */
+const { registerSuperAdmin } = require("./controllers/auth/authController");
+const { setupSocket } = require("./controllers/livestream/livestreamController");
+
+/* ------------------------------ ROUTES ------------------------------ */
+const routes = require("./routes");
+const recordingRoutes = require("./routes/recordingRoutes");
+const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
+// const monitorRoutes = require('./routes/monitorRoutes');
+const holidayRoutes = require('./routes/holidayRoutes');
+const emergencyRoutes = require('./routes/emergencyRoutes');
+const livestreamRoutes = require("./routes/livestreamRoutes");
+// const { setupSocket } = require("./controllers/livestream/livestreamController");
+const { startCELWatcher } = require("./controllers/livestream/celLiveEmitter");
+startCELWatcher(); // 🔁 Start CEL live call background loop
+
+const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
+const reportsRoutes = require('./routes/reports.routes');
+const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
+
+/* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(cors({
-  origin: ["http://localhost:3000", "https://10.52.0.19:3000"],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+  origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
 }));
 
-// Static Asterisk sound files
-app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
-  setHeaders: (res, path) => {
-    if (path.endsWith(".wav")) {
-      res.set("Content-Type", "audio/wav");
+/* ------------------------------ STATIC FILES ------------------------------ */
+// Voice note audio files
+app.get("/api/voice-notes/:id/audio", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const voiceNote = await VoiceNote.findByPk(id);
+    if (!voiceNote || !voiceNote.recording_path) {
+      return res.status(404).send("Voice note not found");
+    }
+
+    const filePath = path.resolve(voiceNote.recording_path);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Voice file not found on disk");
+    }
+
+    res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error("Failed to send audio file:", err);
+        res.status(500).send("Error sending file");
+      }
+    });
+  } catch (error) {
+    console.error("Unexpected error fetching voice note:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+// Static folders for voice and recorded audio
+app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.wav')) {
+      res.set('Content-Type', 'audio/wav');
     }
   }
 }));
+app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
 
-// API routes
+/* ------------------------------ API ROUTES ------------------------------ */
 app.use("/api", routes);
-app.use("/api", require("./routes/ivr-dtmf-routes"));
+app.use("/api", ivrDtmfRoutes);
 app.use("/api", recordingRoutes);
-app.use("/", instagramWebhookRoutes); // Mount Instagram webhook routes at root
+app.use("/api/holidays", holidayRoutes);
+app.use("/api/emergency", emergencyRoutes);
+app.use("/api/reports", reportsRoutes);
+app.use("/api/recorded-audio", recordedAudioRoutes);
+app.use("/api/livestream", livestreamRoutes);
+app.use("/api/instagram", instagramWebhookRoutes);
 
-// WebSocket Logic
-const liveCalls = new Map();
+/* ------------------------------ SOCKET.IO ------------------------------ */
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+global._io = io;
+setupSocket(io);
+
+// Private messaging and live call socket logic
 const users = {};
+const liveCalls = new Map();
 
 io.on("connection", (socket) => {
-  console.log("New user connected:", socket.id);
+  console.log("✅ Socket.IO client connected:", socket.id);
 
   socket.on("register", (userId) => {
     users[userId] = socket.id;
-    console.log(`User ${userId} registered to socket ${socket.id}`);
+    console.log(`User ${userId} registered with socket ID ${socket.id}`);
   });
 
   socket.on("private_message", async ({ senderId, receiverId, message }) => {
-    console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
-    await ChatMassage.create({ senderId, receiverId, message });
+    console.log(`💬 Message from ${senderId} to ${receiverId}: ${message}`);
+    try {
+      await ChatMassage.create({ senderId, receiverId, message });
 
-    if (users[receiverId]) {
-      io.to(users[receiverId]).emit("private_message", { senderId, receiverId, message });
-    }
-    if (users[senderId]) {
-      io.to(users[senderId]).emit("private_message", { senderId, receiverId, message });
-    }
-  });
-
-  socket.on("disconnect", () => {
-    for (const [key, val] of Object.entries(users)) {
-      if (val === socket.id) {
-        console.log(`User ${key} disconnected`);
-        delete users[key];
-      }
+      [receiverId, senderId].forEach(id => {
+        if (users[id]) {
+          io.to(users[id]).emit("private_message", { senderId, receiverId, message });
+        }
+      });
+    } catch (error) {
+      console.error("❌ Failed to store or emit message:", error);
     }
   });
 
@@ -88,9 +146,26 @@ io.on("connection", (socket) => {
     }
     io.emit("dashboardUpdate", Array.from(liveCalls.values()));
   });
+
+  socket.on("queueStatusUpdate", (data) => {
+    console.log("📥 Received queue status via socket:", data);
+    // Broadcast to others
+    io.emit("queueStatusUpdate", data);
+
+    // (Optional) Save to DB here
+  });
+
+  socket.on("disconnect", () => {
+    for (const id in users) {
+      if (users[id] === socket.id) {
+        console.log(`🛑 User ${id} disconnected`);
+        delete users[id];
+      }
+    }
+  });
 });
 
-// Start the server after DB sync
+/* ------------------------------ SERVER START ------------------------------ */
 sequelize.sync({ force: false, alter: false }).then(() => {
   console.log("✅ Database synced");
   registerSuperAdmin();
