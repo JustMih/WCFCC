@@ -408,8 +408,8 @@ if ((requester === 'Employee' || requester === 'Representative') && isValidTzPho
         <p>WCF Customer Care System</p>
       `;
       try {
-        await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        // await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
       } catch (emailError) {
         console.error("Error sending email:", emailError.message);
         // console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
