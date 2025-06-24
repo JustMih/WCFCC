@@ -4,10 +4,15 @@ const FunctionData = require('../../models/FunctionData');
 const Function = require('../../models/Function');
 const Section = require('../../models/Section');
 const Notification = require('../../models/Notification');
-
+const AgentLoginLog = require("../../models/agent_activity_logs");
+const ChatMassage = require("../../models/chart_message")
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
 const { Op } = require("sequelize");
+const { sendQuickSms } = require("../../services/smsService");
+const { sendEmail } = require('../../services/emailService');
+const RequesterDetails = require("../../models/RequesterDetails");
+const Employer = require("../../models/Employer");
 
 const getTicketCounts = async (req, res) => {
   try {
@@ -152,7 +157,6 @@ const generateTicketId = () => {
   return `WCF-CC-${random}`;
 };
 
-
 const createTicket = async (req, res) => {
   try {
     const {
@@ -167,96 +171,262 @@ const createTicket = async (req, res) => {
       region,
       district,
       category,
+      inquiry_type,
       functionId,
       description,
       status,
       subject,
       responsible_unit_id,
       responsible_unit_name,
-      section,
-      sub_section
+      section: inputSection,
+      sub_section,
+      shouldClose,
+      resolution_details,
+      // New fields for representative
+      requesterName,
+      requesterPhoneNumber,
+      requesterEmail,
+      requesterAddress,
+      relationshipToEmployee,
+      // New fields for employer (when requester is Employer)
+      employerRegistrationNumber,
+      employerName,
+      employerTin,
+      employerPhone,
+      employerEmail,
+      employerStatus,
+      employerAllocatedStaffId,
+      employerAllocatedStaffName,
+      employerAllocatedStaffUsername,
     } = req.body;
 
-    const userId = req?.user?.userId; // Use optional chaining for safety
-
+    const userId = req?.user?.userId;
     if (!userId) {
       return res.status(400).json({ message: "User ID is required to create a ticket." });
     }
-
     if (!subject) {
       return res.status(400).json({ message: "Subject is required." });
     }
+    // Validate inquiry_type for Inquiry category
+    if (category === 'Inquiry' && !inquiry_type) {
+      return res.status(400).json({ message: "Inquiry type (Claims or Compliance) is required for Inquiry category." });
+    }
 
+   
+
+    // --- Assignment Logic ---
+    let assignedUser = null;
+    let allocatedUserUsername = employerAllocatedStaffUsername || req.body.allocated_user_username;
+    // let allocatedUserUsername = employerAllocatedStaffUsername || 'rehema.finance';
+   
+    if (category === 'Inquiry') {
+      // Claims or Compliance
+      if (allocatedUserUsername) {
+        assignedUser = await User.findOne({
+          where: { username: allocatedUserUsername },
+          attributes: ['id', 'name', 'email', 'role', 'unit_section']
+        });
+      }
+      if (!assignedUser) {
+        // Fallback to focal person for the section/unit
+        assignedUser = await User.findOne({
+          where: {
+            role: 'focal-person',
+            unit_section: finalSection || responsible_unit_name // Use section/unit if available
+          },
+          attributes: ['id', 'name', 'email', 'role', 'unit_section']
+        });
+      }
+    } else if (["Complaint", "Suggestion", "Compliment"].includes(category)) {
+      // Assign to coordinator
+      assignedUser = await User.findOne({
+        where: { role: 'coordinator' },
+        attributes: ['id', 'name', 'email', 'role', 'unit_section']
+      });
+    }
+    if (!assignedUser) {
+      return res.status(400).json({ message: `No appropriate user found to assign the ${category} ticket to.` });
+    }
+
+    // --- Ticket Data Preparation ---
     const ticketId = generateTicketId();
     const responsibleUnit = await Function.findOne({
       where: { id: functionId || responsible_unit_id },
-      include: [
-        {
-          model: Section,
-          as: 'section'
-        }
-      ]
+      include: [{ model: Section, as: 'section' }]
     });
+    const initialStatus = shouldClose ? 'Closed' : (status || 'Open');
+    let ticketEmployerId = null;
+    let ticketPhoneNumber = phoneNumber;
+    let ticketInstitution = institution;
+    let requesterFullName = `${firstName} ${lastName || ''}`;
+    // Handle Employer details and association
+    if (requester === 'Employer') {
+      let employer = await Employer.findOne({ where: { registration_number: employerRegistrationNumber } });
+      if (!employer) {
+        employer = await Employer.create({
+          registration_number: employerRegistrationNumber,
+          name: employerName,
+          tin: employerTin,
+          phone: employerPhone,
+          email: employerEmail,
+          employer_status: employerStatus,
+          allocated_staff_id: employerAllocatedStaffId,
+          allocated_staff_name: employerAllocatedStaffName,
+          allocated_staff_username: employerAllocatedStaffUsername,
+        });
+      }
+      ticketEmployerId = employer.id;
+      ticketPhoneNumber = employerPhone;
+      ticketInstitution = employerName;
+      requesterFullName = employerName;
+    } else if (requester === 'Representative') {
+      ticketPhoneNumber = requesterPhoneNumber;
+      requesterFullName = requesterName;
+    }
 
-    // Create the ticket
-    const newTicket = await Ticket.create({
+
+    let finalSection = inputSection;
+    if (finalSection === 'Unit') {
+      finalSection = sub_section;
+    }
+    const ticketData = {
+      
       ticket_id: ticketId,
       first_name: firstName,
       middle_name: middleName || '',
       last_name: lastName,
-      phone_number: phoneNumber,
+      phone_number: ticketPhoneNumber,
       nida_number: nidaNumber,
       requester,
-      institution,
+      institution: ticketInstitution,
       channel,
       region,
       district,
       category,
+      inquiry_type,
       responsible_unit_id: responsible_unit_id || functionId,
-      responsible_unit_name: responsible_unit_name || responsibleUnit?.section?.name || 'Unit',
-      section: section || responsibleUnit?.section?.name || 'Unit',
-      sub_section: sub_section || responsibleUnit?.name || '',  // Use provided sub_section or function name
-      subject: subject || '',  // Use provided subject
+      responsible_unit_name: responsible_unit_name || finalSection,
+      section: finalSection || responsibleUnit?.section?.name || 'Unit',
+      sub_section: sub_section || responsibleUnit?.name || '',
+      subject: subject || '',
       description,
-      status: status || 'Open',
-      created_by: userId,
+      status: initialStatus,
+      userId: userId,
+      assigned_to: assignedUser.id,
+      employerId: ticketEmployerId,
+    };
+    if (shouldClose) {
+      ticketData.resolution_details = resolution_details || 'Ticket resolved during creation';
+      ticketData.date_of_resolution = new Date();
+      ticketData.attended_by_id = userId;
+    }
+    // --- Ticket Creation ---
+    const newTicket = await Ticket.create(ticketData);
+    // Save representative details if applicable
+    if (requester === 'Representative') {
+      await RequesterDetails.create({
+        ticketId: newTicket.id,
+        name: requesterName,
+        phoneNumber: requesterPhoneNumber,
+        email: requesterEmail,
+        address: requesterAddress,
+        relationshipToEmployee: relationshipToEmployee,
+      });
+    }
+    // --- SMS Notification ---
+    // let smsRecipient = String(ticketPhoneNumber || '').replace(/^"+/, '').replace(/^0/, '255');
+    // const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+    // if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
+    //   const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+    //   try {
+    //     // await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+    //     await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+    //     console.log("SMS sent (test) to 255673554743");
+    //   } catch (smsError) {
+    //     console.error("Error sending SMS:", smsError.message);
+    //     console.error("Error sending SMS:", smsError.message);
+    //   }
+    // }
+
+    
+
+// Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
+let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
+const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+
+if ((requester === 'Employee' || requester === 'Representative') && isValidTzPhone(smsRecipient)) {
+  const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+  try {
+    await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
+    console.log("SMS sent successfully to", smsRecipient);
+  } catch (smsError) {
+    console.error("Error sending SMS:", smsError.message);
+  }
+} else {
+  console.log('Not sending SMS, invalid phone:', smsRecipient);
+}
+
+    // --- Email Notification to Assignee ---
+    let emailWarning = '';
+    if (assignedUser.email) {
+      const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedUser.name},</p>
+        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${newTicket.subject}</li>
+          <li><strong>Category:</strong> ${newTicket.category}</li>
+          <li><strong>Description:</strong> ${newTicket.description}</li>
+          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+          <li><strong>Channel:</strong> ${newTicket.channel}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+      } catch (emailError) {
+        // console.error("Error sending email:", emailError.message);
+        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+        emailWarning += ' (Warning: Failed to send email to assignee.)';
+      }
+    }
+    // --- Notification for Assignee ---
+    await Notification.create({
+      ticket_id: newTicket.id,
+      sender_id: userId,
+      recipient_id: assignedUser.id,
+      message: `New ${category} ticket ${shouldClose ? '(Closed)' : ''} assigned to you: ${subject}`,
+      channel: channel,
+      status: 'unread'
     });
-
-    // Determine who to assign the ticket to
-    let assignedUser;
-
-    if (category === 'Inquiry') {
-      assignedUser = await User.findOne({
-        where: { role: 'focal-person' },
-        order: [['id', 'ASC']]
+    // --- Email to Supervisor if Closed on Creation ---
+    if (shouldClose) {
+      const supervisor = await User.findOne({
+        where: {
+          role: 'supervisor',
+          unit_section: newTicket.section
+        },
+        attributes: ['id', 'name', 'email']
       });
-    } else if (['Complaint', 'Suggestion', 'Compliment', 'Social Media'].includes(category)) {
-      assignedUser = await User.findOne({
-        where: { role: 'coordinator' },
-        // order: [['id', 'ASC']]
-      });
+      if (supervisor && supervisor.email) {
+        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        const emailBody = `The following ticket has been closed by the agent: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        try {
+          await sendEmail({ to: supervisor.email, subject: emailSubject, htmlBody: emailBody });
+        } catch (emailError) {
+          console.error("Error sending email to supervisor:", emailError.message);
+          emailWarning += ' (Warning: Failed to send email to supervisor.)';
+        }
+      }
     }
-    console.log(assignedUser);
-    // If an assignee was found, update ticket and notify
-    if (assignedUser) {
-      await newTicket.update({ assigned_to: assignedUser.id });
-
-      await Notification.create({
-        ticket_id: newTicket.id,           // maps to ticket_id
-        sender_id: userId,                 // maps to sender_id
-        recipient_id: assignedUser.id,     // maps to recipient_id
-        message: `New ${category} ticket assigned to you: ${subject}`,
-        channel: channel,
-        status: 'unread'
-      });
-      
-    }
-
     return res.status(201).json({
-      message: "Ticket created successfully",
+      message: `Ticket created successfully${shouldClose ? ' and closed' : ''}${emailWarning}`,
       ticket: newTicket
     });
-
   } catch (error) {
     console.error("Ticket creation error:", error);
     return res.status(500).json({
@@ -728,29 +898,17 @@ const getAllCustomersTickets = async (req, res) => {
           as: 'ratedBy',
           attributes: ['id', 'name', 'email']
         },
-        {
-          model: User,
-          as: 'convertedBy',
-          attributes: ['id', 'name', 'email']
-        },
-        {
-          model: User,
-          as: 'forwardedBy',
-          attributes: ['id', 'name', 'email']
-        }
-      ],
-      attributes: [
-        'id', 'ticket_id', 'first_name', 'middle_name', 'last_name',
-        'phone_number', 'nida_number', 'requester', 'institution',
-        'region', 'district', 'subject', 'category', 'sub_section',
-        'section', 'channel', 'description', 'complaint_type',
-        'converted_to', 'status', 'request_registered_date',
-        'date_of_resolution', 'date_of_feedback', 'date_of_review_resolution',
-        'resolution_details', 'aging_days', 'responsible_unit_name',
-        'converted_at', 'forwarded_at', 'assigned_to_role',
-        'created_at', 'updated_at', 'created_by', 'assigned_to_id',
-        'attended_by_id', 'rated_by_id', 'converted_by_id', 'forwarded_by_id',
-        'responsible_unit_id'
+        // Commented out for simplicity (can be re-added if needed)
+        // {
+        //   model: User,
+        //   as: 'convertedBy',
+        //   attributes: ['id', 'name', 'email']
+        // },
+        // {
+        //   model: User,
+        //   as: 'forwardedBy',
+        //   attributes: ['id', 'name', 'email']
+        // }
       ]
     });
 
@@ -1081,6 +1239,196 @@ const getTicketById = async (req, res) => {
   }
 };
 
+// Helper to notify all users with a given role
+async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, message) {
+  const users = await User.findAll({ where: { role: roles } });
+  for (const user of users) {
+    if (user.email) {
+      await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+    }
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: senderId,
+      recipient_id: user.id,
+      message,
+      status: 'unread'
+    });
+  }
+}
+
+const closeTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { resolution_details, userId } = req.body;
+
+    if (!ticketId) {
+      return res.status(400).json({ message: "Ticket ID is required" });
+    }
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name']
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Update ticket status and add resolution details
+    await ticket.update({
+      status: 'Closed',
+      resolution_details: resolution_details || 'Ticket closed by agent',
+      date_of_resolution: new Date(),
+      attended_by_id: userId
+    });
+
+    // Notify all coordinators and supervisors
+    const notifySubject = `Ticket Closed: ${ticket.subject}`;
+    const notifyHtml = `<p>The following ticket has been closed: ${ticket.subject} (ID: ${ticket.ticket_id})</p>`;
+    const notifyMsg = `Ticket ${ticket.ticket_id} has been closed.`;
+    await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject, notifyHtml, ticketId, userId, notifyMsg);
+
+    return res.status(200).json({
+      message: "Ticket closed successfully",
+      ticket
+    });
+
+  } catch (error) {
+    console.error("Error closing ticket:", error);
+    return res.status(500).json({
+      message: "Failed to close ticket",
+      error: error.message
+    });
+  }
+};
+
+const closeCoordinatorTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { 
+      resolution_details,
+      userId,
+      resolution_type // e.g., 'Resolved', 'Not Applicable', 'Duplicate'
+    } = req.body;
+
+    // Validate inputs
+    if (!ticketId || !userId || !resolution_details) {
+      return res.status(400).json({ 
+        message: "Ticket ID, user ID, and resolution details are required" 
+      });
+    }
+
+    // Find the ticket and include relevant associations
+    const ticket = await Ticket.findOne({
+      where: { 
+        id: ticketId,
+        category: {
+          [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] // Allow all coordinator-managed categories
+        }
+      },
+      include: [
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name']
+        },
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'role']
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ 
+        message: "Ticket not found or not a coordinator-managed ticket type" 
+      });
+    }
+
+    // Check if the user is authorized (must be a coordinator)
+    const coordinator = await User.findOne({
+      where: { 
+        id: userId,
+        role: 'coordinator'
+      }
+    });
+
+    if (!coordinator) {
+      return res.status(403).json({ 
+        message: "Only coordinators can close these types of tickets" 
+      });
+    }
+
+    // Update the ticket
+    await ticket.update({
+      status: 'Closed',
+      resolution_details,
+      resolution_type: resolution_type || 'Resolved',
+      date_of_resolution: new Date(),
+      attended_by_id: userId
+    });
+
+    // Notify all coordinators and supervisors
+    const notifySubject2 = `Ticket Closed: ${ticket.subject}`;
+    const notifyHtml2 = `<p>The following ticket has been closed: ${ticket.subject} (ID: ${ticket.ticket_id})</p>`;
+    const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed.`;
+    await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject2, notifyHtml2, ticketId, userId, notifyMsg2);
+
+    // If there was a focal person or other assignee involved, notify them too
+    if (ticket.assigned_to && ticket.assigned_to !== userId) {
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: ticket.assigned_to,
+        message: `${ticket.category} ticket ${ticket.ticket_id} has been resolved and closed by coordinator`,
+        status: 'unread'
+      });
+    }
+
+    return res.status(200).json({
+      message: `${ticket.category} closed successfully`,
+      ticket: {
+        ...ticket.toJSON(),
+        resolution_date: new Date(),
+        resolved_by: coordinator.name
+      }
+    });
+
+  } catch (error) {
+    console.error("Error closing ticket:", error);
+    return res.status(500).json({
+      message: "Failed to close ticket",
+      error: error.message
+    });
+  }
+};
+
+const getClaimsWithValidNumbers = async (req, res) => {
+  try {
+    const response = await axios.get("https://demomspapi.wcf.go.tz/api/v1/search/details");
+
+    // Filter entries where claim_number is NOT null
+    const filteredClaims = response.data.filter(item => item.firstname !== null);
+
+    res.status(200).json({
+      message: "Filtered claims fetched successfully",
+      total: filteredClaims.length,
+      data: filteredClaims,
+    });
+
+  } catch (error) {
+    console.error("Error fetching claims:", error.message);
+    res.status(500).json({ message: "Failed to fetch claims", error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1095,5 +1443,8 @@ module.exports = {
   getAllCustomersTickets,
   mockComplaintWorkflow,
   searchByPhoneNumber,
-  getTicketById
+  getTicketById,
+  closeTicket,
+  closeCoordinatorTicket,
+  getClaimsWithValidNumbers
 };

@@ -1,4 +1,3 @@
-// routes/missedCallRoutes.js
 const express = require("express");
 const router = express.Router();
 const { MissedCall } = require("../models");
@@ -69,6 +68,46 @@ router.get("/", async (req, res) => {
     res.json(missedCalls);
   } catch (err) {
     console.error("❌ Error fetching missed calls:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ✅ PUT to update missed call status (e.g., mark as called_back)
+router.put("/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    console.log("🔄 PUT /missed-calls/:id/status called:", { id, status });
+
+    // Basic validation
+    if (!status) {
+      console.warn("⚠️ Missing status in PUT /missed-calls/:id/status");
+      return res.status(400).json({ error: "Missing required field: status" });
+    }
+
+    // Validate status value
+    const validStatuses = ['pending', 'called_back', 'ignored'];
+    if (!validStatuses.includes(status)) {
+      console.warn("⚠️ Invalid status value:", status);
+      return res.status(400).json({ error: "Invalid status value. Must be one of: pending, called_back, ignored" });
+    }
+
+    // Find and update the missed call
+    const missedCall = await MissedCall.findByPk(id);
+    
+    if (!missedCall) {
+      console.warn("⚠️ Missed call not found with ID:", id);
+      return res.status(404).json({ error: "Missed call not found" });
+    }
+
+    // Update the status
+    await missedCall.update({ status });
+
+    console.log("✅ Missed call status updated:", missedCall.toJSON());
+    res.json(missedCall);
+  } catch (error) {
+    console.error("❌ Error updating missed call status:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
