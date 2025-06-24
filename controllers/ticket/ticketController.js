@@ -123,10 +123,22 @@ const getTicketCounts = async (req, res) => {
       }
     }
 
+    let assignedCount = 0;
+    if (!isSuperAdmin) {
+      assignedCount = await Ticket.count({
+        where: {
+          assigned_to_id: id,
+          status: { [Op.in]: ["Assigned", "Open"] }
+        }
+      });
+    } else {
+      assignedCount = counts.assigned || 0;
+    }
+
     const ticketStats = {
       total,
       open: counts.open || 0,
-      assigned: counts.assigned || 0,
+      assigned: assignedCount,
       closed: counts.closed || 0,
       carriedForward: counts.carriedforward || 0,
       inProgress: counts.inprogress || 0,
@@ -585,23 +597,18 @@ const getAssignedTickets = async (req, res) => {
     }
     let tickets;
     if (user.role === "super-admin") {
-      // Super admin: Fetch all tickets with assignments
+      // Super admin: Fetch all tickets with status Assigned or Open
       tickets = await Ticket.findAll({
-        include: [{
-          model: TicketAssignment,
-          as: 'assignments',
-        }],
+        where: { status: { [Op.in]: ["Assigned", "Open"] } },
         order: [["created_at", "DESC"]]
       });
     } else {
-      // Fetch tickets assigned to this user (via TicketAssignment)
+      // Fetch tickets assigned to this user (attendee)
       tickets = await Ticket.findAll({
-        include: [{
-          model: TicketAssignment,
-          as: 'assignments',
-          where: { assigned_to_id: userId },
-          required: true
-        }],
+        where: {
+          assigned_to: userId,
+          status: { [Op.in]: ["Assigned", "Open"] }
+        },
         order: [["created_at", "DESC"]]
       });
     }
@@ -1446,24 +1453,6 @@ const closeCoordinatorTicket = async (req, res) => {
   }
 };
 
-const getClaimsWithValidNumbers = async (req, res) => {
-  try {
-    const response = await axios.get("https://demomspapi.wcf.go.tz/api/v1/search/details");
-
-    // Filter entries where claim_number is NOT null
-    const filteredClaims = response.data.filter(item => item.firstname !== null);
-
-    res.status(200).json({
-      message: "Filtered claims fetched successfully",
-      total: filteredClaims.length,
-      data: filteredClaims,
-    });
-
-  } catch (error) {
-    console.error("Error fetching claims:", error.message);
-    res.status(500).json({ message: "Failed to fetch claims", error: error.message });
-  }
-};
 
 // Assign ticket to attendee by username (for focal person)
 const assignTicket = async (req, res) => {
@@ -1633,7 +1622,6 @@ module.exports = {
   getTicketById,
   closeTicket,
   closeCoordinatorTicket,
-  getClaimsWithValidNumbers,
   assignTicket,
   getAllAttendee,
   getTicketAssignments,

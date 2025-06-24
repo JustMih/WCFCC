@@ -33,7 +33,7 @@ router.get(
 router.get(
   "/open/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
+  // roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
   getOpenTickets
 );
 
@@ -125,11 +125,6 @@ router.get('/:ticketId',
 
 // Route for coordinator to close tickets
 router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
-
-// Route to get claims with valid numbers
-router.get('/claims-with-valid-numbers', 
-  authMiddleware,
-  getClaimsWithValidNumbers);
 
 // Add after other ticket routes
 router.post(
