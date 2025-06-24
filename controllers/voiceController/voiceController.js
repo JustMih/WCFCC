@@ -2,25 +2,33 @@ const path = require("path");
 const fs = require("fs");
 const IVRVoice = require("../../models/IVRVoice");
 
-// Create Voice Entry (with file upload)
+ 
 const createVoice = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
 
   const { file_name } = req.body;
-  const file_path = `/voice/${req.file.filename}`;
+
+  // Remove the file extension (.wav, .mp3, etc.) before saving to the database
+  const file_path = `/voice/${req.file.filename.replace(/\.[^/.]+$/, "")}`; // Strips the extension
+
   const { language } = req.body;
-// Then include `language` in the model creation
 
   try {
-    const voice = await IVRVoice.create({ file_name, file_path,language });
+    // Create IVRVoice entry with the modified file path (no extension)
+    const voice = await IVRVoice.create({
+      file_name,
+      file_path,  // Save without the file extension
+      language,
+    });
+
     res.status(201).json(voice);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
- 
+
 // Get All Voices
 const getAllVoices = async (req, res) => {
   try {
