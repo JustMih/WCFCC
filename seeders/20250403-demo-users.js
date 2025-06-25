@@ -53,7 +53,17 @@ module.exports = {
       { name: 'Head of HR and Attachments', email: 'hr@wcf.go.tz', username: 'head.hr', role: 'head', unit_section: 'Human Resource Management and Attachment Unit' },
       { name: 'Focal Person HR', email: 'focal.hr@wcf.go.tz', username: 'focal.hr', role: 'focal-person', unit_section: 'Human Resource Management and Attachment Unit' },
       { name: 'Attendee HR 1', email: 'attendee.hr1@wcf.go.tz', username: 'attendee.hr1', role: 'attendee', unit_section: 'Human Resource Management and Attachment Unit' },
-      { name: 'Attendee HR 2', email: 'attendee.hr2@wcf.go.tz', username: 'attendee.hr2', role: 'attendee', unit_section: 'Human Resource Management and Attachment Unit' }
+      { name: 'Attendee HR 2', email: 'attendee.hr2@wcf.go.tz', username: 'attendee.hr2', role: 'attendee', unit_section: 'Human Resource Management and Attachment Unit' },
+      { name: 'Clara Claim Focal', email: 'claim.focal.operations@wcf.go.tz', username: 'clara.claim.operations', role: 'claim-focal-person', unit_section: 'Directorate of Operations' },
+      { name: 'Colin Compliance Focal', email: 'compliance.focal.operations@wcf.go.tz', username: 'colin.compliance.operations', role: 'compliance-focal-person', unit_section: 'Directorate of Operations' },
+      { name: 'Alice Claim Focal', email: 'claim.focal.assessment@wcf.go.tz', username: 'alice.claim.assessment', role: 'claim-focal-person', unit_section: 'Directorate of Assessment Services' },
+      { name: 'Alex Compliance Focal', email: 'compliance.focal.assessment@wcf.go.tz', username: 'alex.compliance.assessment', role: 'compliance-focal-person', unit_section: 'Directorate of Assessment Services' },
+      { name: 'Fiona Claim Focal', email: 'claim.focal.finance@wcf.go.tz', username: 'fiona.claim.finance', role: 'claim-focal-person', unit_section: 'Directorate of Finance, Planning and Investment' },
+      { name: 'Felix Compliance Focal', email: 'compliance.focal.finance@wcf.go.tz', username: 'felix.compliance.finance', role: 'compliance-focal-person', unit_section: 'Directorate of Finance, Planning and Investment' },
+      { name: 'Irene Claim Focal', email: 'claim.focal.ict@wcf.go.tz', username: 'irene.claim.ict', role: 'claim-focal-person', unit_section: 'ICT Unit' },
+      { name: 'Ian Compliance Focal', email: 'compliance.focal.ict@wcf.go.tz', username: 'ian.compliance.ict', role: 'compliance-focal-person', unit_section: 'ICT Unit' },
+      { name: 'Anita Claim Focal', email: 'claim.focal.hr@wcf.go.tz', username: 'anita.claim.hr', role: 'claim-focal-person', unit_section: 'Human Resource Management and Attachment Unit' },
+      { name: 'Andrew Compliance Focal', email: 'compliance.focal.hr@wcf.go.tz', username: 'andrew.compliance.hr', role: 'compliance-focal-person', unit_section: 'Human Resource Management and Attachment Unit' }
     ];
 
     const hashedPassword = await bcrypt.hash('user12345', 10);
@@ -155,7 +165,17 @@ module.exports = {
         'hr@wcf.go.tz',
         'focal.hr@wcf.go.tz',
         'attendee.hr1@wcf.go.tz',
-        'attendee.hr2@wcf.go.tz'
+        'attendee.hr2@wcf.go.tz',
+        'claim.focal.operations@wcf.go.tz',
+        'compliance.focal.operations@wcf.go.tz',
+        'claim.focal.assessment@wcf.go.tz',
+        'compliance.focal.assessment@wcf.go.tz',
+        'claim.focal.finance@wcf.go.tz',
+        'compliance.focal.finance@wcf.go.tz',
+        'claim.focal.ict@wcf.go.tz',
+        'compliance.focal.ict@wcf.go.tz',
+        'claim.focal.hr@wcf.go.tz',
+        'compliance.focal.hr@wcf.go.tz'
       ]
     });
   }

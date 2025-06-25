@@ -85,80 +85,50 @@ const getFocalPersonTickets = async (req, res) => {
 const getFocalPersonDashboardCounts = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const user = await User.findByPk(userId);
-    const section = user.unit_section;
-    // Get new inquiries (status is null or Open)
+    // Only count tickets assigned to this focal person and not closed
+    const ticketWhere = {
+      assigned_to_id: userId,
+      status: { [Op.ne]: 'Closed' }
+    };
+
+    // New inquiries (Open or null)
     const newInquiries = await Ticket.count({
       where: {
-        section,
+        ...ticketWhere,
         [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ],
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { status: null },
-              { status: 'Open' }
-            ]
-          }
+          { status: null },
+          { status: 'Open' }
         ]
       }
     });
-    // Get escalated inquiries
+    // Escalated inquiries (customize as needed, e.g., is_escalated: true)
     const escalatedInquiries = await Ticket.count({
       where: {
-        section,
-        [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ],
-        // is_escalated: true
+        ...ticketWhere,
+        is_escalated: true
       }
     });
-    // Get total inquiries
-    const totalInquiries = await Ticket.count({
+    // Total inquiries (not closed)
+    const totalInquiries = await Ticket.count({ where: ticketWhere });
+    // In progress
+    const inProgressInquiries = await Ticket.count({
       where: {
-        section,
-        [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ]
+        ...ticketWhere,
+        status: 'In Progress'
       }
     });
-    // Get resolved (closed) inquiries
-    const resolvedInquiries = await Ticket.count({
-      where: {
-        section,
-        [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ],
-        status: 'Closed'
-      }
-    });
-    // Get open inquiries
+    // Open inquiries
     const openInquiries = await Ticket.count({
       where: {
-        section,
-        [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ],
+        ...ticketWhere,
         status: 'Open'
       }
     });
-    // Get closed inquiries (same as resolved)
-    const closedInquiries = resolvedInquiries;
-    // Get in progress inquiries
-    const inProgressInquiries = await Ticket.count({
+    // Resolved/closed inquiries (status: Closed, for reference)
+    const resolvedInquiries = await Ticket.count({
       where: {
-        section,
-        [Op.or]: [
-          { category: "Inquiry" },
-          { converted_to: "Inquiry" }
-        ],
-        status: 'In Progress'
+        assigned_to_id: userId,
+        status: 'Closed'
       }
     });
     res.status(200).json({
@@ -168,7 +138,7 @@ const getFocalPersonDashboardCounts = async (req, res) => {
       totalInquiries,
       resolvedInquiries,
       openInquiries,
-      closedInquiries,
+      closedInquiries: resolvedInquiries,
       inProgressInquiries
     });
   } catch (error) {

@@ -248,9 +248,43 @@ const createTicket = async (req, res) => {
           where: { username: allocatedUserUsername },
           attributes: ['id', 'name', 'email', 'role', 'unit_section']
         });
+        // If not found, create the user
+        if (!assignedUser) {
+          const nameParts = allocatedUserUsername.split('.').map(
+            part => part.charAt(0).toUpperCase() + part.slice(1)
+          );
+          const newUser = await User.create({
+            username: allocatedUserUsername,
+            name: nameParts.join(' '),
+            email: `${allocatedUserUsername}@ttcl.co.tz`,
+            role: 'attendee',
+            unit_section: finalSection || responsible_unit_name,
+            password: await bcrypt.hash('defaultPassword123', 10),
+            status: 'active',
+          });
+          assignedUser = newUser;
+        }
       }
+      // If not assigned by username, try focal-person by inquiry_type
+      if (!assignedUser && inquiry_type) {
+        let focalRole = null;
+        if (inquiry_type.toLowerCase() === 'claims') {
+          focalRole = 'claim-focal-person';
+        } else if (inquiry_type.toLowerCase() === 'compliance') {
+          focalRole = 'compliance-focal-person';
+        }
+        if (focalRole) {
+          assignedUser = await User.findOne({
+            where: {
+              role: focalRole,
+              unit_section: finalSection || responsible_unit_name
+            },
+            attributes: ['id', 'name', 'email', 'role', 'unit_section']
+          });
+        }
+      }
+      // Fallback to general focal-person if still not found
       if (!assignedUser) {
-        // Fallback to focal person for the section/unit
         assignedUser = await User.findOne({
           where: {
             role: 'focal-person',
@@ -330,6 +364,8 @@ const createTicket = async (req, res) => {
       status: initialStatus,
       userId: userId,
       assigned_to: assignedUser.id,
+      assigned_to_id: assignedUser.id,
+      assigned_to_role: assignedUser.role,
       employerId: ticketEmployerId,
     };
     if (shouldClose) {
@@ -438,7 +474,8 @@ if ((requester === 'Employee' || requester === 'Representative') && isValidTzPho
         const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
         const emailBody = `The following ticket has been closed by the agent: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
         try {
-          await sendEmail({ to: supervisor.email, subject: emailSubject, htmlBody: emailBody });
+          // await sendEmail({ to: supervisor.email, subject: emailSubject, htmlBody: emailBody });
+          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
         } catch (emailError) {
           console.error("Error sending email to supervisor:", emailError.message);
           emailWarning += ' (Warning: Failed to send email to supervisor.)';
@@ -1276,7 +1313,8 @@ async function notifyUsersByRole(roles, subject, htmlBody, ticketId, senderId, m
   }
   for (const user of users) {
     if (user.email) {
-      await sendEmail({ to: user.email, subject, htmlBody });
+      // await sendEmail({ to: user.email, subject, htmlBody });
+      await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
     }
     await Notification.create({
       ticket_id: ticketId,
