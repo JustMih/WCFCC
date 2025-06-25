@@ -4,7 +4,8 @@ const {
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
   mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers,
-  assignTicket, getAllAttendee
+  assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers,
+  getAssignedNotifiedTickets
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -32,7 +33,7 @@ router.get(
 router.get(
   "/open/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
+  // roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
   getOpenTickets
 );
 
@@ -118,17 +119,12 @@ router.get(
 // Get ticket by ID
 router.get('/:ticketId', 
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person"]),
   getTicketById
 );
 
 // Route for coordinator to close tickets
 router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
-
-// Route to get claims with valid numbers
-router.get('/claims-with-valid-numbers', 
-  authMiddleware,
-  getClaimsWithValidNumbers);
 
 // Add after other ticket routes
 router.post(
@@ -144,6 +140,24 @@ router.get(
   authMiddleware,
   roleMiddleware(['focal-person', 'super-admin', 'coordinator', 'admin']),
   getAllAttendee
+);
+
+// Add after other ticket routes
+router.post(
+  '/:ticketId/close',
+  authMiddleware,
+  roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', 'focal-person']),
+  closeTicket
+);
+
+router.get('/:ticketId/assignments', authMiddleware, getTicketAssignments);
+router.get('/:ticketId/assigned-officers', authMiddleware, getAssignedOfficers);
+
+// Get tickets assigned to user and notified
+router.get(
+  "/assigned-notified/:userId",
+  authMiddleware,
+  getAssignedNotifiedTickets
 );
 
 module.exports = router;

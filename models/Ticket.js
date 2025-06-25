@@ -88,7 +88,12 @@ const Ticket = sequelize.define(
     assigned_to_role: DataTypes.ENUM('Agent', 'Coordinator', 'Attendee', 'Head of Unit', 'Director', 'DG'),
     evidence_url: DataTypes.STRING,
     review_notes: DataTypes.TEXT,
-    approval_notes: DataTypes.TEXT
+    approval_notes: DataTypes.TEXT,
+    is_escalated: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: 'Tickets',
@@ -130,6 +135,7 @@ Ticket.associate = (models) => {
   });
 
   Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
+  Ticket.hasMany(models.Notification, { foreignKey: 'ticket_id', as: 'notifications' });
 };
 
 module.exports = Ticket;
