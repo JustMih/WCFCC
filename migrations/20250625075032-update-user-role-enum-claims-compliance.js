@@ -1,5 +1,6 @@
 'use strict';
 
+/** @type {import('sequelize-cli').Migration} */
 module.exports = {
   up: async (queryInterface, Sequelize) => {
     await queryInterface.sequelize.query(`
@@ -38,12 +39,18 @@ module.exports = {
         'agent',
         'attendee',
         'coordinator',
-        'head-of-unit',
-        'manager',
-        'director',
         'focal-person',
-        'director-general'
+        'director-general',
+        'directorate of operations',
+        'directorate of assessment services',
+        'directorate of finance, planning and investment',
+        'legal unit',
+        'ict unit',
+        'actuarial statistics and risk management',
+        'public relation unit',
+        'procurement management unit',
+        'human resource management and attachment unit'
       ) NOT NULL DEFAULT 'super-admin';
     `);
   }
-}; 
+};

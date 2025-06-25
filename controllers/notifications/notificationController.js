@@ -2,7 +2,7 @@ const Notification = require("../../models/Notification");
 const User = require("../../models/User");
 const { Op } = require("sequelize");
 const Ticket = require("../../models/Ticket");
-const { sendEmail } = require('../../services/emailService');
+const { sendEmail } = require("../../services/emailService");
 
 // Create a notification
 const createNotification = async (req, res) => {
@@ -24,19 +24,17 @@ const createNotification = async (req, res) => {
       if (!recipientUser) {
         return res.status(404).json({ message: "Recipient user not found." });
       }
-    } else {
-      // Fallback to role-based lookup for backward compatibility
-      if (category === "Inquiry") {
-        recipientUser = await User.findOne({
-          where: { role: "focal-person" },
-          order: [["id", "ASC"]]
-        });
-      } else if (["Complaint", "Suggestion", "Compliment", "Social Media"].includes(category)) {
-        recipientUser = await User.findOne({ where: { role: "coordinator" } });
+    } else if (ticket_id) {
+      // Fallback: use assigned_to_id from ticket
+      const ticket = await Ticket.findByPk(ticket_id);
+      if (ticket && ticket.assigned_to_id) {
+        recipientUser = await User.findByPk(ticket.assigned_to_id);
       }
       if (!recipientUser) {
-        return res.status(404).json({ message: "No appropriate assignee found for this category." });
+        return res.status(404).json({ message: "Recipient user not found for this ticket." });
       }
+    } else {
+      return res.status(400).json({ message: "recipient_id or ticket_id with assigned_to_id is required." });
     }
 
     if (missingFields.length > 0) {
@@ -53,7 +51,7 @@ const createNotification = async (req, res) => {
     }
 
     const default_message = `Reminder to ${category} ticket, under your preview`;
-console.log('user notified', userId);
+    console.log("user notified", recipientUser.id);
     // Step 4: Create the notification
     const notification = await Notification.create({
       ticket_id,
@@ -62,7 +60,7 @@ console.log('user notified', userId);
       message: default_message,
       comment: message,
       channel,
-      status: 'unread',
+      status: "unread",
       category: category
     });
 
@@ -75,13 +73,21 @@ console.log('user notified', userId);
             WCF Customer Care Notification
           </div>
           <div style="background: #fff; padding: 24px; border-radius: 0 0 8px 8px;">
-            <p style="font-size: 1.1rem; color: #333;">Dear <strong>${recipientUser.name}</strong>,</p>
-            <p style="font-size: 1.1rem; color: #333;">Dear <strong>${recipientUser.id}</strong>,</p>
+            <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
+              recipientUser.name
+            }</strong>,</p>
+            <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
+              recipientUser.id
+            }</strong>,</p>
             <p style="font-size: 1.05rem; color: #333;">${default_message}</p>
             <p style="font-size: 1.05rem; color: #333;">${message}</p>
             <hr style="margin: 24px 0; border: none; border-top: 1px solid #eee;" />
-            <p style="font-size: 1rem; color: #555;"><strong>Ticket Subject:</strong> ${ticket ? ticket.subject : ''}</p>
-            <p style="font-size: 1rem; color: #555;"><strong>Category:</strong> ${ticket ? ticket.category : ''}</p>
+            <p style="font-size: 1rem; color: #555;"><strong>Ticket Subject:</strong> ${
+              ticket ? ticket.subject : ""
+            }</p>
+            <p style="font-size: 1rem; color: #555;"><strong>Category:</strong> ${
+              ticket ? ticket.category : ""
+            }</p>
             <p style="font-size: 0.95rem; color: #888; margin-top: 32px;">Please log in to the system for more details.</p>
             <p style="font-size: 0.95rem; color: #888;">WCF Customer Care System</p>
           </div>
@@ -89,9 +95,13 @@ console.log('user notified', userId);
       `;
       try {
         // await sendEmail({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({
+          to: "rehema.said3@ttcl.co.tz",
+          subject: emailSubject,
+          htmlBody: emailHtmlBody
+        });
       } catch (emailError) {
-        console.error('Error sending notification email:', emailError.message);
+        console.error("Error sending notification email:", emailError.message);
       }
     }
 
@@ -99,7 +109,6 @@ console.log('user notified', userId);
       message: "Notification created.",
       notification
     });
-
   } catch (error) {
     console.error("Error creating notification:", error);
     return res.status(500).json({
@@ -109,7 +118,6 @@ console.log('user notified', userId);
   }
 };
 
-
 // List all notifications for a user
 const listNotifications = async (req, res) => {
   try {
@@ -117,17 +125,21 @@ const listNotifications = async (req, res) => {
     const notifications = await Notification.findAll({
       where: {
         recipient_id: userId,
-        [Op.or]: [
-          { status: "unread" },
-          { status: " " }
-        ]
+        [Op.or]: [{ status: "unread" }, { status: " " }]
       },
-      
+
       include: [
         {
           model: Ticket,
-          as: 'ticket',
-          attributes: ['id', 'ticket_id', 'subject', 'category', 'status', 'description']
+          as: "ticket",
+          attributes: [
+            "id",
+            "ticket_id",
+            "subject",
+            "category",
+            "status",
+            "description"
+          ]
         }
       ],
       order: [["created_at", "DESC"]]
@@ -149,8 +161,15 @@ const getNotificationById = async (req, res) => {
       include: [
         {
           model: Ticket,
-          as: 'ticket',
-          attributes: ['id', 'ticket_id', 'subject', 'category', 'status', 'description']
+          as: "ticket",
+          attributes: [
+            "id",
+            "ticket_id",
+            "subject",
+            "category",
+            "status",
+            "description"
+          ]
         }
       ]
     });
@@ -214,21 +233,28 @@ const getNotificationsByTicketId = async (req, res) => {
       include: [
         {
           model: Ticket,
-          as: 'ticket',
-          attributes: ['id', 'ticket_id', 'subject', 'category', 'status', 'description']
+          as: "ticket",
+          attributes: [
+            "id",
+            "ticket_id",
+            "subject",
+            "category",
+            "status",
+            "description"
+          ]
         },
         {
-          model: require('../../models/User'),
-          as: 'sender',
-          attributes: ['id', 'name']
+          model: require("../../models/User"),
+          as: "sender",
+          attributes: ["id", "name"]
         },
         {
-          model: require('../../models/User'),
-          as: 'recipient',
-          attributes: ['id', 'name']
+          model: require("../../models/User"),
+          as: "recipient",
+          attributes: ["id", "name"]
         }
       ],
-      order: [['created_at', 'DESC']]
+      order: [["created_at", "DESC"]]
     });
 
     console.log("Found notifications:", notifications.length);
@@ -241,7 +267,6 @@ const getNotificationsByTicketId = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   createNotification,

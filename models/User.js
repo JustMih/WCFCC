@@ -34,6 +34,8 @@ const User = sequelize.define(
         "attendee",
         "coordinator",
         "focal-person",
+        "claim-focal-person",
+        "compliance-focal-person",
         "director-general",
         "directorate of operations",
         "directorate of assessment services",
