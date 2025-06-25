@@ -287,8 +287,8 @@ const createTicket = async (req, res) => {
       if (!assignedUser) {
         assignedUser = await User.findOne({
           where: {
-            role: 'focal-person',
-            unit_section: finalSection || responsible_unit_name // Use section/unit if available
+            role:{[Op.in]: ['focal-person', 'claim-focal-person', 'complience-focal-person']},
+            unit_section: responsible_unit_name||finalSection  // Use section/unit if available
           },
           attributes: ['id', 'name', 'email', 'role', 'unit_section']
         });
@@ -386,6 +386,16 @@ const createTicket = async (req, res) => {
         relationshipToEmployee: relationshipToEmployee,
       });
     }
+    // --- Create AssignedOfficer record for initial assignment ---
+    await AssignedOfficer.create({
+      ticket_id: newTicket.id,
+      assigned_to_id: assignedUser.id,
+      assigned_to_role: assignedUser.role,
+      assigned_by_id: userId,
+      status: 'Active',
+      assigned_at: new Date(),
+      notes: 'Initial assignment'
+    });
     // --- Create Notification for Assigned User ---
     await Notification.create({
       ticket_id: newTicket.id,
@@ -1372,6 +1382,11 @@ const closeTicket = async (req, res) => {
       attended_by_name = attendedByUser ? attendedByUser.name : null;
     }
 
+    await AssignedOfficer.update(
+      { status: 'Completed', completed_at: new Date() },
+      { where: { ticket_id: ticketId, status: 'Active' } }
+    );
+
     return res.status(200).json({
       message: "Ticket closed successfully",
       ticket: {
@@ -1472,6 +1487,11 @@ const closeCoordinatorTicket = async (req, res) => {
         status: 'unread'
       });
     }
+
+    await AssignedOfficer.update(
+      { status: 'Completed', completed_at: new Date() },
+      { where: { ticket_id: ticketId, status: 'Active' } }
+    );
 
     return res.status(200).json({
       message: `${ticket.category} closed successfully`,
@@ -1643,6 +1663,303 @@ const getAssignedNotifiedTickets = async (req, res) => {
   }
 };
 
+// Unified dashboard counts for any user
+const getDashboardCounts = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "name", "role"] });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    // AGENT/ATTENDEE LOGIC (from getTicketCounts)
+    if (["agent", "attendee"].includes(user.role)) {
+      // Use getTicketCounts logic
+      const isSuperAdmin = user.role === "super-admin";
+      const whereUserCondition = isSuperAdmin ? {} : { created_by: userId };
+      const statuses = ["Open", "Assigned", "Closed", "Carried Forward", "In Progress"];
+      const counts = {};
+      for (const status of statuses) {
+        const key = status.toLowerCase().replace(/ /g, "");
+        const condition = isSuperAdmin ? { status } : { created_by: userId, status };
+        counts[key] = await Ticket.count({ where: condition });
+      }
+      const total = await Ticket.count({ where: whereUserCondition });
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const overdueCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          status: "Open",
+          created_at: { [Op.lt]: tenDaysAgo },
+        },
+      });
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newTicketsCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          created_at: { [Op.gte]: today },
+        },
+      });
+      const lastHour = new Date(new Date().setHours(new Date().getHours() - 1));
+      const inHourCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          created_at: { [Op.gte]: lastHour },
+        },
+      });
+      const resolvedHourCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          status: "Closed",
+          updated_at: { [Op.gte]: lastHour },
+        },
+      });
+      const pendingCount = counts.open + counts.inprogress;
+      // Assigned tickets: assigned_to_id = userId and status in ["Assigned", "Open"]
+      let assignedCount = await Ticket.count({
+        where: {
+          assigned_to_id: userId,
+          status: { [Op.in]: ["Assigned", "Open"] },
+        },
+      });
+      // Escalated tickets: assigned_to_id = userId and is_escalated = true
+      const escalatedCount = await Ticket.count({
+        where: {
+          assigned_to_id: userId,
+          is_escalated: true,
+        },
+      });
+      // In-progress assignments count (not closed)
+      const assignments = await TicketAssignment.findAll({
+        where: {
+          assigned_by_id: userId,
+          action: { [Op.in]: ["Assigned", "Reassigned"] },
+        },
+        include: [
+          {
+            model: Ticket,
+            as: "ticket",
+            where: { status: { [Op.ne]: "Closed" } },
+          }
+        ],
+      });
+      // Reduce to only the latest assignment per ticket_id
+      const latestAssignmentsMap = new Map();
+      for (const assignment of assignments) {
+        if (!latestAssignmentsMap.has(assignment.ticket_id)) {
+          latestAssignmentsMap.set(assignment.ticket_id, assignment);
+        }
+      }
+      const filteredAssignments = Array.from(latestAssignmentsMap.values()).filter(a => a.ticket);
+      // Wait Time metrics (copy from getTicketCounts)
+      const tickets = await Ticket.findAll({ where: whereUserCondition });
+      let longestWait = "00:00";
+      let avgWait = "00:00";
+      let maxWait = "00:00";
+      let slaBreaches = 0;
+      if (tickets.length > 0) {
+        const waitTimes = tickets
+          .filter((t) => t.status === "Open" || t.status === "In Progress")
+          .map((t) => {
+            const created = new Date(t.created_at);
+            const now = new Date();
+            return Math.floor((now - created) / 1000 / 60); // Minutes
+          });
+        if (waitTimes.length > 0) {
+          const maxWaitMinutes = Math.max(...waitTimes);
+          const avgWaitMinutes = waitTimes.reduce((a, b) => a + b, 0) / waitTimes.length;
+          longestWait = `${Math.floor(maxWaitMinutes / 60)}:${String(maxWaitMinutes % 60).padStart(2, "0")}`;
+          avgWait = `${Math.floor(avgWaitMinutes / 60)}:${String(Math.round(avgWaitMinutes % 60)).padStart(2, "0")}`;
+          maxWait = longestWait;
+          slaBreaches = waitTimes.filter((t) => t > 1440).length; // > 24 hours
+        }
+      }
+      // Debug log
+      console.log('Filtered assignments for in-progress count:', filteredAssignments.map(a => ({
+        ticket_id: a.ticket_id,
+        ticket_status: a.ticket?.status,
+        assigned_by_id: a.assigned_by_id,
+        action: a.action
+      })));
+      return res.status(200).json({
+        success: true,
+        ticketStats: {
+          total,
+          open: counts.open || 0,
+          assigned: assignedCount,
+          escalated: escalatedCount,
+          closed: counts.closed || 0,
+          carriedForward: counts.carriedforward || 0,
+          inProgress: filteredAssignments.length,
+          overdue: overdueCount || 0,
+          newTickets: newTicketsCount || 0,
+          inHour: inHourCount || 0,
+          resolvedHour: resolvedHourCount || 0,
+          pending: pendingCount || 0,
+          longestWait,
+          avgWait,
+          maxWait,
+          lastHour: inHourCount || 0,
+          avgDelay: avgWait,
+          maxDelay: maxWait,
+          slaBreaches: slaBreaches || 0,
+        },
+      });
+    }
+    // FOCAL PERSON/COORDINATOR LOGIC
+    if (["focal-person", "claim-focal-person", "compliance-focal-person"].includes(user.role)) {
+      // Use focal person dashboard logic
+      // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
+      // For now, inline the logic:
+      const ticketWhere = { assigned_to_id: userId };
+      const newInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          [Op.or]: [
+            { status: null },
+            { status: "Open" },
+          ],
+        },
+      });
+      const escalatedInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          is_escalated: true,
+        },
+      });
+      const totalInquiries = await Ticket.count({ where: ticketWhere });
+      const inProgressInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          status: "In Progress",
+        },
+      });
+      const openInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          status: "Open",
+        },
+      });
+      const resolvedInquiries = await Ticket.count({
+        where: {
+          assigned_to_id: userId,
+          status: "Closed",
+        },
+      });
+      return res.status(200).json({
+        success: true,
+        newInquiries,
+        escalatedInquiries,
+        totalInquiries,
+        resolvedInquiries,
+        openInquiries,
+        closedInquiries: resolvedInquiries,
+        inProgressInquiries,
+      });
+    }
+    // COORDINATOR LOGIC (add as needed)
+    // ...
+    return res.status(400).json({ success: false, message: "Role not supported for dashboard counts" });
+  } catch (error) {
+    console.error("Error fetching dashboard counts:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+
+const reassignTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { assigned_to_id, assigned_to_role, reassignment_reason, notes } = req.body;
+    const assigned_by_id = req.user?.userId;
+
+    // Mark previous assignment as 'Reassigned'
+    await AssignedOfficer.update(
+      { status: 'Reassigned', completed_at: new Date(), reassignment_reason: reassignment_reason || null },
+      { where: { ticket_id: ticketId, status: 'Active' } }
+    );
+
+    // Insert new assignment row
+    await AssignedOfficer.create({
+      ticket_id: ticketId,
+      assigned_to_id,
+      assigned_to_role,
+      assigned_by_id,
+      status: 'Active',
+      assigned_at: new Date(),
+      notes: notes || 'Reassignment'
+    });
+
+    // Update the ticket's current assignee
+    await Ticket.update(
+      {
+        assigned_to_id,
+        assigned_to_role
+      },
+      { where: { id: ticketId } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Ticket reassigned successfully'
+    });
+  } catch (error) {
+    console.error('Error in reassignTicket:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reassign ticket',
+      error: error.message
+    });
+  }
+};
+
+const getInProgressAssignments = async (req, res) => {
+  try {
+    // Prefer userId from authenticated user (JWT), fallback to query param
+    const userId = req.user?.userId || req.query.userId;
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+    // Get only the most recent assignment per ticket_id, including ticket details
+    const assignments = await TicketAssignment.findAll({
+      where: {
+        assigned_by_id: userId,
+        action: { [Op.in]: ['Assigned', 'Reassigned'] },
+      },
+      order: [['ticket_id', 'ASC'], ['created_at', 'DESC']],
+      include: [
+        {
+          model: Ticket,
+          as: 'ticket',
+          where: { status: { [Op.ne]: 'Closed' } },
+          attributes: ['id', 'ticket_id', 'subject', 'first_name', 'middle_name', 'last_name', 'phone_number', 'status', 'category']
+        }
+      ]
+    });
+    // Reduce to only the latest assignment per ticket_id
+    const latestAssignmentsMap = new Map();
+    for (const assignment of assignments) {
+      if (!latestAssignmentsMap.has(assignment.ticket_id)) {
+        latestAssignmentsMap.set(assignment.ticket_id, assignment);
+      }
+    }
+    const latestAssignments = Array.from(latestAssignmentsMap.values());
+    // Only count assignments where ticket is present (i.e., not closed)
+    const filteredAssignments = latestAssignments.filter(a => a.ticket);
+    res.status(200).json({
+      message: 'In-progress assignments fetched successfully',
+      count: filteredAssignments.length,
+      assignments: filteredAssignments,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch in-progress assignments', error: error.message });
+  }
+};
+
 module.exports = {
   createTicket,
   getTickets,
@@ -1665,4 +1982,7 @@ module.exports = {
   getTicketAssignments,
   getAssignedOfficers,
   getAssignedNotifiedTickets,
+  getDashboardCounts,
+  reassignTicket,
+  getInProgressAssignments,
 };

@@ -33,28 +33,28 @@ const isClaimsFocalPerson = async (req, res, next) => {
 // Get all focal person tickets with filters and pagination
 router.get("/new-tickets", 
     authMiddleware, 
-    roleMiddleware(["focal-person"]), 
+    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     getFocalPersonTickets
 );
 
 // Get dashboard counts
 router.get("/dashboard-counts", 
     authMiddleware, 
-    roleMiddleware(["focal-person"]), 
+    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     getFocalPersonDashboardCounts
 );
 
 // Assign a ticket to an officer
 router.post("/focal-person-tickets/:ticketId/assign", 
     authMiddleware, 
-    roleMiddleware(["focal-person"]), 
+    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     assignTicket
 );
 
 // Reassign a ticket to a different officer
 router.post("/focal-person-tickets/:ticketId/reassign", 
     authMiddleware, 
-    roleMiddleware(["focal-person"]), 
+    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     reassignTicket
 );
 
@@ -63,7 +63,7 @@ router.post("/focal-person-tickets/:ticketId/reassign",
 // Complete an assignment
 router.post("/focal-person-tickets/:ticketId/complete", 
     authMiddleware, 
-    roleMiddleware(["focal-person"]), 
+    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     completeAssignment
 );
 

@@ -5,7 +5,7 @@ const {
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
   mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers,
   assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers,
-  getAssignedNotifiedTickets
+  getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -119,7 +119,7 @@ router.get(
 // Get ticket by ID
 router.get('/:ticketId', 
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketById
 );
 
@@ -130,7 +130,7 @@ router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
 router.post(
   '/:ticketId/assign',
   authMiddleware,
-  roleMiddleware(['focal-person', 'super-admin', 'coordinator']),
+  roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator']),
   assignTicket
 );
 
@@ -138,7 +138,7 @@ router.post(
 router.get(
   '/admin/attendee',
   authMiddleware,
-  roleMiddleware(['focal-person', 'super-admin', 'coordinator', 'admin']),
+  roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator', 'admin']),
   getAllAttendee
 );
 
@@ -146,7 +146,7 @@ router.get(
 router.post(
   '/:ticketId/close',
   authMiddleware,
-  roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', 'focal-person']),
+  roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
   closeTicket
 );
 
@@ -158,6 +158,25 @@ router.get(
   "/assigned-notified/:userId",
   authMiddleware,
   getAssignedNotifiedTickets
+);
+
+router.get(
+  "/dashboard-counts/:userId",
+  getDashboardCounts
+);
+
+router.get(
+  '/in-progress',
+  authMiddleware,
+  roleMiddleware(['super-admin', 'coordinator', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
+  getInProgressAssignments
+);
+
+router.get(
+  '/assignments/in-progress',
+  authMiddleware,
+  // roleMiddleware(['attendee','agent','super-admin', 'coordinator', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
+  getInProgressAssignments
 );
 
 module.exports = router;
