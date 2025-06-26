@@ -131,13 +131,6 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         status: 'Closed'
       }
     });
-    // Assigned Attendees: tickets currently assigned to the user and not closed
-    const assignedAttendeesCount = await Ticket.count({
-      where: {
-        assigned_to_id: userId,
-        status: { [Op.ne]: 'Closed' }
-      }
-    });
     res.status(200).json({
       success: true,
       newInquiries,
@@ -146,8 +139,7 @@ const getFocalPersonDashboardCounts = async (req, res) => {
       resolvedInquiries: closedInquiries,
       openInquiries,
       closedInquiries,
-      inProgressInquiries,
-      assignedAttendeesCount
+      inProgressInquiries
     });
   } catch (error) {
     console.error("Error fetching dashboard counts:", error);

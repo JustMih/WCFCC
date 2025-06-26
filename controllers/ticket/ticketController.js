@@ -596,12 +596,50 @@ const getOpenTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "Open" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ],
+            order: [['created_at', 'ASC']]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only OPEN tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "Open" }, // Filter by userId and status
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ],
+            order: [['created_at', 'ASC']]
+          }
+        ],
         // attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]]
       });
@@ -1276,7 +1314,7 @@ const getTicketById = async (req, res) => {
         {
           model: User,
           as: 'assignee',
-          attributes: ['id', 'name', 'email', 'role']
+          attributes: ['id', 'name', 'role']
         },
         {
           model: User,
@@ -1297,6 +1335,18 @@ const getTicketById = async (req, res) => {
           model: User,
           as: 'forwardedBy',
           attributes: ['id', 'name', 'email']
+        },
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'role']
+            }
+          ],
+          order: [['created_at', 'ASC']]
         }
       ]
     });
