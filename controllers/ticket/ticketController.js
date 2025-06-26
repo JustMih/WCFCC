@@ -1645,14 +1645,29 @@ const getTicketAssignments = async (req, res) => {
     const { ticketId } = req.params;
     const assignments = await TicketAssignment.findAll({
       where: { ticket_id: ticketId },
+      include: [
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'role']
+        }
+      ],
       order: [["created_at", "ASC"]]
     });
-    console.log('ticket assignment', assignments);
-    res.json(assignments);
+    // Map to include assigned_to_name and assigned_to_role
+    const mappedAssignments = assignments.map(a => ({
+      assigned_to_id: a.assigned_to_id,
+      assigned_to_name: a.assignee ? a.assignee.name : null,
+      assigned_to_role: a.assignee ? a.assignee.role : null,
+      action: a.action,
+      reason: a.reason,
+      created_at: a.created_at
+    }));
+    console.log('ticket assignment', mappedAssignments);
+    res.json(mappedAssignments);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch ticket assignments", error: error.message });
   }
-  
 };
 
 
