@@ -653,7 +653,6 @@ const getOpenTickets = async (req, res) => {
             ]
           }
         ],
-        // attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]]
       });
     }
@@ -662,10 +661,9 @@ const getOpenTickets = async (req, res) => {
       return res.status(404).json({ message: "No open tickets found." });
     }
 
-    // Modify response to include created_by (user.name) and ensure assignments are sorted and include action/created_at
+    // Modify response to include created_by (user.name) and assignment history
     const response = tickets.map((ticket) => {
       const t = ticket.toJSON();
-      // Ensure assignments are sorted by created_at ASC
       t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
@@ -678,7 +676,7 @@ const getOpenTickets = async (req, res) => {
         created_by: user.name
       };
     });
-
+    console.log('all ticketd open', response);
     res.status(200).json({
       message: "Open tickets fetched successfully",
       totalTickets: tickets.length,
@@ -709,6 +707,24 @@ const getAssignedTickets = async (req, res) => {
       // Super admin: Fetch all tickets with status Assigned or Open
       tickets = await Ticket.findAll({
         where: { status: { [Op.in]: ["Assigned", "Open"] } },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
@@ -718,16 +734,44 @@ const getAssignedTickets = async (req, res) => {
           assigned_to: userId,
           status: { [Op.in]: ["Assigned", "Open"] }
         },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
     if (!tickets || tickets.length === 0) {
       return res.status(404).json({ message: "No assigned tickets found." });
     }
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
     res.status(200).json({
       message: "Assigned tickets fetched successfully",
       totalTickets: tickets.length,
@@ -766,13 +810,48 @@ const getInprogressTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "In Progress" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only OPEN tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "In Progress" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -781,11 +860,21 @@ const getInprogressTickets = async (req, res) => {
       return res.status(404).json({ message: "No In progress tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
 
     res.status(200).json({
       message: "Open tickets fetched successfully",
@@ -825,13 +914,48 @@ const getCarriedForwardTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "Carried Forward" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only carried forward tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "Carried Forward" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -840,11 +964,21 @@ const getCarriedForwardTickets = async (req, res) => {
       return res.status(404).json({ message: "No open tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
 
     res.status(200).json({
       message: "Carried forward tickets fetched successfully",
@@ -884,13 +1018,48 @@ const getClosedTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "Closed" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only Closed tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "Closed" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -899,11 +1068,21 @@ const getClosedTickets = async (req, res) => {
       return res.status(404).json({ message: "No closed tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
 
     res.status(200).json({
       message: "Carried closed fetched successfully",
@@ -948,6 +1127,24 @@ const getOverdueTickets = async (req, res) => {
           status: "Open",
           created_at: { [Op.lt]: tenDaysAgo },
         },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]],
       });
     } else {
@@ -958,6 +1155,24 @@ const getOverdueTickets = async (req, res) => {
           status: "Open",
           created_at: { [Op.lt]: tenDaysAgo },
         },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]],
       });
     }
@@ -966,11 +1181,21 @@ const getOverdueTickets = async (req, res) => {
       return res.status(404).json({ message: "No overdue tickets found." });
     }
 
-    // Map tickets to include created_by
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name,
-    }));
+    // Map tickets to include created_by and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name,
+      };
+    });
 
     res.status(200).json({
       message: "Overdue tickets fetched successfully",
@@ -1103,6 +1328,17 @@ const getAllTickets = async (req, res) => {
             model: User,
             as: 'assignee',
             attributes: ['id', 'name', 'email']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1140,6 +1376,17 @@ const getAllTickets = async (req, res) => {
             model: User,
             as: 'assignee',
             attributes: ['id', 'name', 'email']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1150,11 +1397,22 @@ const getAllTickets = async (req, res) => {
       return res.status(404).json({ message: "No tickets found for this user." });
     }
 
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name,
-    }));
-
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || "N/A",
+        action: a.action,
+        reason: a.reason || t.description,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name,
+      };
+    });
+console.log('all ticketd closed', response);
     res.status(200).json({
       message: "All tickets fetched successfully",
       totalTickets: tickets.length,
@@ -1687,7 +1945,6 @@ const getTicketAssignments = async (req, res) => {
       assigned_to_name: a.assignee ? a.assignee.name : null,
       assigned_to_role: a.assignee ? a.assignee.role : null,
       action: a.action,
-      reason: a.reason,
       created_at: a.created_at
     }));
     console.log('ticket assignment', mappedAssignments);
