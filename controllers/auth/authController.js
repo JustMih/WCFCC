@@ -210,6 +210,7 @@ const login = async (req, res) => {
       isActive: user.isActive,
       role: user.role,
       id: user.id,
+      unit_section: user.unit_section,
       extension: user.extension,
     },
   });
