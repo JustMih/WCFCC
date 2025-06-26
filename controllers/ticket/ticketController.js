@@ -369,7 +369,7 @@ const createTicket = async (req, res) => {
       employerId: ticketEmployerId,
     };
     if (shouldClose) {
-      ticketData.resolution_details = resolution_details || 'Ticket resolved during creation';
+      ticketData.resolution_details = resolution_details || description || 'Ticket resolved during creation';
       ticketData.date_of_resolution = new Date();
       ticketData.attended_by_id = userId;
     }
@@ -387,36 +387,51 @@ const createTicket = async (req, res) => {
       });
     }
     // --- Create AssignedOfficer record for initial assignment ---
-    await AssignedOfficer.create({
-      ticket_id: newTicket.id,
-      assigned_to_id: assignedUser.id,
-      assigned_to_role: assignedUser.role,
-      assigned_by_id: userId,
-      status: 'Active',
-      assigned_at: new Date(),
-      notes: 'Initial assignment'
-    });
-    // --- Create Notification for Assigned User ---
-    await Notification.create({
-      ticket_id: newTicket.id,
-      sender_id: userId,
-      recipient_id: assignedUser.id,
-      message: `New ${category} ticket assigned to you: ${subject}`,
-      channel: channel,
-      status: 'unread',
-      category: category
-    });
+    if (!shouldClose) {
+      await AssignedOfficer.create({
+        ticket_id: newTicket.id,
+        assigned_to_id: assignedUser.id,
+        assigned_to_role: assignedUser.role,
+        assigned_by_id: userId,
+        status: 'Active',
+        assigned_at: new Date(),
+        notes: 'Initial assignment'
+      });
+      // --- Create Notification for Assigned User ---
+      await Notification.create({
+        ticket_id: newTicket.id,
+        sender_id: userId,
+        recipient_id: assignedUser.id,
+        message: `New ${category} ticket assigned to you: ${subject}`,
+        channel: channel,
+        status: 'unread',
+        category: category
+      });
+      // --- Create Ticket Assignment Record ---
+      await TicketAssignment.create({
+        ticket_id: newTicket.id,
+        assigned_by_id: userId,
+        assigned_to_id: assignedUser.id,
+        assigned_to_role: assignedUser.role,
+        action: 'Assigned',
+        reason: description,
+        created_at: new Date()
+      });
+    }
 
-    // --- Create Ticket Assignment Record ---
-    await TicketAssignment.create({
-      ticket_id: newTicket.id,
-      assigned_by_id: userId,
-      assigned_to_id: assignedUser.id,
-      assigned_to_role: assignedUser.role,
-      action: 'Assigned',
-      reason: description,
-      created_at: new Date()
-    });
+    // If ticket is closed at creation, record closure in assignment history
+    if (shouldClose) {
+      const closingUser = await User.findOne({ where: { id: userId } });
+      await TicketAssignment.create({
+        ticket_id: newTicket.id,
+        assigned_by_id: userId,
+        assigned_to_id: userId,
+        assigned_to_role: closingUser ? closingUser.role : null,
+        action: 'Closed',
+        reason: description || 'Ticket closed at creation',
+        created_at: new Date()
+      });
+    }
 
 // Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
 let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
@@ -1434,12 +1449,24 @@ const closeTicket = async (req, res) => {
     const notifyMsg = `Ticket ${ticket.ticket_id} has been closed.`;
     await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject, notifyHtml, ticketId, userId, notifyMsg);
 
-    // Fetch attended_by user name
+    // Fetch attended_by user name and role
     let attended_by_name = null;
+    let attended_by_role = null;
     if (userId) {
       const attendedByUser = await User.findOne({ where: { id: userId } });
       attended_by_name = attendedByUser ? attendedByUser.name : null;
+      attended_by_role = attendedByUser ? attendedByUser.role : null;
     }
+
+    // Record the closing action in TicketAssignment
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_to_id: userId,
+      assigned_to_role: attended_by_role,
+      action: 'Closed',
+      reason: resolution_details || 'Ticket closed by agent',
+      created_at: new Date()
+    });
 
     await AssignedOfficer.update(
       { status: 'Completed', completed_at: new Date() },
