@@ -3,23 +3,20 @@ const { IVRDTMFLog } = require("../../models");
 
  
 exports.getDTMFStats = async (req, res) => {
-    try {
-      const stats = await IVRDTMFLog.findAll({
-        attributes: [
-          'digit_pressed',
-          [sequelize.fn('COUNT', sequelize.col('digit_pressed')), 'count']
-        ],
-        group: ['digit_pressed'],
-        order: [[sequelize.literal('count'), 'DESC']],
-        raw: true
-      });
-      
-      console.log("✅ DTMF Stats API Hit");
-      console.log(stats); // Show result
+  try {
+    console.log("👉 Fetching full DTMF logs");
 
-      res.json(stats);
-    } catch (err) {
-      console.error("❌ Error in getDTMFStats:", err);
-      res.status(500).json({ error: err.message });
-    }
+    const logs = await IVRDTMFLog.findAll({
+      attributes: ['digit_pressed', 'caller_id', 'language', 'timestamp'],
+      order: [['timestamp', 'DESC']],
+      raw: true
+    });
+
+    console.log("✅ Success fetching DTMF logs", logs);
+    res.json(logs);
+  } catch (err) {
+    console.error("❌ DTMF Stats Error:", err);
+    res.status(500).json({ error: err.message });
+  }
 };
+ 

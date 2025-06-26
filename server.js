@@ -12,29 +12,8 @@ const { Server } = require("socket.io");
 
 /* ------------------------------ CONFIG & DB ------------------------------ */
 const sequelize = require("./config/mysql_connection.js");
-const routes = require("./routes");
-const { registerSuperAdmin } = require("./controllers/auth/authController");
-const recordingRoutes = require("./routes/recordingRoutes");
-const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
-const monitorRoutes = require('./routes/monitorRoutes');
-const holidayRoutes = require('./routes/holidayRoutes');
-const emergencyRoutes = require('./routes/emergencyRoutes');
-const livestreamRoutes = require("./routes/livestreamRoutes");
- 
 
-const { setupSocket } = require("./controllers/livestream/livestreamController");
-const { startCELWatcher } = require("./controllers/livestream/celLiveEmitter");
-startCELWatcher(); // 🔁 Start CEL live call background loop
-
-const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
-const reportsRoutes = require('./routes/reports.routes');
-
-const ChatMassage = require("./models/chart_message");
-const InstagramComment = require("./models/instagram_comment");
-const VoiceNote = require('./models/voice_notes.model');
-//const { setupSocket } = require("./controllers/livestream/livestreamController");
-
-// Initialize Express
+/* ------------------------------ EXPRESS INIT ------------------------------ */
 const app = express();
 const server = http.createServer(app);
 
@@ -58,6 +37,7 @@ const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
+
 require('./amiServer'); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());
@@ -116,7 +96,6 @@ app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use("/api/livestream", livestreamRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
 app.use("/api", require("./routes/dtmfRoutes"));
-
 
 /* ------------------------------ SOCKET.IO ------------------------------ */
 const io = new Server(server, {
