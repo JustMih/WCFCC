@@ -37,6 +37,7 @@ router.use("/admin-dashboard", adminDashboardRoutes);
 router.use("/ivr", voiceRoutes);
 router.use("/ivr-actions", ivrActionRoutes);
 router.use("/voice-notes", recordingRoutes);  
+router.use("/voicenotes", recordingRoutes);  
 router.use("/ticket", ticketRoutes);
 router.use("/coordinator", coordinatorRoutes);
 router.use("/section", sectionRoutes);

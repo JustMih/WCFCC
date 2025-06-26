@@ -41,5 +41,4 @@ router.put('/voice-notes/:id/mark-played', async (req, res) => {
     }
   });
   
-  
 module.exports = router;
