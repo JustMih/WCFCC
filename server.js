@@ -34,14 +34,11 @@ const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
 const livestreamRoutes = require("./routes/livestreamRoutes");
-// const { setupSocket } = require("./controllers/livestream/livestreamController");
-const { startCELWatcher } = require("./controllers/livestream/celLiveEmitter");
-startCELWatcher(); // 🔁 Start CEL live call background loop
-
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
 
+require('./amiServer'); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());
 app.use(cors({
@@ -98,6 +95,7 @@ app.use("/api/reports", reportsRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use("/api/livestream", livestreamRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
+app.use("/api", require("./routes/dtmfRoutes"));
 
 /* ------------------------------ SOCKET.IO ------------------------------ */
 const io = new Server(server, {

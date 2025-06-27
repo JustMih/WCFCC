@@ -15,6 +15,22 @@ const VoiceNote = sequelize.define("Voice_Notes", {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  assigned_agent_id: {
+    type: DataTypes.CHAR(36),
+    allowNull: true
+  },
+  is_played: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  duration_seconds: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  transcription: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
