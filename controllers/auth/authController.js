@@ -129,23 +129,35 @@ const login = async (req, res) => {
       { expiresIn: "24h" }
     );
 
-    // Step 6: Return successful response
-    res.json({
-      message: "Login successful",
-      token,
-      user: {
-        name: user.name,
-        isActive: user.isActive,
-        role: user.role,
-        id: user.id,
-        extension: user.extension,
-      },
+  // Log agent login in AgentLoginLog
+  if (user.role === "agent") {
+    await AgentLoginLog.create({
+      userId: user.id,
+      role: "agent",
+      loginTime: new Date(),
+      logoutTime: null, // Will be updated on logout
+      totalOnlineTime: 0, // Will be calculated later
     });
-  } catch (error) {
-    console.error("Login error:", error);
-    res.status(400).json({ message: error.message });
+    console.log(`Agent ${user.name} logged in.`);
   }
+
+  res.json({
+    message: "Login successful",
+    token,
+    user: {
+      name: user.name,
+      isActive: user.isActive,
+      role: user.role,
+      id: user.id,
+      unit_section: user.unit_section,
+      extension: user.extension,
+    },
+  });
+} catch (error) {
+  console.error("Login error:", error);
+  res.status(500).json({ message: "Server error", error: error.message });
 };
+}
 
 const logout = async (req, res) => {
   const { userId } = req.body;

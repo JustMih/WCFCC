@@ -2,6 +2,7 @@ const Ticket = require("../../models/Ticket");
 const User = require("../../models/User");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { Op, Sequelize } = require("sequelize");
+const TicketAssignment = require("../../models/TicketAssignment");
 
 const getFocalPersonTickets = async (req, res) => {
   try {
@@ -9,69 +10,91 @@ const getFocalPersonTickets = async (req, res) => {
     const user = await User.findByPk(userId);
     const section = user.unit_section;
     const statusParam = req.query.status ? req.query.status.toLowerCase() : 'new';
-    let where = {
-      section,
-      [Op.or]: [
-        { category: "Inquiry" },
-        { converted_to: "Inquiry" }
-      ]
-    };
-
-    switch (statusParam) {
-      case 'new':
-        where = {
-          ...where,
-          [Op.or]: [
-            { status: null },
-            { status: 'Open' },
-          ]
-        };
-        break;
-      case 'escalated':
-        where = {
-          ...where,
-          is_escalated: true
-        };
-        break;
-      case 'open':
-        where = {
-          ...where,
-          // status: 'Open',
-          status:'Assigned'
-        };
-        break;
-      // case 'in-progress':
-      //   where = {
-      //     ...where,
-      //     status: 'In Progress'
-      //   };
-      //   break;
-      case 'closed':
-        where = {
-          ...where,
-          status: 'Closed'
-        };
-        break;
-      default:
-        // fallback to new
-        where = {
-          ...where,
-          [Op.or]: [
-            { status: null },
-            { status: 'Open' }
-          ]
-        };
+    let where;
+    if (statusParam === 'new') {
+      where = {
+        assigned_to_id: userId,
+        status: 'Open',
+      };
+    } else {
+      switch (statusParam) {
+        case 'escalated':
+          where = {
+            assigned_to_id: userId,
+            status: 'Open',
+            is_escalated: true
+          };
+          break;
+        case 'open':
+          where = {
+            assigned_to_id: userId,
+            status: 'Open'
+          };
+          break;
+        case 'closed':
+          where = {
+            assigned_to_id: userId,
+            status: 'Closed'
+          };
+          break;
+        default:
+          where = {
+            assigned_to_id: userId,
+            [Op.or]: [
+              { status: null },
+              { status: 'Open' }
+            ]
+          };
+      }
     }
 
+    // Eager-load assignments and their assignee user info
     const inquiries = await Ticket.findAll({
       where,
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      include: [
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'role']
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'role']
+        }
+      ]
+    });
+
+    // Debug: Log the raw data to check if assignee is being populated
+    console.log('DEBUG inquiries:', JSON.stringify(inquiries, null, 2));
+
+    // Map over inquiries to include assignments with assigned_to_name and assigned_to_role
+    const response = inquiries.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: t.creator?.name || t.created_by || null
+      };
     });
 
     res.status(200).json({
-      message: inquiries.length ? "Tickets fetched successfully." : "No tickets found.",
-      inquiries,
-      count: inquiries.length
+      message: response.length ? "Tickets fetched successfully." : "No tickets found.",
+      inquiries: response,
+      count: response.length
     });
   } catch (error) {
     console.error("Error fetching Focal person tickets:", error);
@@ -88,7 +111,6 @@ const getFocalPersonDashboardCounts = async (req, res) => {
     // Only count tickets assigned to this focal person and not closed
     const ticketWhere = {
       assigned_to_id: userId,
-      status: { [Op.ne]: 'Closed' }
     };
 
     // New inquiries (Open or null)
@@ -117,17 +139,25 @@ const getFocalPersonDashboardCounts = async (req, res) => {
         status: 'In Progress'
       }
     });
-    // Open inquiries
+    // Find all ticket IDs ever assigned to this focal person (for open and closed)
+    const assignedTicketAssignments = await AssignedOfficer.findAll({
+      where: { assigned_to_id: userId },
+      attributes: ['ticket_id'],
+      group: ['ticket_id']
+    });
+    const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+
+    // Open inquiries: tickets ever assigned to this user and not closed
     const openInquiries = await Ticket.count({
       where: {
-        ...ticketWhere,
-        status: 'Open'
-      }
+        id: { [Op.in]: assignedTicketIds },
+        status: { [Op.ne]: 'Closed' }
+      },
     });
-    // Resolved/closed inquiries (status: Closed, for reference)
-    const resolvedInquiries = await Ticket.count({
+    // Closed inquiries: tickets ever assigned to this user and status = 'Closed'
+    const closedInquiries = await Ticket.count({
       where: {
-        assigned_to_id: userId,
+        id: { [Op.in]: assignedTicketIds },
         status: 'Closed'
       }
     });
@@ -136,7 +166,7 @@ const getFocalPersonDashboardCounts = async (req, res) => {
       newInquiries,
       escalatedInquiries,
       totalInquiries,
-      resolvedInquiries,
+      resolvedInquiries: closedInquiries,
       openInquiries,
       closedInquiries: resolvedInquiries,
       inProgressInquiries

@@ -85,6 +85,10 @@ User.associate = (models) => {
     foreignKey: "userId", // ✅ Sequelize field in Ticket model
     as: "ticketsCreated",
   });
+
+  User.hasMany(models.TicketAssignment, { as: 'assignments', foreignKey: 'assigned_to_id' });
+  // User can be the assignee of many Tickets
+  User.hasMany(models.Ticket, { as: 'assignedTickets', foreignKey: 'assigned_to_id' });
 };
 
 module.exports = User;

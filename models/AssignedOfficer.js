@@ -2,69 +2,19 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/mysql_connection');
 
 const AssignedOfficer = sequelize.define('AssignedOfficer', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  first_name: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  middle_name: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  last_name: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  nida_number: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  phone_number: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  employer_id: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  assigned_to_id: {
-    type: DataTypes.UUID,
-    allowNull: true,
-    references: {
-      model: 'Users',
-      key: 'id'
-    },
-    onDelete: 'SET NULL'
-  },
-  status: {
-    type: DataTypes.ENUM('Active', 'Reassigned', 'Completed'),
-    defaultValue: 'Active',
-    allowNull: false
-  },
-  reassignment_history: {
-    type: DataTypes.JSON,
-    allowNull: true
-  },
-  assigned_at: {
-    type: DataTypes.DATE,
-    defaultValue: DataTypes.NOW,
-    allowNull: false
-  },
-  completed_at: {
-    type: DataTypes.DATE,
-    allowNull: true
-  },
-  notes: {
-    type: DataTypes.TEXT,
-    allowNull: true
-  }
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  ticket_id: { type: DataTypes.INTEGER, allowNull: false },
+  assigned_to_id: { type: DataTypes.INTEGER, allowNull: false },
+  assigned_to_role: { type: DataTypes.STRING, allowNull: false },
+  assigned_by_id: { type: DataTypes.INTEGER, allowNull: false },
+  status: { type: DataTypes.STRING, defaultValue: 'Active' },
+  assigned_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  reassignment_reason: { type: DataTypes.STRING },
+  completed_at: { type: DataTypes.DATE },
+  notes: { type: DataTypes.STRING }
 }, {
-  tableName: 'AssignedOfficers',
-  timestamps: true
+  tableName: 'assigned_officers',
+  timestamps: false
 });
 
 // Define associations

@@ -16,6 +16,133 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 
+// Utility: Calculate working days between two dates, excluding weekends and optional holidays
+/**
+ * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.
+ * @param {Date|string} startDate - The start date (inclusive)
+ * @param {Date|string} endDate - The end date (inclusive)
+ * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
+ * @returns {number} Number of working days
+ */
+function getWorkingDays(startDate, endDate, holidays = []) {
+  let count = 0;
+  let current = new Date(startDate);
+  const end = new Date(endDate);
+  const holidaySet = new Set((holidays || []).map(h => new Date(h).toDateString()));
+  while (current <= end) {
+    const day = current.getDay();
+    const isWeekend = (day === 0 || day === 6);
+    const isHoliday = holidaySet.has(current.toDateString());
+    if (!isWeekend && !isHoliday) count++;
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+}
+
+// SLA rules mapping
+const SLA_RULES = {
+  inquiry: 3, // days
+  complaint_minor: 7, // total days for minor complaint (adjust as needed)
+  complaint_major: 15 // total days for major complaint (adjust as needed)
+};
+
+/**
+ * Checks if a ticket has breached its SLA based on working days since created_at.
+ * @param {Object} ticket - The ticket object (must have category, complaint_type, created_at)
+ * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
+ * @returns {Object} { workingDays, slaDays, breached }
+ */
+function checkTicketSlaBreach(ticket, holidays = []) {
+  if (!ticket || !ticket.created_at) return { workingDays: 0, slaDays: 0, breached: false };
+
+  // Determine SLA days
+  let slaDays = 0;
+  if (ticket.category === "Inquiry") {
+    slaDays = SLA_RULES.inquiry;
+  } else if (ticket.category === "Complaint") {
+    const type = ticket.complaint_type === "major" ? "complaint_major" : "complaint_minor";
+    slaDays = SLA_RULES[type];
+  }
+
+  // Calculate working days since created_at
+  const workingDays = getWorkingDays(ticket.created_at, new Date(), holidays);
+
+  // Check if breached
+  const breached = workingDays > slaDays;
+
+  return { workingDays, slaDays, breached };
+}
+
+/**
+ * Escalate and update ticket if SLA is breached.
+ * @param {Object} ticket - The ticket object (must have id, category, complaint_type, created_at, assigned_to_id, assigned_to_role, unit_section)
+ * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
+ * @returns {Promise<boolean>} true if escalated, false otherwise
+ */
+async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
+  const { breached, workingDays, slaDays } = checkTicketSlaBreach(ticket, holidays);
+  if (!breached) return false;
+
+  // Define escalation path
+  const ESCALATION_PATH = {
+    inquiry: ["focal-person", "attendee"],
+    complaint_minor: ["attendee", "head-of-unit", "manager", "director"],
+    complaint_major: ["attendee", "head-of-unit", "manager", "director", "director-general"]
+  };
+  let path;
+  if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
+  else if (ticket.category === "Complaint" && ticket.complaint_type === "major") path = ESCALATION_PATH.complaint_major;
+  else if (ticket.category === "Complaint") path = ESCALATION_PATH.complaint_minor;
+  else return false;
+
+  const currentRole = (ticket.assigned_to_role || '').toLowerCase();
+  const idx = path.indexOf(currentRole);
+  if (idx === -1 || idx === path.length - 1) return false; // Already at top
+  const nextRole = path[idx + 1];
+  const section = ticket.unit_section;
+
+  // Find next user in same unit_section
+  let sectionValue;
+  if (ticket.section && ticket.section.toLowerCase() === 'unit') {
+    sectionValue = ticket.sub_section;
+  } else {
+    sectionValue = ticket.unit_section;
+  }
+  const userWhere = { role: nextRole };
+  if (sectionValue) userWhere.unit_section = sectionValue;
+  let nextUser = await User.findOne({ where: userWhere });
+  if (!nextUser) {
+    // Fallback: find any user with the nextRole
+    nextUser = await User.findOne({ where: { role: nextRole } });
+    if (!nextUser) {
+      console.warn(`Escalation failed: No user found for role '${nextRole}' (section: '${sectionValue}') or any section.`);
+      return false;
+    }
+  }
+
+  // Update ticket assignment
+  await Ticket.update(
+    { assigned_to_id: nextUser.id, assigned_to_role: nextRole, status: 'Escalated' },
+    { where: { id: ticket.id } }
+  );
+
+  // Find system user for assigned_by_id
+  const systemUser = await User.findOne({ where: { username: 'system' } });
+
+  // Record escalation in assignment history
+  await TicketAssignment.create({
+    ticket_id: ticket.id,
+    assigned_by_id: systemUser ? systemUser.id : ticket.assigned_to_id,
+    assigned_to_id: nextUser.id,
+    assigned_to_role: nextRole,
+    action: "Escalated",
+    reason: `SLA breached after ${workingDays} working days (SLA: ${slaDays} days). Escalated automatically to ${nextRole}.`,
+    created_at: new Date()
+  });
+
+  return true;
+}
+
 const getTicketCounts = async (req, res) => {
   try {
     const { userId: id } = req.params;
@@ -287,8 +414,8 @@ const createTicket = async (req, res) => {
       if (!assignedUser) {
         assignedUser = await User.findOne({
           where: {
-            role: 'focal-person',
-            unit_section: finalSection || responsible_unit_name // Use section/unit if available
+            role:{[Op.in]: ['focal-person', 'claim-focal-person', 'complience-focal-person']},
+            unit_section: responsible_unit_name||finalSection  // Use section/unit if available
           },
           attributes: ['id', 'name', 'email', 'role', 'unit_section']
         });
@@ -369,7 +496,7 @@ const createTicket = async (req, res) => {
       employerId: ticketEmployerId,
     };
     if (shouldClose) {
-      ticketData.resolution_details = resolution_details || 'Ticket resolved during creation';
+      ticketData.resolution_details = resolution_details || description || 'Ticket resolved during creation';
       ticketData.date_of_resolution = new Date();
       ticketData.attended_by_id = userId;
     }
@@ -386,27 +513,52 @@ const createTicket = async (req, res) => {
         relationshipToEmployee: relationshipToEmployee,
       });
     }
-    // --- Create Notification for Assigned User ---
-    await Notification.create({
-      ticket_id: newTicket.id,
-      sender_id: userId,
-      recipient_id: assignedUser.id,
-      message: `New ${category} ticket assigned to you: ${subject}`,
-      channel: channel,
-      status: 'unread',
-      category: category
-    });
+    // --- Create AssignedOfficer record for initial assignment ---
+    if (!shouldClose) {
+      await AssignedOfficer.create({
+        ticket_id: newTicket.id,
+        assigned_to_id: assignedUser.id,
+        assigned_to_role: assignedUser.role,
+        assigned_by_id: userId,
+        status: 'Active',
+        assigned_at: new Date(),
+        notes: 'Initial assignment'
+      });
+      // --- Create Notification for Assigned User ---
+      await Notification.create({
+        ticket_id: newTicket.id,
+        sender_id: userId,
+        recipient_id: assignedUser.id,
+        message: `New ${category} ticket assigned to you: ${subject}`,
+        channel: channel,
+        status: 'unread',
+        category: category
+      });
+      // --- Create Ticket Assignment Record ---
+      await TicketAssignment.create({
+        ticket_id: newTicket.id,
+        assigned_by_id: userId,
+        assigned_to_id: assignedUser.id,
+        assigned_to_role: assignedUser.role,
+        action: 'Assigned',
+        reason: description,
+        created_at: new Date()
+      });
+    }
 
-    // --- Create Ticket Assignment Record ---
-    await TicketAssignment.create({
-      ticket_id: newTicket.id,
-      assigned_by_id: userId,
-      assigned_to_id: assignedUser.id,
-      assigned_to_role: assignedUser.role,
-      action: 'Assigned',
-      reason: description,
-      created_at: new Date()
-    });
+    // If ticket is closed at creation, record closure in assignment history
+    if (shouldClose) {
+      const closingUser = await User.findOne({ where: { id: userId } });
+      await TicketAssignment.create({
+        ticket_id: newTicket.id,
+        assigned_by_id: userId,
+        assigned_to_id: userId,
+        assigned_to_role: closingUser ? closingUser.role : null,
+        action: 'Closed',
+        reason: description || 'Ticket closed at creation',
+        created_at: new Date()
+      });
+    }
 
 // Format phone number for SMS: ensure it starts with +255 and is followed by 9 digits
 let smsRecipient = String(ticketPhoneNumber || '').replace(/^\+/, '').replace(/^0/, '255');
@@ -584,15 +736,50 @@ const getOpenTickets = async (req, res) => {
     if (user.role === "super-admin") {
       // Super admin: Fetch all OPEN tickets
       tickets = await Ticket.findAll({
-        where: { status: "Open" }, // Filter by status
+        where: { status: ["Open", "Assigned"] }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only OPEN tickets created by this agent
       tickets = await Ticket.findAll({
-        where: { userId, status: "Open" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        where: { userId, status: ["Open", "Assigned"] }, // Filter by userId and status
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -601,12 +788,22 @@ const getOpenTickets = async (req, res) => {
       return res.status(404).json({ message: "No open tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
-
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
+    console.log('all ticketd open', response);
     res.status(200).json({
       message: "Open tickets fetched successfully",
       totalTickets: tickets.length,
@@ -637,25 +834,71 @@ const getAssignedTickets = async (req, res) => {
       // Super admin: Fetch all tickets with status Assigned or Open
       tickets = await Ticket.findAll({
         where: { status: { [Op.in]: ["Assigned", "Open"] } },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Fetch tickets assigned to this user (attendee)
       tickets = await Ticket.findAll({
         where: {
-          assigned_to: userId,
+          assigned_to_id: userId,
           status: { [Op.in]: ["Assigned", "Open"] }
         },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
     if (!tickets || tickets.length === 0) {
       return res.status(404).json({ message: "No assigned tickets found." });
     }
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
     res.status(200).json({
       message: "Assigned tickets fetched successfully",
       totalTickets: tickets.length,
@@ -694,13 +937,48 @@ const getInprogressTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "In Progress" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only OPEN tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "In Progress" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -709,11 +987,21 @@ const getInprogressTickets = async (req, res) => {
       return res.status(404).json({ message: "No In progress tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
 
     res.status(200).json({
       message: "Open tickets fetched successfully",
@@ -753,13 +1041,48 @@ const getCarriedForwardTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "Carried Forward" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only carried forward tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "Carried Forward" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -768,11 +1091,21 @@ const getCarriedForwardTickets = async (req, res) => {
       return res.status(404).json({ message: "No open tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
 
     res.status(200).json({
       message: "Carried forward tickets fetched successfully",
@@ -812,13 +1145,48 @@ const getClosedTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { status: "Closed" }, // Filter by status
         attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     } else {
       // Agent: Fetch only Closed tickets created by this agent
       tickets = await Ticket.findAll({
         where: { userId, status: "Closed" }, // Filter by userId and status
-        // attributes: { exclude: ["userId"] },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]]
       });
     }
@@ -827,11 +1195,21 @@ const getClosedTickets = async (req, res) => {
       return res.status(404).json({ message: "No closed tickets found." });
     }
 
-    // Modify response to include created_by (user.name)
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name
-    }));
+    // Modify response to include created_by (user.name) and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name
+      };
+    });
 
     res.status(200).json({
       message: "Carried closed fetched successfully",
@@ -876,6 +1254,24 @@ const getOverdueTickets = async (req, res) => {
           status: "Open",
           created_at: { [Op.lt]: tenDaysAgo },
         },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]],
       });
     } else {
@@ -886,6 +1282,24 @@ const getOverdueTickets = async (req, res) => {
           status: "Open",
           created_at: { [Op.lt]: tenDaysAgo },
         },
+        include: [
+          {
+            model: User,
+            as: 'assignee',
+            attributes: ['id', 'name', 'role']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
+          }
+        ],
         order: [["created_at", "DESC"]],
       });
     }
@@ -894,11 +1308,21 @@ const getOverdueTickets = async (req, res) => {
       return res.status(404).json({ message: "No overdue tickets found." });
     }
 
-    // Map tickets to include created_by
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name,
-    }));
+    // Map tickets to include created_by and assignment history
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name,
+      };
+    });
 
     res.status(200).json({
       message: "Overdue tickets fetched successfully",
@@ -1031,6 +1455,17 @@ const getAllTickets = async (req, res) => {
             model: User,
             as: 'assignee',
             attributes: ['id', 'name', 'email']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1068,6 +1503,17 @@ const getAllTickets = async (req, res) => {
             model: User,
             as: 'assignee',
             attributes: ['id', 'name', 'email']
+          },
+          {
+            model: TicketAssignment,
+            as: 'assignments',
+            include: [
+              {
+                model: User,
+                as: 'assignee',
+                attributes: ['id', 'name', 'role']
+              }
+            ]
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1078,11 +1524,22 @@ const getAllTickets = async (req, res) => {
       return res.status(404).json({ message: "No tickets found for this user." });
     }
 
-    const response = tickets.map((ticket) => ({
-      ...ticket.toJSON(),
-      created_by: user.name,
-    }));
-
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || "N/A",
+        action: a.action,
+        reason: a.reason || t.description,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: user.name,
+      };
+    });
+console.log('all ticketd closed', response);
     res.status(200).json({
       message: "All tickets fetched successfully",
       totalTickets: tickets.length,
@@ -1266,7 +1723,7 @@ const getTicketById = async (req, res) => {
         {
           model: User,
           as: 'assignee',
-          attributes: ['id', 'name', 'email', 'role']
+          attributes: ['id', 'name', 'role']
         },
         {
           model: User,
@@ -1287,6 +1744,18 @@ const getTicketById = async (req, res) => {
           model: User,
           as: 'forwardedBy',
           attributes: ['id', 'name', 'email']
+        },
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'role']
+            }
+          ],
+          order: [['created_at', 'ASC']]
         }
       ]
     });
@@ -1365,12 +1834,29 @@ const closeTicket = async (req, res) => {
     const notifyMsg = `Ticket ${ticket.ticket_id} has been closed.`;
     await notifyUsersByRole(['coordinator', 'supervisor'], notifySubject, notifyHtml, ticketId, userId, notifyMsg);
 
-    // Fetch attended_by user name
+    // Fetch attended_by user name and role
     let attended_by_name = null;
+    let attended_by_role = null;
     if (userId) {
       const attendedByUser = await User.findOne({ where: { id: userId } });
       attended_by_name = attendedByUser ? attendedByUser.name : null;
+      attended_by_role = attendedByUser ? attendedByUser.role : null;
     }
+
+    // Record the closing action in TicketAssignment
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_to_id: userId,
+      assigned_to_role: attended_by_role,
+      action: 'Closed',
+      reason: resolution_details || 'Ticket closed by agent',
+      created_at: new Date()
+    });
+
+    await AssignedOfficer.update(
+      { status: 'Completed', completed_at: new Date() },
+      { where: { ticket_id: ticketId, status: 'Active' } }
+    );
 
     return res.status(200).json({
       message: "Ticket closed successfully",
@@ -1473,6 +1959,11 @@ const closeCoordinatorTicket = async (req, res) => {
       });
     }
 
+    await AssignedOfficer.update(
+      { status: 'Completed', completed_at: new Date() },
+      { where: { ticket_id: ticketId, status: 'Active' } }
+    );
+
     return res.status(200).json({
       message: `${ticket.category} closed successfully`,
       ticket: {
@@ -1506,7 +1997,7 @@ const assignTicket = async (req, res) => {
     }
     // Update ticket assignment
     await Ticket.update(
-      { assigned_to_id: assignedTo.id, status: 'Assigned' },
+      { assigned_to_id: assignedTo.id, assigned_to_role: assignedTo.role, status: 'Assigned' },
       { where: { id: ticketId } }
     );
     // Track assignment
@@ -1566,13 +2057,30 @@ const getTicketAssignments = async (req, res) => {
     const { ticketId } = req.params;
     const assignments = await TicketAssignment.findAll({
       where: { ticket_id: ticketId },
-      order: [["createdAt", "ASC"]]
+      include: [
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'role']
+        }
+      ],
+      order: [["created_at", "ASC"]]
     });
-    res.json(assignments);
+    // Map to include assigned_to_name and assigned_to_role
+    const mappedAssignments = assignments.map(a => ({
+      assigned_to_id: a.assigned_to_id,
+      assigned_to_name: a.assignee ? a.assignee.name : null,
+      assigned_to_role: a.assignee ? a.assignee.role : null,
+      action: a.action,
+      created_at: a.created_at
+    }));
+    console.log('ticket assignment', mappedAssignments);
+    res.json(mappedAssignments);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch ticket assignments", error: error.message });
   }
 };
+
 
 // Get all assigned officers for a ticket
 const getAssignedOfficers = async (req, res) => {
@@ -1643,7 +2151,306 @@ const getAssignedNotifiedTickets = async (req, res) => {
   }
 };
 
+// Unified dashboard counts for any user
+const getDashboardCounts = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "name", "role"] });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    // AGENT/ATTENDEE LOGIC (from getTicketCounts)
+    if (["agent", "attendee"].includes(user.role)) {
+      // Use getTicketCounts logic
+      const isSuperAdmin = user.role === "super-admin";
+      const whereUserCondition = isSuperAdmin ? {} : { created_by: userId };
+      const statuses = ["Open", "Assigned", "Closed", "Carried Forward", "In Progress"];
+      const counts = {};
+      for (const status of statuses) {
+        const key = status.toLowerCase().replace(/ /g, "");
+        const condition = isSuperAdmin ? { status } : { created_by: userId, status };
+        counts[key] = await Ticket.count({ where: condition });
+      }
+      const total = await Ticket.count({ where: whereUserCondition });
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const overdueCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          status: "Open",
+          created_at: { [Op.lt]: tenDaysAgo },
+        },
+      });
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newTicketsCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          created_at: { [Op.gte]: today },
+        },
+      });
+      const lastHour = new Date(new Date().setHours(new Date().getHours() - 1));
+      const inHourCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          created_at: { [Op.gte]: lastHour },
+        },
+      });
+      const resolvedHourCount = await Ticket.count({
+        where: {
+          ...whereUserCondition,
+          status: "Closed",
+          updated_at: { [Op.gte]: lastHour },
+        },
+      });
+      const pendingCount = counts.open + counts.inprogress;
+      // Assigned tickets: assigned_to_id = userId and status in ["Assigned", "Open"]
+      let assignedCount = await Ticket.count({
+        where: {
+          assigned_to_id: userId,
+          status: { [Op.in]: ["Assigned", "Open"] },
+        },
+      });
+      // Escalated tickets: assigned_to_id = userId and is_escalated = true
+      const escalatedCount = await Ticket.count({
+        where: {
+          assigned_to_id: userId,
+          is_escalated: true,
+        },
+      });
+      // In-progress assignments count (not closed)
+      const assignments = await TicketAssignment.findAll({
+        where: {
+          assigned_by_id: userId,
+          action: { [Op.in]: ["Assigned", "Reassigned"] },
+        },
+        include: [
+          {
+            model: Ticket,
+            as: "ticket",
+            where: { status: { [Op.ne]: "Closed" } },
+          }
+        ],
+      });
+      // Reduce to only the latest assignment per ticket_id
+      const latestAssignmentsMap = new Map();
+      for (const assignment of assignments) {
+        if (!latestAssignmentsMap.has(assignment.ticket_id)) {
+          latestAssignmentsMap.set(assignment.ticket_id, assignment);
+        }
+      }
+      const filteredAssignments = Array.from(latestAssignmentsMap.values()).filter(a => a.ticket);
+      // Wait Time metrics (copy from getTicketCounts)
+      const tickets = await Ticket.findAll({ where: whereUserCondition });
+      let longestWait = "00:00";
+      let avgWait = "00:00";
+      let maxWait = "00:00";
+      let slaBreaches = 0;
+      if (tickets.length > 0) {
+        const waitTimes = tickets
+          .filter((t) => t.status === "Open" || t.status === "In Progress")
+          .map((t) => {
+            const created = new Date(t.created_at);
+            const now = new Date();
+            return Math.floor((now - created) / 1000 / 60); // Minutes
+          });
+        if (waitTimes.length > 0) {
+          const maxWaitMinutes = Math.max(...waitTimes);
+          const avgWaitMinutes = waitTimes.reduce((a, b) => a + b, 0) / waitTimes.length;
+          longestWait = `${Math.floor(maxWaitMinutes / 60)}:${String(maxWaitMinutes % 60).padStart(2, "0")}`;
+          avgWait = `${Math.floor(avgWaitMinutes / 60)}:${String(Math.round(avgWaitMinutes % 60)).padStart(2, "0")}`;
+          maxWait = longestWait;
+          slaBreaches = waitTimes.filter((t) => t > 1440).length; // > 24 hours
+        }
+      }
+      // Debug log
+      console.log('Filtered assignments for in-progress count:', filteredAssignments.map(a => ({
+        ticket_id: a.ticket_id,
+        ticket_status: a.ticket?.status,
+        assigned_by_id: a.assigned_by_id,
+        action: a.action
+      })));
+      return res.status(200).json({
+        success: true,
+        ticketStats: {
+          total,
+          open: counts.open || 0,
+          assigned: assignedCount,
+          escalated: escalatedCount,
+          closed: counts.closed || 0,
+          carriedForward: counts.carriedforward || 0,
+          inProgress: filteredAssignments.length,
+          overdue: overdueCount || 0,
+          newTickets: newTicketsCount || 0,
+          inHour: inHourCount || 0,
+          resolvedHour: resolvedHourCount || 0,
+          pending: pendingCount || 0,
+          longestWait,
+          avgWait,
+          maxWait,
+          lastHour: inHourCount || 0,
+          avgDelay: avgWait,
+          maxDelay: maxWait,
+          slaBreaches: slaBreaches || 0,
+        },
+      });
+    }
+    // FOCAL PERSON/COORDINATOR LOGIC
+    if (["focal-person", "claim-focal-person", "compliance-focal-person"].includes(user.role)) {
+      // Use focal person dashboard logic
+      // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
+      // For now, inline the logic:
+      const ticketWhere = { assigned_to_id: userId };
+      const newInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          [Op.or]: [
+            { status: null },
+            { status: "Open" },
+          ],
+        },
+      });
+      const escalatedInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          is_escalated: true,
+        },
+      });
+      const totalInquiries = await Ticket.count({ where: ticketWhere });
+      const inProgressInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          status: "In Progress",
+        },
+      });
+      const openInquiries = await Ticket.count({
+        where: {
+          ...ticketWhere,
+          status: "Open",
+        },
+      });
+      const resolvedInquiries = await Ticket.count({
+        where: {
+          assigned_to_id: userId,
+          status: "Closed",
+        },
+      });
+      return res.status(200).json({
+        success: true,
+        newInquiries,
+        escalatedInquiries,
+        totalInquiries,
+        resolvedInquiries,
+        openInquiries,
+        closedInquiries: resolvedInquiries,
+        inProgressInquiries,
+      });
+    }
+    // COORDINATOR LOGIC (add as needed)
+    // ...
+    return res.status(400).json({ success: false, message: "Role not supported for dashboard counts" });
+  } catch (error) {
+    console.error("Error fetching dashboard counts:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+
+const reassignTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { assigned_to_id, assigned_to_role, reassignment_reason, notes } = req.body;
+    const assigned_by_id = req.user?.userId;
+
+    // Mark previous assignment as 'Reassigned'
+    await AssignedOfficer.update(
+      { status: 'Reassigned', completed_at: new Date(), reassignment_reason: reassignment_reason || null },
+      { where: { ticket_id: ticketId, status: 'Active' } }
+    );
+
+    // Insert new assignment row
+    await AssignedOfficer.create({
+      ticket_id: ticketId,
+      assigned_to_id,
+      assigned_to_role,
+      assigned_by_id,
+      status: 'Active',
+      assigned_at: new Date(),
+      notes: notes || 'Reassignment'
+    });
+
+    // Update the ticket's current assignee
+    await Ticket.update(
+      {
+        assigned_to_id,
+        assigned_to_role
+      },
+      { where: { id: ticketId } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Ticket reassigned successfully'
+    });
+  } catch (error) {
+    console.error('Error in reassignTicket:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reassign ticket',
+      error: error.message
+    });
+  }
+};
+
+const getInProgressAssignments = async (req, res) => {
+  try {
+    // Prefer userId from authenticated user (JWT), fallback to query param
+    const userId = req.user?.userId || req.query.userId;
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+    // Get only the most recent assignment per ticket_id, including ticket details
+    const assignments = await TicketAssignment.findAll({
+      where: {
+        assigned_by_id: userId,
+        action: { [Op.in]: ['Assigned', 'Reassigned'] },
+      },
+      order: [['ticket_id', 'ASC'], ['created_at', 'DESC']],
+      include: [
+        {
+          model: Ticket,
+          as: 'ticket',
+          where: { status: { [Op.ne]: 'Closed' } },
+          attributes: ['id', 'ticket_id', 'subject', 'first_name', 'middle_name', 'last_name', 'phone_number', 'status', 'category']
+        }
+      ]
+    });
+    // Reduce to only the latest assignment per ticket_id
+    const latestAssignmentsMap = new Map();
+    for (const assignment of assignments) {
+      if (!latestAssignmentsMap.has(assignment.ticket_id)) {
+        latestAssignmentsMap.set(assignment.ticket_id, assignment);
+      }
+    }
+    const latestAssignments = Array.from(latestAssignmentsMap.values());
+    // Only count assignments where ticket is present (i.e., not closed)
+    const filteredAssignments = latestAssignments.filter(a => a.ticket);
+    res.status(200).json({
+      message: 'In-progress assignments fetched successfully',
+      count: filteredAssignments.length,
+      assignments: filteredAssignments,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch in-progress assignments', error: error.message });
+  }
+};
+
 module.exports = {
+  checkTicketSlaBreach,
+  escalateAndUpdateTicketOnSlaBreach,
   createTicket,
   getTickets,
   getTicketCounts,
@@ -1665,4 +2472,7 @@ module.exports = {
   getTicketAssignments,
   getAssignedOfficers,
   getAssignedNotifiedTickets,
+  getDashboardCounts,
+  reassignTicket,
+  getInProgressAssignments,
 };
