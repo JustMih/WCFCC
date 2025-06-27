@@ -795,6 +795,7 @@ const getOpenTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -891,6 +892,7 @@ const getAssignedTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -994,6 +996,7 @@ const getInprogressTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1098,6 +1101,7 @@ const getCarriedForwardTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1202,6 +1206,7 @@ const getClosedTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1315,6 +1320,7 @@ const getOverdueTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -2071,6 +2077,7 @@ const getTicketAssignments = async (req, res) => {
       assigned_to_id: a.assigned_to_id,
       assigned_to_name: a.assignee ? a.assignee.name : null,
       assigned_to_role: a.assignee ? a.assignee.role : null,
+      reason: a.reason,
       action: a.action,
       created_at: a.created_at
     }));
