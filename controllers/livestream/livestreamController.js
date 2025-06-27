@@ -1,55 +1,46 @@
- const sequelize = require("../../config/mysql_connection");
+'use strict';
+
+const sequelize = require("../../config/mysql_connection");
 const { DataTypes, Op } = require("sequelize");
 const moment = require("moment");
-
-/* ----------------------------- MODEL IMPORTS ----------------------------- */
 const CEL = require("../../models/CEL")(sequelize, DataTypes);
 
 /* ------------------------------ SOCKET STATE ------------------------------ */
 let ioInstance = null;
 
 /* ------------------------------ SOCKET SETUP ------------------------------ */
-/**
- * Initialize Socket.IO and listen for connection/disconnection events
- */
 const setupSocket = (io) => {
   ioInstance = io;
-  global._io = io; // Ensure global support for emitLiveCall
+  global._io = io;
+
   io.on("connection", (socket) => {
-    console.log("📡 LiveCall client connected:", socket.id);
+    console.log("📡 Livestream socket connected:", socket.id);
 
     socket.on("disconnect", () => {
-      console.log("📴 LiveCall client disconnected:", socket.id);
+      console.log("📴 Livestream socket disconnected:", socket.id);
     });
   });
 };
 
-// Socket emitter
+/* --------------------------- SOCKET EMIT FUNCTION -------------------------- */
 const emitLiveCall = (callData) => {
-  if (!ioInstance) return;
+  if (!ioInstance) {
+    console.warn("⚠️ No active socket to emit live call");
+    return;
+  }
 
   if (callData.call_start && !callData.call_end) {
     callData.duration_secs = moment().diff(moment(callData.call_start), "seconds");
   }
 
   ioInstance.emit("live_call_update", callData);
-  // console.log("📡 Emitted live_call_update:", callData);
+  console.log("📡 Emitted live_call_update:", callData);
 };
 
-// Global emit support
-exports.emitLiveCall = (callData) => {
-  if (global._io) {
-    global._io.emit("live_call_update", callData);
-    // console.log("📡 Emitted live call globally:", callData);
-  } else {
-    console.warn("⚠️ Socket.IO not initialized");
-  }
-};
+// Global access support
+exports.emitLiveCall = emitLiveCall;
 
-/* ----------------------------- CEL CALL TRACKER ----------------------------- */
-/**
- * REST: Get structured live call data from CEL events within the past 5 minutes
- */
+/* ----------------------------- LIVE CALL FETCH ----------------------------- */
 const getAllLiveCalls = async (req, res) => {
   try {
     const events = await CEL.findAll({
@@ -64,7 +55,6 @@ const getAllLiveCalls = async (req, res) => {
 
     for (const row of events) {
       const key = row.linkedid || row.uniqueid;
-
       if (!calls[key]) {
         calls[key] = {
           caller: row.cid_num || "-",
@@ -80,85 +70,78 @@ const getAllLiveCalls = async (req, res) => {
           queue_entry_time: null,
           estimated_wait_time: null,
           voicemail_path: null,
-          missed: false,
+          missed: false
         };
       }
 
       const c = calls[key];
 
-      // inside for (const row of events) { ... }
+      switch (row.eventtype) {
+        case 'CHAN_START':
+          if (!c.call_start) {
+            c.call_start = row.eventtime;
+            c.queue_entry_time = row.eventtime;
+            console.log(`📞 CHAN_START: ${key} at ${row.eventtime}`);
+          }
+          c.status = 'calling';
+          break;
 
-switch (row.eventtype) {
-  case 'CHAN_START':
-    if (!c.call_start) {
-      c.call_start = row.eventtime;
-      c.queue_entry_time = row.eventtime;
-      console.log(`📥 Queue entry recorded for ${key} at`, row.eventtime);
-    }
-    c.status = 'calling';
-    break;
+        case 'ANSWER':
+          if (!c.call_answered) {
+            c.call_answered = row.eventtime;
+            c.status = 'active';
+            console.log(`✅ ANSWER: ${key} at ${row.eventtime}`);
+          }
+          break;
 
-  case 'ANSWER':
-    if (!c.call_answered) {
-      console.log(`⏳ ETA calculated for ${key}:`, c.call_answered, "-", c.queue_entry_time);
-      c.call_answered = row.eventtime;
-      c.status = 'active';
-    }
-    break;
+        case 'HANGUP':
+          c.call_end = row.eventtime;
 
-  case 'HANGUP':
-    c.call_end = row.eventtime;
+          if (!c.call_answered && c.queue_entry_time) {
+            c.status = 'lost';
+          } else if (!c.call_answered && !c.queue_entry_time) {
+            c.status = 'dropped';
+          } else {
+            c.status = 'ended';
+          }
 
-    // === Status classification ===
-    if (!c.call_answered && c.queue_entry_time) {
-      c.status = 'lost'; // Ringed, entered queue, but not answered
-    } else if (!c.call_answered && !c.queue_entry_time) {
-      c.status = 'dropped'; // Caller hung up quickly
-    } else {
-      c.status = 'ended'; // Answered and finished
-    }
+          console.log(`📴 HANGUP: ${key} => ${c.status} at ${row.eventtime}`);
+          break;
 
-    break;
-
-  case 'APP_START':
-    if (row.appname === 'Queue') {
-      c.queue_entry_time = row.eventtime;
-    }
-    if (row.appname === 'VoiceMail') {
-      c.voicemail_path = `/recorded/voicemails/${key}.wav`;
-    }
-    break;
-}
-
-
-      
-// Duration and wait time calculations (must come BEFORE formatting)
-   // Duration and ETA: must be BEFORE time is formatted
-if (c.call_start && c.call_end) {
-  c.duration_secs = Math.floor((new Date(c.call_end) - new Date(c.call_start)) / 1000);
-}
-if (c.queue_entry_time && c.call_answered) {
-  c.estimated_wait_time = Math.floor((new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000);
-}
-
-
-      // Format time fields AFTER calculations
-     // AFTER duration & ETA
-if (c.call_start) c.call_start = moment(c.call_start).format('YYYY-MM-DD HH:mm:ss');
-if (c.call_answered) c.call_answered = moment(c.call_answered).format('YYYY-MM-DD HH:mm:ss');
-if (c.call_end) c.call_end = moment(c.call_end).format('YYYY-MM-DD HH:mm:ss');
-if (c.queue_entry_time) c.queue_entry_time = moment(c.queue_entry_time).format('YYYY-MM-DD HH:mm:ss');
-
-      // Default voicemail path
-      if (c.missed && !c.voicemail_path) {
-        c.voicemail_path = `/recorded/voicemails/${key}.wav`;
+        case 'APP_START':
+          if (row.appname === 'Queue') {
+            c.queue_entry_time = row.eventtime;
+            console.log(`📥 Queue Entered: ${key} at ${row.eventtime}`);
+          }
+          if (row.appname === 'VoiceMail') {
+            c.voicemail_path = `/recorded/voicemails/${key}.wav`;
+            console.log(`🗣️ Voicemail triggered for ${key}`);
+          }
+          break;
       }
 
-      // 🔁 Emit update immediately
-      emitLiveCall(c);
+      // Duration & wait time (calculated before formatting)
+      if (c.call_start && c.call_end) {
+        c.duration_secs = Math.floor((new Date(c.call_end) - new Date(c.call_start)) / 1000);
+      }
+      if (c.queue_entry_time && c.call_answered) {
+        c.estimated_wait_time = Math.floor((new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000);
+      }
+
+      // Format timestamps
+      if (c.call_start) c.call_start = moment(c.call_start).format('YYYY-MM-DD HH:mm:ss');
+      if (c.call_answered) c.call_answered = moment(c.call_answered).format('YYYY-MM-DD HH:mm:ss');
+      if (c.call_end) c.call_end = moment(c.call_end).format('YYYY-MM-DD HH:mm:ss');
+      if (c.queue_entry_time) c.queue_entry_time = moment(c.queue_entry_time).format('YYYY-MM-DD HH:mm:ss');
+
+      // Emit only on CHAN_START (start of live call)
+      if (['CHAN_START', 'ANSWER', 'APP_START'].includes(row.eventtype)) {
+        emitLiveCall({ ...c });
+      }
+      
     }
 
-    // Prepare final sorted list for REST fetch
+    // Sort result
     const result = Object.values(calls).sort((a, b) => {
       if (a.status === 'active' && b.status !== 'active') return -1;
       if (b.status === 'active' && a.status !== 'active') return 1;
@@ -167,14 +150,14 @@ if (c.queue_entry_time) c.queue_entry_time = moment(c.queue_entry_time).format('
 
     res.status(200).json(result);
   } catch (err) {
-    console.error("❌ Error building call data from CEL:", err);
+    console.error("❌ Error fetching CEL call data:", err);
     res.status(500).json({ error: "Failed to process CEL data" });
   }
 };
 
-// Exports
+/* ------------------------------ EXPORTS ------------------------------ */
 module.exports = {
   setupSocket,
   emitLiveCall,
-  getAllLiveCalls,
+  getAllLiveCalls
 };
