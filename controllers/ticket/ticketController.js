@@ -16,6 +16,133 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 
+// Utility: Calculate working days between two dates, excluding weekends and optional holidays
+/**
+ * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.
+ * @param {Date|string} startDate - The start date (inclusive)
+ * @param {Date|string} endDate - The end date (inclusive)
+ * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
+ * @returns {number} Number of working days
+ */
+function getWorkingDays(startDate, endDate, holidays = []) {
+  let count = 0;
+  let current = new Date(startDate);
+  const end = new Date(endDate);
+  const holidaySet = new Set((holidays || []).map(h => new Date(h).toDateString()));
+  while (current <= end) {
+    const day = current.getDay();
+    const isWeekend = (day === 0 || day === 6);
+    const isHoliday = holidaySet.has(current.toDateString());
+    if (!isWeekend && !isHoliday) count++;
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+}
+
+// SLA rules mapping
+const SLA_RULES = {
+  inquiry: 3, // days
+  complaint_minor: 7, // total days for minor complaint (adjust as needed)
+  complaint_major: 15 // total days for major complaint (adjust as needed)
+};
+
+/**
+ * Checks if a ticket has breached its SLA based on working days since created_at.
+ * @param {Object} ticket - The ticket object (must have category, complaint_type, created_at)
+ * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
+ * @returns {Object} { workingDays, slaDays, breached }
+ */
+function checkTicketSlaBreach(ticket, holidays = []) {
+  if (!ticket || !ticket.created_at) return { workingDays: 0, slaDays: 0, breached: false };
+
+  // Determine SLA days
+  let slaDays = 0;
+  if (ticket.category === "Inquiry") {
+    slaDays = SLA_RULES.inquiry;
+  } else if (ticket.category === "Complaint") {
+    const type = ticket.complaint_type === "major" ? "complaint_major" : "complaint_minor";
+    slaDays = SLA_RULES[type];
+  }
+
+  // Calculate working days since created_at
+  const workingDays = getWorkingDays(ticket.created_at, new Date(), holidays);
+
+  // Check if breached
+  const breached = workingDays > slaDays;
+
+  return { workingDays, slaDays, breached };
+}
+
+/**
+ * Escalate and update ticket if SLA is breached.
+ * @param {Object} ticket - The ticket object (must have id, category, complaint_type, created_at, assigned_to_id, assigned_to_role, unit_section)
+ * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
+ * @returns {Promise<boolean>} true if escalated, false otherwise
+ */
+async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
+  const { breached, workingDays, slaDays } = checkTicketSlaBreach(ticket, holidays);
+  if (!breached) return false;
+
+  // Define escalation path
+  const ESCALATION_PATH = {
+    inquiry: ["focal-person", "attendee"],
+    complaint_minor: ["attendee", "head-of-unit", "manager", "director"],
+    complaint_major: ["attendee", "head-of-unit", "manager", "director", "director-general"]
+  };
+  let path;
+  if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
+  else if (ticket.category === "Complaint" && ticket.complaint_type === "major") path = ESCALATION_PATH.complaint_major;
+  else if (ticket.category === "Complaint") path = ESCALATION_PATH.complaint_minor;
+  else return false;
+
+  const currentRole = (ticket.assigned_to_role || '').toLowerCase();
+  const idx = path.indexOf(currentRole);
+  if (idx === -1 || idx === path.length - 1) return false; // Already at top
+  const nextRole = path[idx + 1];
+  const section = ticket.unit_section;
+
+  // Find next user in same unit_section
+  let sectionValue;
+  if (ticket.section && ticket.section.toLowerCase() === 'unit') {
+    sectionValue = ticket.sub_section;
+  } else {
+    sectionValue = ticket.unit_section;
+  }
+  const userWhere = { role: nextRole };
+  if (sectionValue) userWhere.unit_section = sectionValue;
+  let nextUser = await User.findOne({ where: userWhere });
+  if (!nextUser) {
+    // Fallback: find any user with the nextRole
+    nextUser = await User.findOne({ where: { role: nextRole } });
+    if (!nextUser) {
+      console.warn(`Escalation failed: No user found for role '${nextRole}' (section: '${sectionValue}') or any section.`);
+      return false;
+    }
+  }
+
+  // Update ticket assignment
+  await Ticket.update(
+    { assigned_to_id: nextUser.id, assigned_to_role: nextRole, status: 'Escalated' },
+    { where: { id: ticket.id } }
+  );
+
+  // Find system user for assigned_by_id
+  const systemUser = await User.findOne({ where: { username: 'system' } });
+
+  // Record escalation in assignment history
+  await TicketAssignment.create({
+    ticket_id: ticket.id,
+    assigned_by_id: systemUser ? systemUser.id : ticket.assigned_to_id,
+    assigned_to_id: nextUser.id,
+    assigned_to_role: nextRole,
+    action: "Escalated",
+    reason: `SLA breached after ${workingDays} working days (SLA: ${slaDays} days). Escalated automatically to ${nextRole}.`,
+    created_at: new Date()
+  });
+
+  return true;
+}
+
 const getTicketCounts = async (req, res) => {
   try {
     const { userId: id } = req.params;
@@ -731,7 +858,7 @@ const getAssignedTickets = async (req, res) => {
       // Fetch tickets assigned to this user (attendee)
       tickets = await Ticket.findAll({
         where: {
-          assigned_to: userId,
+          assigned_to_id: userId,
           status: { [Op.in]: ["Assigned", "Open"] }
         },
         include: [
@@ -2322,6 +2449,8 @@ const getInProgressAssignments = async (req, res) => {
 };
 
 module.exports = {
+  checkTicketSlaBreach,
+  escalateAndUpdateTicketOnSlaBreach,
   createTicket,
   getTickets,
   getTicketCounts,

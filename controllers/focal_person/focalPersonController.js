@@ -2,6 +2,7 @@ const Ticket = require("../../models/Ticket");
 const User = require("../../models/User");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { Op, Sequelize } = require("sequelize");
+const TicketAssignment = require("../../models/TicketAssignment");
 
 const getFocalPersonTickets = async (req, res) => {
   try {
@@ -25,20 +26,11 @@ const getFocalPersonTickets = async (req, res) => {
           };
           break;
         case 'open':
-          // Find all ticket IDs ever assigned to this focal person (for open only)
-          // 
-          
-        // case 'in-progress':
-        //   where = {
-        //     assigned_to_id: userId,
-        //     status: 'In Progress'
-        //   };
-        //   break;
-        where = {
-          assigned_to_id: userId,
-          status: 'Open'
-        };
-        break;
+          where = {
+            assigned_to_id: userId,
+            status: 'Open'
+          };
+          break;
         case 'closed':
           where = {
             assigned_to_id: userId,
@@ -56,15 +48,53 @@ const getFocalPersonTickets = async (req, res) => {
       }
     }
 
+    // Eager-load assignments and their assignee user info
     const inquiries = await Ticket.findAll({
       where,
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      include: [
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'role']
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'name', 'role']
+        }
+      ]
+    });
+
+    // Debug: Log the raw data to check if assignee is being populated
+    console.log('DEBUG inquiries:', JSON.stringify(inquiries, null, 2));
+
+    // Map over inquiries to include assignments with assigned_to_name and assigned_to_role
+    const response = inquiries.map((ticket) => {
+      const t = ticket.toJSON();
+      t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
+        assigned_to_id: a.assigned_to_id,
+        assigned_to_name: a.assignee?.name || null,
+        assigned_to_role: a.assignee?.role || null,
+        action: a.action,
+        created_at: a.created_at
+      }));
+      return {
+        ...t,
+        created_by: t.creator?.name || t.created_by || null
+      };
     });
 
     res.status(200).json({
-      message: inquiries.length ? "Tickets fetched successfully." : "No tickets found.",
-      inquiries,
-      count: inquiries.length
+      message: response.length ? "Tickets fetched successfully." : "No tickets found.",
+      inquiries: response,
+      count: response.length
     });
   } catch (error) {
     console.error("Error fetching Focal person tickets:", error);

@@ -63,7 +63,17 @@ module.exports = {
       { name: 'Irene Claim Focal', email: 'claim.focal.ict@wcf.go.tz', username: 'irene.claim.ict', role: 'claim-focal-person', unit_section: 'ICT Unit' },
       { name: 'Ian Compliance Focal', email: 'compliance.focal.ict@wcf.go.tz', username: 'ian.compliance.ict', role: 'compliance-focal-person', unit_section: 'ICT Unit' },
       { name: 'Anita Claim Focal', email: 'claim.focal.hr@wcf.go.tz', username: 'anita.claim.hr', role: 'claim-focal-person', unit_section: 'Human Resource Management and Attachment Unit' },
-      { name: 'Andrew Compliance Focal', email: 'compliance.focal.hr@wcf.go.tz', username: 'andrew.compliance.hr', role: 'compliance-focal-person', unit_section: 'Human Resource Management and Attachment Unit' }
+      { name: 'Andrew Compliance Focal', email: 'compliance.focal.hr@wcf.go.tz', username: 'andrew.compliance.hr', role: 'compliance-focal-person', unit_section: 'Human Resource Management and Attachment Unit' },
+      { name: 'Head of Operations', email: 'head.operations@wcf.go.tz', username: 'head.operations', role: 'head-of-unit', unit_section: 'directorate of operations', status: 'active' },
+      { name: 'Head of Assessment', email: 'head.assessment@wcf.go.tz', username: 'head.assessment', role: 'head-of-unit', unit_section: 'directorate of assessment services', status: 'active' },
+      { name: 'Head of Finance', email: 'head.finance@wcf.go.tz', username: 'head.finance', role: 'head-of-unit', unit_section: 'directorate of finance, planning and investment', status: 'active' },
+      { name: 'Head of Legal', email: 'head.legal@wcf.go.tz', username: 'head.legal', role: 'head-of-unit', unit_section: 'legal unit', status: 'active' },
+      { name: 'Head of ICT', email: 'head.ict@wcf.go.tz', username: 'head.ict', role: 'head-of-unit', unit_section: 'ict unit', status: 'active' },
+      { name: 'Head of Actuarial', email: 'head.actuarial@wcf.go.tz', username: 'head.actuarial', role: 'head-of-unit', unit_section: 'actuarial statistics and risk management', status: 'active' },
+      { name: 'Head of PR', email: 'head.pr@wcf.go.tz', username: 'head.pr', role: 'head-of-unit', unit_section: 'public relation unit', status: 'active' },
+      { name: 'Head of Procurement', email: 'head.procurement@wcf.go.tz', username: 'head.procurement', role: 'head-of-unit', unit_section: 'procurement management unit', status: 'active' },
+      { name: 'Head of HR', email: 'head.hr@wcf.go.tz', username: 'head.hr', role: 'head-of-unit', unit_section: 'human resource management and attachment unit', status: 'active' },
+      { name: 'System', email: 'system@wcf.go.tz', username: 'system', role: 'system', unit_section: null, password: await bcrypt.hash('systempassword', 10), status: 'active' },
     ];
 
     const hashedPassword = await bcrypt.hash('user12345', 10);

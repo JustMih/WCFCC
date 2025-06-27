@@ -162,6 +162,8 @@ router.get(
 
 router.get(
   "/dashboard-counts/:userId",
+  authMiddleware,
+  roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getDashboardCounts
 );
 
