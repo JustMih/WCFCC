@@ -373,7 +373,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
 
     res.status(200).json({
       message: "Dashboard counts retrieved successfully",
-      data: {
+      ticketStats: {
         newTickets: {
           "Total": allNewTicketsTotal,
           "New Tickets": newTicketsCount,

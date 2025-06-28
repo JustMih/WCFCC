@@ -1460,7 +1460,7 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email', 'role']
           },
           {
             model: TicketAssignment,
@@ -1508,7 +1508,7 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email', 'assigned_to_role']
           },
           {
             model: TicketAssignment,
@@ -1517,7 +1517,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'role', 'assigned_to_role']
               }
             ]
           }
@@ -1534,8 +1534,8 @@ const getAllTickets = async (req, res) => {
       const t = ticket.toJSON();
       t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
         assigned_to_id: a.assigned_to_id,
-        assigned_to_name: a.assignee?.name || null,
-        assigned_to_role: a.assignee?.role || "N/A",
+        assigned_to_name: a.assignee?.assigned_to_name || "N/A",
+        assigned_to_role: a.assignee?.assigned_to_role || "N/A",
         action: a.action,
         reason: a.reason || t.description,
         created_at: a.created_at
@@ -2357,7 +2357,33 @@ const getDashboardCounts = async (req, res) => {
       });
     }
     // COORDINATOR LOGIC (add as needed)
-    // ...
+    if (user.role === 'coordinator') {
+      // Return the full nested structure expected by the sidebar
+      return res.status(200).json({
+        success: true,
+        message: 'Dashboard counts for coordinator',
+        ticketStats: {
+          newTickets: {
+            "New Tickets": 0,
+            "Escalated Tickets": 0,
+            Total: 0
+          },
+          convertedTickets: {
+            Complaints: 0,
+            Suggestions: 0,
+            Compliments: 0
+          },
+          channeledTickets: {
+            Directorate: 0,
+            Units: 0
+          },
+          ticketStatus: {
+            Closed: 0,
+            // "On Progress": 0 // add if needed
+          }
+        }
+      });
+    }
     return res.status(400).json({ success: false, message: "Role not supported for dashboard counts" });
   } catch (error) {
     console.error("Error fetching dashboard counts:", error);
