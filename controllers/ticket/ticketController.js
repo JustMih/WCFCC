@@ -553,9 +553,9 @@ const createTicket = async (req, res) => {
         ticket_id: newTicket.id,
         assigned_by_id: userId,
         assigned_to_id: userId,
-        assigned_to_role: closingUser ? closingUser.role : null,
+        assigned_to_role: attended_by_role,
         action: 'Closed',
-        reason: description || 'Ticket closed at creation',
+        reason: resolution_details || 'Ticket closed by agent',
         created_at: new Date()
       });
     }
@@ -742,7 +742,7 @@ const getOpenTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -751,7 +751,7 @@ const getOpenTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -766,7 +766,7 @@ const getOpenTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -775,7 +775,7 @@ const getOpenTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -839,7 +839,7 @@ const getAssignedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -848,7 +848,7 @@ const getAssignedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -866,7 +866,7 @@ const getAssignedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -875,7 +875,7 @@ const getAssignedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -943,7 +943,7 @@ const getInprogressTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -952,7 +952,7 @@ const getInprogressTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -967,7 +967,7 @@ const getInprogressTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -976,7 +976,7 @@ const getInprogressTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1048,7 +1048,7 @@ const getCarriedForwardTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1057,7 +1057,7 @@ const getCarriedForwardTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1072,7 +1072,7 @@ const getCarriedForwardTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1081,7 +1081,7 @@ const getCarriedForwardTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1153,7 +1153,7 @@ const getClosedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1162,7 +1162,7 @@ const getClosedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1177,7 +1177,7 @@ const getClosedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1186,7 +1186,7 @@ const getClosedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1263,7 +1263,7 @@ const getOverdueTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1272,7 +1272,7 @@ const getOverdueTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1291,7 +1291,7 @@ const getOverdueTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1300,7 +1300,7 @@ const getOverdueTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1469,7 +1469,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1534,8 +1534,8 @@ const getAllTickets = async (req, res) => {
       const t = ticket.toJSON();
       t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
         assigned_to_id: a.assigned_to_id,
-        assigned_to_name: a.assignee?.assigned_to_name || "N/A",
-        assigned_to_role: a.assignee?.assigned_to_role || "N/A",
+        assigned_to_name: a.assignee?.name || "N/A",
+        assigned_to_role: a.assignee?.role || "N/A",
         action: a.action,
         reason: a.reason || t.description,
         created_at: a.created_at
@@ -1852,6 +1852,7 @@ const closeTicket = async (req, res) => {
     // Record the closing action in TicketAssignment
     await TicketAssignment.create({
       ticket_id: ticketId,
+      assigned_by_id: userId,
       assigned_to_id: userId,
       assigned_to_role: attended_by_role,
       action: 'Closed',

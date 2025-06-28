@@ -83,6 +83,11 @@ const Ticket = sequelize.define(
 
     // Additional
     resolution_details: DataTypes.TEXT,
+    resolution_type: {
+      type: DataTypes.ENUM('Resolved', 'Not Applicable', 'Duplicate', 'Referred'),
+      allowNull: true
+    },
+    attachment_path: DataTypes.STRING,
     aging_days: { type: DataTypes.INTEGER, defaultValue: 0 },
     responsible_unit_name: DataTypes.STRING,
     assigned_to_role: DataTypes.ENUM('Agent', 'Coordinator', 'Attendee', 'Head of Unit', 'Director', 'DG'),

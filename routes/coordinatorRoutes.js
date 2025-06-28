@@ -1,4 +1,7 @@
 const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 const {
     getAllCoordinatorTickets,
     rateTickets,
@@ -14,10 +17,29 @@ const {
     rateAndRegisterComplaint,
     convertToInquiry,
     channelComplaint,
-    closeCoordinatorTicket
+    closeCoordinatorTicket,
 } = require("../controllers/coordinator/coordinatorController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
+
+// Set up multer storage for ticket attachments
+const ticketAttachmentsDirectory = path.join(__dirname, "..", "ticket_attachments");
+if (!fs.existsSync(ticketAttachmentsDirectory)) {
+  fs.mkdirSync(ticketAttachmentsDirectory);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, ticketAttachmentsDirectory);
+  },
+  filename: (req, file, cb) => {
+    const fileName = Date.now() + "_" + file.originalname;
+    cb(null, fileName);
+  },
+});
+
+const upload = multer({ storage: storage });
+
 const router = express.Router();
 
 // Get coordinator dashboard counts
@@ -124,10 +146,12 @@ router.post(
 
 // Coordinator closes a ticket
 router.post(
-  "/complaints/:ticketId/close",
+  "/:ticketId/close",
   authMiddleware,
   roleMiddleware(['coordinator']),
+  upload.single("attachment"),
   closeCoordinatorTicket
 );
+
 
 module.exports = router;

@@ -40,6 +40,25 @@ app.use("/sounds", express.static("/var/lib/asterisk/sounds", {
   }
 }));
 
+// Static ticket attachment files
+app.use("/uploads", express.static(path.join(__dirname, "ticket_attachments"), {
+  setHeaders: (res, filePath) => {
+    // Set appropriate content type based on file extension
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.pdf') {
+      res.set("Content-Type", "application/pdf");
+    } else if (ext === '.doc' || ext === '.docx') {
+      res.set("Content-Type", "application/msword");
+    } else if (ext === '.jpg' || ext === '.jpeg') {
+      res.set("Content-Type", "image/jpeg");
+    } else if (ext === '.png') {
+      res.set("Content-Type", "image/png");
+    } else if (ext === '.txt') {
+      res.set("Content-Type", "text/plain");
+    }
+  }
+}));
+
 // API routes
 app.use("/api", routes);
 app.use("/api", require("./routes/ivr-dtmf-routes"));

@@ -19,6 +19,7 @@ const notificationRoutes = require("./notificationRoutes");
 const complaintWorkflowRoutes = require("./complaintWorkflowRoutes");
 const focalPersonRoutes = require("./focalPersonRoutes");
 const instagramComments = require("./instagramWebhookRoutes");
+const workflowRoutes = require("./workflowRoutes");
 const router = express.Router();
 const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
@@ -42,6 +43,7 @@ router.use("/calls", getCallsRoutes);
 router.use("/mac-system", macRoutes);
 router.use("/monitor", monitorRoutes);
 router.use("/missed-calls", missedCallRoutes);
+router.use("/workflow", workflowRoutes);
 
 
 
