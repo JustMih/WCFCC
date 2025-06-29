@@ -1490,7 +1490,7 @@ const getAllTickets = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
-
+    console.log("Fetching All tickets for user ID:", userId);
     const user = await User.findOne({
       where: { id: userId },
       attributes: ["id", "name", "role"],
@@ -1533,7 +1533,7 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'email', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1581,7 +1581,7 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'email', 'assigned_to_role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1590,7 +1590,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role', 'assigned_to_role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
