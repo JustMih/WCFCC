@@ -85,9 +85,7 @@ app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
 }));
 app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
 
-<<<<<<< HEAD
 /* ------------------------------ API ROUTES ------------------------------ */
-=======
 // Static ticket attachment files
 app.use("/uploads", express.static(path.join(__dirname, "ticket_attachments"), {
   setHeaders: (res, filePath) => {
@@ -108,7 +106,6 @@ app.use("/uploads", express.static(path.join(__dirname, "ticket_attachments"), {
 }));
 
 // API routes
->>>>>>> d8adfba6704a1d3bc52c8e71acaee65e2e546d27
 app.use("/api", routes);
 app.use("/api", ivrDtmfRoutes);
 app.use("/api", recordingRoutes);
