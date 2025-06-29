@@ -2358,7 +2358,7 @@ const getDashboardCounts = async (req, res) => {
         success: true,
         ticketStats: {
           total,
-          open: counts.open || 0,
+          // open: counts.open || 0,
           assigned: assignedCount,
           escalated: escalatedCount,
           closed: counts.closed || 0,
