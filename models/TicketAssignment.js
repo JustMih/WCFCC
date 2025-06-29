@@ -35,10 +35,6 @@ const TicketAssignment = sequelize.define('TicketAssignment', {
     type: DataTypes.DATE,
     allowNull: false,
     defaultValue: DataTypes.NOW
-  },
-  updated_at: {
-    type: DataTypes.DATE,
-    allowNull: true
   }
 }, {
   tableName: 'Ticket_assignments',
