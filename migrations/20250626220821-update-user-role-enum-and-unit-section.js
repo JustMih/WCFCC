@@ -5,17 +5,30 @@ module.exports = {
     // 1. Update the ENUM for the 'role' column
     await queryInterface.changeColumn('Users', 'role', {
       type: Sequelize.ENUM(
-        'admin',
         'super-admin',
+        'admin',
         'user',
         'agent',
         'attendee',
         'coordinator',
         'head-of-unit',
+        'supervisor',
         'manager',
         'director',
         'focal-person',
-        'director-general'
+        'claim-focal-person',
+        'compliance-focal-person',
+        'director-general',
+        'directorate of operations',
+        'directorate of assessment services',
+        'directorate of finance, planning and investment',
+        'legal unit',
+        'ict unit',
+        'actuarial statistics and risk management',
+        'public relation unit',
+        'procurement management unit',
+        'human resource management and attachment unit',
+        'dg' // if you use this in your seeders
       ),
       allowNull: false,
     });

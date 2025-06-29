@@ -553,9 +553,9 @@ const createTicket = async (req, res) => {
         ticket_id: newTicket.id,
         assigned_by_id: userId,
         assigned_to_id: userId,
-        assigned_to_role: closingUser ? closingUser.role : null,
+        assigned_to_role: attended_by_role,
         action: 'Closed',
-        reason: description || 'Ticket closed at creation',
+        reason: resolution_details || 'Ticket closed by agent',
         created_at: new Date()
       });
     }
@@ -742,7 +742,7 @@ const getOpenTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -751,7 +751,7 @@ const getOpenTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -766,7 +766,7 @@ const getOpenTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -775,7 +775,7 @@ const getOpenTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -795,6 +795,7 @@ const getOpenTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -838,7 +839,7 @@ const getAssignedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -847,7 +848,7 @@ const getAssignedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -865,7 +866,7 @@ const getAssignedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -874,7 +875,7 @@ const getAssignedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -891,6 +892,7 @@ const getAssignedTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -941,7 +943,7 @@ const getInprogressTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -950,7 +952,7 @@ const getInprogressTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -965,7 +967,7 @@ const getInprogressTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -974,7 +976,7 @@ const getInprogressTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -994,6 +996,7 @@ const getInprogressTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1045,7 +1048,7 @@ const getCarriedForwardTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1054,7 +1057,7 @@ const getCarriedForwardTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1069,7 +1072,7 @@ const getCarriedForwardTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1078,7 +1081,7 @@ const getCarriedForwardTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1098,6 +1101,7 @@ const getCarriedForwardTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1149,7 +1153,7 @@ const getClosedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1158,7 +1162,7 @@ const getClosedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1173,7 +1177,7 @@ const getClosedTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1182,7 +1186,7 @@ const getClosedTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1202,6 +1206,7 @@ const getClosedTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1258,7 +1263,7 @@ const getOverdueTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1267,7 +1272,7 @@ const getOverdueTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1286,7 +1291,7 @@ const getOverdueTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'role']
+            attributes: ['id', 'name', 'email']
           },
           {
             model: TicketAssignment,
@@ -1295,7 +1300,7 @@ const getOverdueTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1315,6 +1320,7 @@ const getOverdueTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
@@ -1454,7 +1460,7 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email', 'role']
           },
           {
             model: TicketAssignment,
@@ -1463,7 +1469,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'email']
               }
             ]
           }
@@ -1502,7 +1508,7 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: 'assignee',
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email', 'assigned_to_role']
           },
           {
             model: TicketAssignment,
@@ -1511,7 +1517,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: 'assignee',
-                attributes: ['id', 'name', 'role']
+                attributes: ['id', 'name', 'role', 'assigned_to_role']
               }
             ]
           }
@@ -1528,7 +1534,7 @@ const getAllTickets = async (req, res) => {
       const t = ticket.toJSON();
       t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
         assigned_to_id: a.assigned_to_id,
-        assigned_to_name: a.assignee?.name || null,
+        assigned_to_name: a.assignee?.name || "N/A",
         assigned_to_role: a.assignee?.role || "N/A",
         action: a.action,
         reason: a.reason || t.description,
@@ -1846,6 +1852,7 @@ const closeTicket = async (req, res) => {
     // Record the closing action in TicketAssignment
     await TicketAssignment.create({
       ticket_id: ticketId,
+      assigned_by_id: userId,
       assigned_to_id: userId,
       assigned_to_role: attended_by_role,
       action: 'Closed',
@@ -2071,6 +2078,7 @@ const getTicketAssignments = async (req, res) => {
       assigned_to_id: a.assigned_to_id,
       assigned_to_name: a.assignee ? a.assignee.name : null,
       assigned_to_role: a.assignee ? a.assignee.role : null,
+      reason: a.reason,
       action: a.action,
       created_at: a.created_at
     }));
@@ -2350,7 +2358,33 @@ const getDashboardCounts = async (req, res) => {
       });
     }
     // COORDINATOR LOGIC (add as needed)
-    // ...
+    if (user.role === 'coordinator') {
+      // Return the full nested structure expected by the sidebar
+      return res.status(200).json({
+        success: true,
+        message: 'Dashboard counts for coordinator',
+        ticketStats: {
+          newTickets: {
+            "New Tickets": 0,
+            "Escalated Tickets": 0,
+            Total: 0
+          },
+          convertedTickets: {
+            Complaints: 0,
+            Suggestions: 0,
+            Compliments: 0
+          },
+          channeledTickets: {
+            Directorate: 0,
+            Units: 0
+          },
+          ticketStatus: {
+            Closed: 0,
+            // "On Progress": 0 // add if needed
+          }
+        }
+      });
+    }
     return res.status(400).json({ success: false, message: "Role not supported for dashboard counts" });
   } catch (error) {
     console.error("Error fetching dashboard counts:", error);

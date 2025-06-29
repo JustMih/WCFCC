@@ -82,6 +82,7 @@ const getFocalPersonTickets = async (req, res) => {
         assigned_to_id: a.assigned_to_id,
         assigned_to_name: a.assignee?.name || null,
         assigned_to_role: a.assignee?.role || null,
+        reason: a.reason,
         action: a.action,
         created_at: a.created_at
       }));
