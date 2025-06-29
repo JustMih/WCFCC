@@ -39,6 +39,7 @@ module.exports = {
         description: 'Madai ya fidia ya ajali kazini.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440001', // Claims Administration Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -62,6 +63,7 @@ module.exports = {
         description: 'Malipo ya mafao kuchelewa.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440001', // Claims Administration Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -85,6 +87,7 @@ module.exports = {
         description: 'Nimepata usumbufu wakati wa huduma.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440002', // Compliance Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -108,6 +111,7 @@ module.exports = {
         description: 'Sijapata fidia ya ulemavu kazini.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440004', // Claims Assessment Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -131,6 +135,7 @@ module.exports = {
         description: 'Nimechelewa kulipwa mafao.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440007', // Finance Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -154,6 +159,7 @@ module.exports = {
         description: 'Sikuridhika na huduma ya afisa wa TTCL.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440002', // Compliance Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -177,6 +183,7 @@ module.exports = {
         description: 'Ucheleweshaji wa nyaraka za madai.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440003', // Records Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -200,6 +207,7 @@ module.exports = {
         description: 'Nilipewa taarifa zisizo sahihi.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440002', // Compliance Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -223,6 +231,7 @@ module.exports = {
         description: 'Sikupewa fomu ya madai kwa wakati.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440001', // Claims Administration Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
@@ -246,6 +255,7 @@ module.exports = {
         description: 'Madai yangu hayajakamilishwa hadi sasa.',
         status: 'Open',
         request_registered_date: now,
+        responsible_unit_id: '660e8400-e29b-41d4-a716-446655440001', // Claims Administration Section
         created_by: DEFAULT_USER_ID,
         created_at: now,
         updated_at: now
