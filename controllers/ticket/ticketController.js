@@ -2354,6 +2354,8 @@ const getDashboardCounts = async (req, res) => {
         assigned_by_id: a.assigned_by_id,
         action: a.action
       })));
+      // In Progress: status = 'In Progress'
+      const inProgressCount = await Ticket.count({ where: { userId, status: 'In Progress' } });
       return res.status(200).json({
         success: true,
         ticketStats: {
@@ -2363,7 +2365,7 @@ const getDashboardCounts = async (req, res) => {
           escalated: escalatedCount,
           closed: counts.closed || 0,
           carriedForward: counts.carriedforward || 0,
-          inProgress: filteredAssignments.length,
+          inProgress: inProgressCount,
           overdue: overdueCount || 0,
           newTickets: newTicketsCount || 0,
           inHour: inHourCount || 0,
@@ -2379,8 +2381,8 @@ const getDashboardCounts = async (req, res) => {
         },
       });
     }
-    // FOCAL PERSON/COORDINATOR LOGIC
-    if (["focal-person", "claim-focal-person", "compliance-focal-person"].includes(user.role)) {
+    // FOCAL PERSON/MANAGEMENT LOGIC
+    if (["focal-person", "claim-focal-person", "compliance-focal-person", "head-of-unit", "manager", "supervisor", "director-general", "director", "admin", "super-admin"].includes(user.role)) {
       // Use focal person dashboard logic
       // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
       // For now, inline the logic:
@@ -2419,15 +2421,47 @@ const getDashboardCounts = async (req, res) => {
           status: "Closed",
         },
       });
+
+      // Count for assigned attendees (you may need to define what this means)
+      // For now, let's say it's tickets assigned to someone by the focal person
+      // that are not yet closed.
+      const assignedToOthersByMe = await TicketAssignment.count({
+        where: {
+          assigned_by_id: userId,
+          // action: { [Op.in]: ["Assigned", "Reassigned"] }
+        },
+        include: [{
+          model: Ticket,
+          as: 'ticket',
+          where: {
+            status: { [Op.ne]: 'Closed' }
+          }
+        }]
+      });
+
+
       return res.status(200).json({
         success: true,
-        newInquiries,
-        escalatedInquiries,
-        totalInquiries,
-        resolvedInquiries,
-        openInquiries,
-        closedInquiries: resolvedInquiries,
-        inProgressInquiries,
+        ticketStats: {
+          newTickets: {
+            "New Tickets": newInquiries,
+            "Escalated Tickets": escalatedInquiries,
+            Total: newInquiries + escalatedInquiries
+          },
+          ticketStatus: {
+            Open: openInquiries,
+            Closed: resolvedInquiries,
+            AssignedAttendees: assignedToOthersByMe
+          },
+          // also pass the flat data for the dashboard page
+          newInquiries,
+          escalatedInquiries,
+          totalInquiries,
+          resolvedInquiries,
+          openInquiries,
+          closedInquiries: resolvedInquiries,
+          inProgressInquiries
+        }
       });
     }
     // COORDINATOR LOGIC (add as needed)
@@ -2531,7 +2565,6 @@ const getInProgressAssignments = async (req, res) => {
           model: Ticket,
           as: 'ticket',
           where: { status: { [Op.ne]: 'Closed' } },
-          attributes: ['id', 'ticket_id', 'subject', 'first_name', 'middle_name', 'last_name', 'phone_number', 'status', 'category']
         }
       ]
     });
