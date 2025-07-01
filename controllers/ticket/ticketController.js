@@ -2153,7 +2153,9 @@ const getTicketAssignments = async (req, res) => {
       assigned_to_role: a.assignee ? a.assignee.role : null,
       reason: a.reason,
       action: a.action,
-      created_at: a.created_at
+      created_at: a.created_at,
+      attachment_path: a.attachment_path,
+      evidence_url: a.evidence_url
     }));
     // Add creator_name to the first assignment if available
     if (assignments.length > 0) {
@@ -2633,6 +2635,32 @@ const reverseTicket = async (req, res) => {
       reason: reason || "Ticket reversed to previous user",
       created_at: new Date()
     });
+
+    // Fetch ticket and previous user details for email
+    const ticket = await Ticket.findByPk(ticketId);
+    const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+    if (prevUser && prevUser.email) {
+      const subject = `Ticket Reversed: ${ticket.ticket_id || ticket.id}`;
+      const htmlBody = `
+        <p>Hello ${prevUser.name || ''},</p>
+        <p>The following ticket has been <b>reversed</b> to you:</p>
+        <ul>
+          <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
+          <li><b>Subject:</b> ${ticket.subject}</li>
+          <li><b>Category:</b> ${ticket.category}</li>
+          <li><b>Status:</b> Returned</li>
+          <li><b>Reversal Reason:</b> ${reason || 'Ticket reversed to previous user'}</li>
+        </ul>
+        <p>Please log into the system to review and take action.</p>
+        <p>Regards,<br/>WCF Support Desk</p>
+      `;
+      try {
+        await sendEmail({ to: prevUser.email, subject, htmlBody });
+      } catch (emailErr) {
+        console.error('Failed to send reversal email:', emailErr.message);
+        // Do not fail the reversal if email fails
+      }
+    }
 
     res.status(200).json({ message: "Ticket reversed to previous user successfully." });
   } catch (error) {

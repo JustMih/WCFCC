@@ -277,6 +277,7 @@ const convertOrForwardTicket = async (req, res) => {
       ticket.forwarded_at = new Date();
       ticket.assigned_to_role = unitHead.role;
       ticket.assigned_to_id = unitHead.id;
+      ticket.assigned_to = unitHead.id;
       ticket.status = "Assigned";
       forwardingDone = true;
 
