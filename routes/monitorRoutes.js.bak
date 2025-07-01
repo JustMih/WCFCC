@@ -1,0 +1,62 @@
+const express = require('express');
+const router = express.Router();
+const {
+  getQueueCache,
+  getLiveCallsCache
+} = require('../services/amiService');
+
+// GET /api/live-calls — return in-memory active calls
+router.get('/live-calls', (req, res) => {
+  try {
+    const calls = getLiveCallsCache();
+    if (!calls || !Array.isArray(calls)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Live calls cache unavailable',
+        fetchedAt: new Date()
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: calls,
+      fetchedAt: new Date()
+    });
+  } catch (err) {
+    console.error('❌ Error in /live-calls:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching live calls',
+      fetchedAt: new Date()
+    });
+  }
+});
+
+// GET /api/waiting-calls — return in-memory queue data
+router.get('/waiting-calls', (req, res) => {
+  try {
+    const queue = getQueueCache();
+    if (!queue || !Array.isArray(queue)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Queue cache unavailable',
+        fetchedAt: new Date()
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: queue,
+      fetchedAt: new Date()
+    });
+  } catch (err) {
+    console.error('❌ Error in /waiting-calls:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching queue status',
+      fetchedAt: new Date()
+    });
+  }
+});
+
+module.exports = router;
