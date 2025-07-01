@@ -751,8 +751,9 @@ const getTickets = async (req, res) => {
     } else if (user.role === "focal-person") {
       // Focal person: Fetch tickets for their section/unit
       tickets = await Ticket.findAll({
-        where: { section: user.unit_section ,
-           status:{[Op.ne]: "Closed"}},
+        where: {
+          section: user.unit_section,
+          status:{[Op.ne]: "Closed"}},
         attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]]
       });
@@ -2593,6 +2594,56 @@ const getInProgressAssignments = async (req, res) => {
   }
 };
 
+
+const reverseTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, reason } = req.body;
+
+    // Get assignment history, ordered by created_at DESC
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (assignments.length < 2) {
+      return res.status(400).json({ message: "No previous user to reverse to." });
+    }
+
+    // The previous user is the second most recent assignment
+    const prevAssignment = assignments[1];
+
+    // Update the ticket to assign to the previous user
+    await Ticket.update(
+      {
+        assigned_to_id: prevAssignment.assigned_to_id,
+        assigned_to_role: prevAssignment.assigned_to_role,
+        status: "Returned"
+      },
+      { where: { id: ticketId } }
+    );
+
+    // Add a new assignment record for the reversal
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: prevAssignment.assigned_to_id,
+      assigned_to_role: prevAssignment.assigned_to_role,
+      action: "Reversed",
+      reason: reason || "Ticket reversed to previous user",
+      created_at: new Date()
+    });
+
+    res.status(200).json({ message: "Ticket reversed to previous user successfully." });
+  } catch (error) {
+    console.error("Error reversing ticket:", error);
+    res.status(500).json({ message: "Failed to reverse ticket", error: error.message });
+  }
+};
+// ... existing code ...
+
+
+
 module.exports = {
   checkTicketSlaBreach,
   escalateAndUpdateTicketOnSlaBreach,
@@ -2620,4 +2671,5 @@ module.exports = {
   getDashboardCounts,
   reassignTicket,
   getInProgressAssignments,
+  reverseTicket,
 };
