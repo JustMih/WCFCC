@@ -751,8 +751,9 @@ const getTickets = async (req, res) => {
     } else if (user.role === "focal-person") {
       // Focal person: Fetch tickets for their section/unit
       tickets = await Ticket.findAll({
-        where: { section: user.unit_section ,
-           status:{[Op.ne]: "Closed"}},
+        where: {
+          section: user.unit_section,
+          status:{[Op.ne]: "Closed"}},
         attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]]
       });
@@ -1797,7 +1798,7 @@ const getTicketById = async (req, res) => {
         {
           model: User,
           as: 'creator',
-          attributes: ['id', 'name', 'email']
+          attributes: ['id', 'name', 'username']
         },
         {
           model: User,
@@ -2146,15 +2147,23 @@ const getTicketAssignments = async (req, res) => {
       ],
       order: [["created_at", "ASC"]]
     });
-    // Map to include assigned_to_name and assigned_to_role
-    const mappedAssignments = assignments.map(a => ({
+    let mappedAssignments = assignments.map(a => ({
       assigned_to_id: a.assigned_to_id,
       assigned_to_name: a.assignee ? a.assignee.name : null,
       assigned_to_role: a.assignee ? a.assignee.role : null,
       reason: a.reason,
       action: a.action,
-      created_at: a.created_at
+      created_at: a.created_at,
+      attachment_path: a.attachment_path,
+      evidence_url: a.evidence_url
     }));
+    // Add creator_name to the first assignment if available
+    if (assignments.length > 0) {
+      const creatorUser = await User.findOne({ where: { id: assignments[0].assigned_by_id } });
+      if (creatorUser) {
+        mappedAssignments[0].creator_name = creatorUser.name || `${creatorUser.first_name || ''} ${creatorUser.last_name || ''}`.trim();
+      }
+    }
     console.log('ticket assignment', mappedAssignments);
     res.json(mappedAssignments);
   } catch (error) {
@@ -2243,24 +2252,22 @@ const getDashboardCounts = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    // AGENT/ATTENDEE LOGIC (from getTicketCounts)
-    if (["agent", "attendee"].includes(user.role)) {
-      // Use getTicketCounts logic
-      const isSuperAdmin = user.role === "super-admin";
-      const whereUserCondition = isSuperAdmin ? {} : { created_by: userId };
+    // ALL ROLES (except coordinator) LOGIC: use assigned_to_id for all counts
+    if (user.role !== 'coordinator') {
+      const ticketWhere = { assigned_to_id: userId };
       const statuses = ["Open", "Assigned", "Closed", "Carried Forward", "In Progress"];
       const counts = {};
       for (const status of statuses) {
         const key = status.toLowerCase().replace(/ /g, "");
-        const condition = isSuperAdmin ? { status } : { created_by: userId, status };
+        const condition = { ...ticketWhere, status };
         counts[key] = await Ticket.count({ where: condition });
       }
-      const total = await Ticket.count({ where: whereUserCondition });
+      const total = await Ticket.count({ where: ticketWhere });
       const tenDaysAgo = new Date();
       tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
       const overdueCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           status: "Open",
           created_at: { [Op.lt]: tenDaysAgo },
         },
@@ -2269,20 +2276,20 @@ const getDashboardCounts = async (req, res) => {
       today.setHours(0, 0, 0, 0);
       const newTicketsCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           created_at: { [Op.gte]: today },
         },
       });
       const lastHour = new Date(new Date().setHours(new Date().getHours() - 1));
       const inHourCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           created_at: { [Op.gte]: lastHour },
         },
       });
       const resolvedHourCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           status: "Closed",
           updated_at: { [Op.gte]: lastHour },
         },
@@ -2325,7 +2332,7 @@ const getDashboardCounts = async (req, res) => {
       }
       const filteredAssignments = Array.from(latestAssignmentsMap.values()).filter(a => a.ticket);
       // Wait Time metrics (copy from getTicketCounts)
-      const tickets = await Ticket.findAll({ where: whereUserCondition });
+      const tickets = await Ticket.findAll({ where: ticketWhere });
       let longestWait = "00:00";
       let avgWait = "00:00";
       let maxWait = "00:00";
@@ -2354,16 +2361,17 @@ const getDashboardCounts = async (req, res) => {
         assigned_by_id: a.assigned_by_id,
         action: a.action
       })));
+      // In Progress: status = 'In Progress'
+      const inProgressCount = await Ticket.count({ where: { assigned_to_id: userId, status: 'In Progress' } });
       return res.status(200).json({
         success: true,
         ticketStats: {
           total,
-          // open: counts.open || 0,
           assigned: assignedCount,
           escalated: escalatedCount,
           closed: counts.closed || 0,
           carriedForward: counts.carriedforward || 0,
-          inProgress: filteredAssignments.length,
+          inProgress: inProgressCount,
           overdue: overdueCount || 0,
           newTickets: newTicketsCount || 0,
           inHour: inHourCount || 0,
@@ -2379,8 +2387,10 @@ const getDashboardCounts = async (req, res) => {
         },
       });
     }
-    // FOCAL PERSON/COORDINATOR LOGIC
-    if (["focal-person", "claim-focal-person", "compliance-focal-person"].includes(user.role)) {
+    // FOCAL PERSON/MANAGEMENT LOGIC
+    if (["focal-person", "claim-focal-person", "compliance-focal-person",
+       "head-of-unit", "manager", "supervisor", "director-general", "director",
+        "admin", "super-admin"].includes(user.role)) {
       // Use focal person dashboard logic
       // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
       // For now, inline the logic:
@@ -2419,15 +2429,47 @@ const getDashboardCounts = async (req, res) => {
           status: "Closed",
         },
       });
+
+      // Count for assigned attendees (you may need to define what this means)
+      // For now, let's say it's tickets assigned to someone by the focal person
+      // that are not yet closed.
+      const assignedToOthersByMe = await TicketAssignment.count({
+        where: {
+          assigned_by_id: userId,
+          // action: { [Op.in]: ["Assigned", "Reassigned"] }
+        },
+        include: [{
+          model: Ticket,
+          as: 'ticket',
+          where: {
+            status: { [Op.ne]: 'Closed' }
+          }
+        }]
+      });
+
+
       return res.status(200).json({
         success: true,
-        newInquiries,
-        escalatedInquiries,
-        totalInquiries,
-        resolvedInquiries,
-        openInquiries,
-        closedInquiries: resolvedInquiries,
-        inProgressInquiries,
+        ticketStats: {
+          newTickets: {
+            "New Tickets": newInquiries,
+            "Escalated Tickets": escalatedInquiries,
+            Total: newInquiries + escalatedInquiries
+          },
+          ticketStatus: {
+            Open: openInquiries,
+            Closed: resolvedInquiries,
+            AssignedAttendees: assignedToOthersByMe
+          },
+          // also pass the flat data for the dashboard page
+          newInquiries,
+          escalatedInquiries,
+          totalInquiries,
+          resolvedInquiries,
+          openInquiries,
+          closedInquiries: resolvedInquiries,
+          inProgressInquiries
+        }
       });
     }
     // COORDINATOR LOGIC (add as needed)
@@ -2531,7 +2573,6 @@ const getInProgressAssignments = async (req, res) => {
           model: Ticket,
           as: 'ticket',
           where: { status: { [Op.ne]: 'Closed' } },
-          attributes: ['id', 'ticket_id', 'subject', 'first_name', 'middle_name', 'last_name', 'phone_number', 'status', 'category']
         }
       ]
     });
@@ -2554,6 +2595,82 @@ const getInProgressAssignments = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch in-progress assignments', error: error.message });
   }
 };
+
+
+const reverseTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, reason } = req.body;
+
+    // Get assignment history, ordered by created_at DESC
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (assignments.length < 2) {
+      return res.status(400).json({ message: "No previous user to reverse to." });
+    }
+
+    // The previous user is the second most recent assignment
+    const prevAssignment = assignments[1];
+
+    // Update the ticket to assign to the previous user
+    await Ticket.update(
+      {
+        assigned_to_id: prevAssignment.assigned_to_id,
+        assigned_to_role: prevAssignment.assigned_to_role,
+        status: "Returned"
+      },
+      { where: { id: ticketId } }
+    );
+
+    // Add a new assignment record for the reversal
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: prevAssignment.assigned_to_id,
+      assigned_to_role: prevAssignment.assigned_to_role,
+      action: "Reversed",
+      reason: reason || "Ticket reversed to previous user",
+      created_at: new Date()
+    });
+
+    // Fetch ticket and previous user details for email
+    const ticket = await Ticket.findByPk(ticketId);
+    const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+    if (prevUser && prevUser.email) {
+      const subject = `Ticket Reversed: ${ticket.ticket_id || ticket.id}`;
+      const htmlBody = `
+        <p>Hello ${prevUser.name || ''},</p>
+        <p>The following ticket has been <b>reversed</b> to you:</p>
+        <ul>
+          <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
+          <li><b>Subject:</b> ${ticket.subject}</li>
+          <li><b>Category:</b> ${ticket.category}</li>
+          <li><b>Status:</b> Returned</li>
+          <li><b>Reversal Reason:</b> ${reason || 'Ticket reversed to previous user'}</li>
+        </ul>
+        <p>Please log into the system to review and take action.</p>
+        <p>Regards,<br/>WCF Support Desk</p>
+      `;
+      try {
+        await sendEmail({ to: prevUser.email, subject, htmlBody });
+      } catch (emailErr) {
+        console.error('Failed to send reversal email:', emailErr.message);
+        // Do not fail the reversal if email fails
+      }
+    }
+
+    res.status(200).json({ message: "Ticket reversed to previous user successfully." });
+  } catch (error) {
+    console.error("Error reversing ticket:", error);
+    res.status(500).json({ message: "Failed to reverse ticket", error: error.message });
+  }
+};
+// ... existing code ...
+
+
 
 module.exports = {
   checkTicketSlaBreach,
@@ -2582,4 +2699,5 @@ module.exports = {
   getDashboardCounts,
   reassignTicket,
   getInProgressAssignments,
+  reverseTicket,
 };

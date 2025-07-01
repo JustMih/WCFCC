@@ -33,14 +33,14 @@ const isClaimsFocalPerson = async (req, res, next) => {
 // Get all focal person tickets with filters and pagination
 router.get("/new-tickets", 
     authMiddleware, 
-    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
+    // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     getFocalPersonTickets
 );
 
 // Get dashboard counts
 router.get("/dashboard-counts", 
     authMiddleware, 
-    roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
+    // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person"]), 
     getFocalPersonDashboardCounts
 );
 

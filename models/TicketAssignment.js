@@ -31,6 +31,14 @@ const TicketAssignment = sequelize.define('TicketAssignment', {
     type: DataTypes.TEXT,
     allowNull: true
   },
+  attachment_path: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  evidence_url: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
   created_at: {
     type: DataTypes.DATE,
     allowNull: false,

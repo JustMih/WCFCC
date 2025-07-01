@@ -28,7 +28,6 @@ module.exports = {
         'public relation unit',
         'procurement management unit',
         'human resource management and attachment unit',
-        'dg' // if you use this in your seeders
       ),
       allowNull: false,
     });
@@ -46,7 +45,7 @@ module.exports = {
   down: async (queryInterface, Sequelize) => {
     // Revert ENUM to a minimal set (customize as needed)
     await queryInterface.changeColumn('Users', 'role', {
-      type: Sequelize.ENUM('admin', 'super-admin', 'user', 'agent'),
+      type: Sequelize.ENUM('admin', 'super-admin', 'user', 'agent', 'supervisor'),
       allowNull: false,
     });
 

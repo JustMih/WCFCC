@@ -148,7 +148,7 @@ router.post(
 router.post(
   "/:ticketId/close",
   authMiddleware,
-  roleMiddleware(['coordinator']),
+  // roleMiddleware(['coordinator']),
   upload.single("attachment"),
   closeCoordinatorTicket
 );
