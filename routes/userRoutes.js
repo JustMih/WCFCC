@@ -21,10 +21,13 @@ const {
   updateAgentStatus,
   updateUserStatus,
   getUsersByRole,
+  unReadMessage,
+  getSenderReceiverUnreadCount,
+  updateIsRead,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
-const { body } = require('express-validator'); // For validation
+const { body } = require("express-validator"); // For validation
 const router = express.Router();
 
 // Create User route
@@ -41,8 +44,7 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   getAllUsers
-);;
-
+);
 
 router.get(
   "/messages/:user1/:user2",
@@ -51,6 +53,29 @@ router.get(
   getMessage
 );
 
+// Get unread messages
+router.get(
+  "/unread-messages/:userId",
+  // authMiddleware,
+  // roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
+  unReadMessage
+);
+
+// Get unread messages count for sender and receiver
+router.get(
+  "/unread-messages-count/:senderId/:receiverId",
+  // authMiddleware,
+  // roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
+  getSenderReceiverUnreadCount
+);
+
+// update unread to read
+router.put(
+  "/update-read-message/:senderId/:receiverId",
+  updateIsRead,
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent", "supervisor"])
+);
 
 router.get(
   "/supervisor",
@@ -73,7 +98,6 @@ router.get(
   roleMiddleware(["admin", "super-admin"]),
   getUsersByRole
 );
-
 
 router.get(
   "/agents-online",
