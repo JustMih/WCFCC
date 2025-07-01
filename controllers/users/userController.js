@@ -169,6 +169,103 @@ const getMessage = async (req, res) => {
   }
 };
 
+// Function to handle unread messages count
+const unReadMessage = async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Count unread messages for the user
+    const unreadCount = await ChatMassage.count({
+      where: {
+        receiverId: userId,
+        isRead: false, // Assuming you have an 'isRead' field to track read status
+      },
+    });
+
+    res.status(200).json({ unreadCount });
+  } catch (error) {
+    console.error("Error fetching unread messages count:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+}
+
+// function to get sender and receiver unread messages count
+const getSenderReceiverUnreadCount = async (req, res) => {
+  const { senderId, receiverId } = req.params;
+  try {
+    // Count unread messages for the sender
+    const senderUnreadCount = await ChatMassage.count({
+      where: {
+        senderId: senderId,
+        receiverId: receiverId,
+        isRead: false, // Assuming you have an 'isRead' field to track read status
+      },
+    });
+    // Count unread messages for the receiver
+    const receiverUnreadCount = await ChatMassage.count({
+      where: {
+        senderId: receiverId,
+        receiverId: senderId,
+        isRead: false, // Assuming you have an 'isRead' field to track read status
+      },
+    });
+    res.status(200).json({
+      senderUnreadCount,
+      receiverUnreadCount,
+    });
+  } catch (error) {
+    console.error("Error fetching sender and receiver unread messages count:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// update isRead to true when a receiver is read a message from sender
+const updateIsRead = async (req, res) => {
+  const { senderId, receiverId } = req.params;
+
+  try {
+    // Log input values for debugging
+    console.log(
+      `Attempting to mark messages as read for senderId: ${senderId}, receiverId: ${receiverId}`
+    );
+
+    // Update the 'isRead' column for the messages from the sender to the receiver
+    const [updatedRows] = await ChatMassage.update(
+      { isRead: true },
+      {
+        where: {
+          senderId: senderId,
+          receiverId: receiverId,
+          isRead: false, // Only update unread messages
+        },
+      }
+    );
+
+    // Check if any rows were updated
+    if (updatedRows === 0) {
+      console.log(
+        `No unread messages found for senderId: ${senderId}, receiverId: ${receiverId}`
+      );
+      return res.status(404).json({ message: "No unread messages found" });
+    }
+
+    // Log success
+    console.log(
+      `${updatedRows} messages marked as read successfully for senderId: ${senderId}, receiverId: ${receiverId}`
+    );
+
+    res.status(200).json({ message: "Messages marked as read successfully" });
+  } catch (error) {
+    // Log the full error stack for debugging
+    console.error("Error updating message read status:", error.stack);
+
+    // Respond with a server error message
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
+
 const getAgentOnline = async (req, res) => {
   try {
     const agents = await User.findAll({
@@ -486,4 +583,7 @@ module.exports = {
   updateAgentStatus,
   updateUserStatus,
   getUsersByRole,
+  unReadMessage,
+  getSenderReceiverUnreadCount,
+  updateIsRead,
 };
