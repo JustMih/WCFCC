@@ -1797,7 +1797,7 @@ const getTicketById = async (req, res) => {
         {
           model: User,
           as: 'creator',
-          attributes: ['id', 'name', 'email']
+          attributes: ['id', 'name', 'username']
         },
         {
           model: User,
@@ -2146,8 +2146,7 @@ const getTicketAssignments = async (req, res) => {
       ],
       order: [["created_at", "ASC"]]
     });
-    // Map to include assigned_to_name and assigned_to_role
-    const mappedAssignments = assignments.map(a => ({
+    let mappedAssignments = assignments.map(a => ({
       assigned_to_id: a.assigned_to_id,
       assigned_to_name: a.assignee ? a.assignee.name : null,
       assigned_to_role: a.assignee ? a.assignee.role : null,
@@ -2155,6 +2154,13 @@ const getTicketAssignments = async (req, res) => {
       action: a.action,
       created_at: a.created_at
     }));
+    // Add creator_name to the first assignment if available
+    if (assignments.length > 0) {
+      const creatorUser = await User.findOne({ where: { id: assignments[0].assigned_by_id } });
+      if (creatorUser) {
+        mappedAssignments[0].creator_name = creatorUser.name || `${creatorUser.first_name || ''} ${creatorUser.last_name || ''}`.trim();
+      }
+    }
     console.log('ticket assignment', mappedAssignments);
     res.json(mappedAssignments);
   } catch (error) {
