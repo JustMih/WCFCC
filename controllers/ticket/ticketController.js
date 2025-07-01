@@ -2243,24 +2243,22 @@ const getDashboardCounts = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    // AGENT/ATTENDEE LOGIC (from getTicketCounts)
-    if (["agent", "attendee"].includes(user.role)) {
-      // Use getTicketCounts logic
-      const isSuperAdmin = user.role === "super-admin";
-      const whereUserCondition = isSuperAdmin ? {} : { created_by: userId };
+    // ALL ROLES (except coordinator) LOGIC: use assigned_to_id for all counts
+    if (user.role !== 'coordinator') {
+      const ticketWhere = { assigned_to_id: userId };
       const statuses = ["Open", "Assigned", "Closed", "Carried Forward", "In Progress"];
       const counts = {};
       for (const status of statuses) {
         const key = status.toLowerCase().replace(/ /g, "");
-        const condition = isSuperAdmin ? { status } : { created_by: userId, status };
+        const condition = { ...ticketWhere, status };
         counts[key] = await Ticket.count({ where: condition });
       }
-      const total = await Ticket.count({ where: whereUserCondition });
+      const total = await Ticket.count({ where: ticketWhere });
       const tenDaysAgo = new Date();
       tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
       const overdueCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           status: "Open",
           created_at: { [Op.lt]: tenDaysAgo },
         },
@@ -2269,20 +2267,20 @@ const getDashboardCounts = async (req, res) => {
       today.setHours(0, 0, 0, 0);
       const newTicketsCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           created_at: { [Op.gte]: today },
         },
       });
       const lastHour = new Date(new Date().setHours(new Date().getHours() - 1));
       const inHourCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           created_at: { [Op.gte]: lastHour },
         },
       });
       const resolvedHourCount = await Ticket.count({
         where: {
-          ...whereUserCondition,
+          ...ticketWhere,
           status: "Closed",
           updated_at: { [Op.gte]: lastHour },
         },
@@ -2325,7 +2323,7 @@ const getDashboardCounts = async (req, res) => {
       }
       const filteredAssignments = Array.from(latestAssignmentsMap.values()).filter(a => a.ticket);
       // Wait Time metrics (copy from getTicketCounts)
-      const tickets = await Ticket.findAll({ where: whereUserCondition });
+      const tickets = await Ticket.findAll({ where: ticketWhere });
       let longestWait = "00:00";
       let avgWait = "00:00";
       let maxWait = "00:00";
@@ -2355,12 +2353,11 @@ const getDashboardCounts = async (req, res) => {
         action: a.action
       })));
       // In Progress: status = 'In Progress'
-      const inProgressCount = await Ticket.count({ where: { userId, status: 'In Progress' } });
+      const inProgressCount = await Ticket.count({ where: { assigned_to_id: userId, status: 'In Progress' } });
       return res.status(200).json({
         success: true,
         ticketStats: {
           total,
-          // open: counts.open || 0,
           assigned: assignedCount,
           escalated: escalatedCount,
           closed: counts.closed || 0,
@@ -2382,7 +2379,9 @@ const getDashboardCounts = async (req, res) => {
       });
     }
     // FOCAL PERSON/MANAGEMENT LOGIC
-    if (["focal-person", "claim-focal-person", "compliance-focal-person", "head-of-unit", "manager", "supervisor", "director-general", "director", "admin", "super-admin"].includes(user.role)) {
+    if (["focal-person", "claim-focal-person", "compliance-focal-person",
+       "head-of-unit", "manager", "supervisor", "director-general", "director",
+        "admin", "super-admin"].includes(user.role)) {
       // Use focal person dashboard logic
       // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
       // For now, inline the logic:

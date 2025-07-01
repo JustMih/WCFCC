@@ -1131,7 +1131,7 @@ const closeCoordinatorTicket = async (req, res) => {
       reason: resolution_details || 'Ticket closed by coordinator',
       created_at: new Date()
     });
-
+    console.error("Closing ticket details");
     res.status(200).json({
       message: "Ticket closed successfully by coordinator",
       ticket
