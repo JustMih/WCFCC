@@ -88,33 +88,63 @@ const login = async (req, res) => {
         return res.status(400).json({ message: "Invalid password" });
       }
     } else {
-      // Step 2: Authenticate against Active Directory for other users
-      const ldapUser = await authenticateActiveDirectory(username, password);
-
-      // Step 3: Check if user exists in the local database
-      user = await User.findOne({
-        where: { email: `${username}@wcf.go.tz` },
-      });
-
-      if (!user) {
-        // If user doesn't exist, create a new user with inactive status
-        user = await User.create({
-          name: username, // Set name as the username from input
-          email: `${username}@wcf.go.tz`, // Set email as username@wcf.go.tz
-          password: "wcf12345", // Password will be updated later by the super admin
-          extension: null,
-          role: "agent",
-          isActive: false, // Set as inactive initially
-        });
-        console.log(`User ${username} created with inactive status.`);
+      // Step 2: Try LDAP authentication first
+      let ldapSuccess = false;
+      try {
+        await authenticateActiveDirectory(username, password);
+        ldapSuccess = true;
+      } catch (ldapError) {
+        // LDAP failed, fallback to local DB authentication
+        // console.log('LDAP failed, trying local DB:', ldapError.message);
       }
 
-      // Step 4: Check if the account is active
-      if (user.isActive === false) {
-        return res.status(400).json({
-          message:
-            "Your account is inactive. Please wait for the super admin to activate it.",
+      if (ldapSuccess) {
+        // Step 3: Check if user exists in the local database
+        user = await User.findOne({
+          where: { email: `${username}@wcf.go.tz` },
         });
+
+        if (!user) {
+          // If user doesn't exist, create a new user with inactive status
+          user = await User.create({
+            name: username, // Set name as the username from input
+            email: `${username}@wcf.go.tz`, // Set email as username@wcf.go.tz
+            password: "wcf12345", // Password will be updated later by the super admin
+            extension: null,
+            role: "agent",
+            isActive: false, // Set as inactive initially
+          });
+          console.log(`User ${username} created with inactive status.`);
+        }
+
+        // Step 4: Check if the account is active
+        if (user.isActive === false) {
+          return res.status(400).json({
+            message:
+              "Your account is inactive. Please wait for the super admin to activate it.",
+          });
+        }
+      } else {
+        // LDAP failed, fallback to local DB authentication
+        user = await User.findOne({
+          where: { username },
+        });
+        if (!user) {
+          user = await User.findOne({ where: { email: username } });
+        }
+        if (!user) {
+          return res.status(400).json({ message: "Authentication failed. User not found." });
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+          return res.status(400).json({ message: "Authentication failed. Invalid password." });
+        }
+        if (user.isActive === false) {
+          return res.status(400).json({
+            message:
+              "Your account is inactive. Please wait for the super admin to activate it.",
+          });
+        }
       }
     }
 
@@ -129,35 +159,35 @@ const login = async (req, res) => {
       { expiresIn: "24h" }
     );
 
-  // Log agent login in AgentLoginLog
-  if (user.role === "agent") {
-    await AgentLoginLog.create({
-      userId: user.id,
-      role: "agent",
-      loginTime: new Date(),
-      logoutTime: null, // Will be updated on logout
-      totalOnlineTime: 0, // Will be calculated later
-    });
-    console.log(`Agent ${user.name} logged in.`);
-  }
+    // Log agent login in AgentLoginLog
+    if (user.role === "agent") {
+      await AgentLoginLog.create({
+        userId: user.id,
+        role: "agent",
+        loginTime: new Date(),
+        logoutTime: null, // Will be updated on logout
+        totalOnlineTime: 0, // Will be calculated later
+      });
+      console.log(`Agent ${user.name} logged in.`);
+    }
 
-  res.json({
-    message: "Login successful",
-    token,
-    user: {
-      name: user.name,
-      isActive: user.isActive,
-      role: user.role,
-      id: user.id,
-      unit_section: user.unit_section,
-      extension: user.extension,
-    },
-  });
-} catch (error) {
-  console.error("Login error:", error);
-  res.status(500).json({ message: "Server error", error: error.message });
+    res.json({
+      message: "Login successful",
+      token,
+      user: {
+        name: user.name,
+        isActive: user.isActive,
+        role: user.role,
+        id: user.id,
+        unit_section: user.unit_section,
+        extension: user.extension,
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
 };
-}
 
 const logout = async (req, res) => {
   const { userId } = req.body;

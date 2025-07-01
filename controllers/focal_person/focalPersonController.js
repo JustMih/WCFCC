@@ -141,7 +141,7 @@ const getFocalPersonDashboardCounts = async (req, res) => {
       }
     });
     // Find all ticket IDs ever assigned to this focal person (for open and closed)
-    const assignedTicketAssignments = await AssignedOfficer.findAll({
+    const assignedTicketAssignments = await TicketAssignment.findAll({
       where: { assigned_to_id: userId },
       attributes: ['ticket_id'],
       group: ['ticket_id']
@@ -169,7 +169,7 @@ const getFocalPersonDashboardCounts = async (req, res) => {
       totalInquiries,
       resolvedInquiries: closedInquiries,
       openInquiries,
-      closedInquiries: resolvedInquiries,
+      closedInquiries: closedInquiries,
       inProgressInquiries
     });
   } catch (error) {

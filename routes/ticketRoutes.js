@@ -41,7 +41,7 @@ router.get(
 router.get(
   "/assigned/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  // roleMiddleware(["agent", "attendee","super-admin"]),
   getAssignedTickets
 );
 
@@ -49,7 +49,7 @@ router.get(
 router.get(
   "/in-progress/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  // roleMiddleware(["agent", "attendee","super-admin"]),
   getInprogressTickets
 );
 
@@ -58,7 +58,7 @@ router.get(
 router.get(
   "/carried-forward/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  // roleMiddleware(["agent", "attendee","super-admin"]),
   getCarriedForwardTickets
 );
 
@@ -66,7 +66,7 @@ router.get(
 router.get(
   "/closed/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  // roleMiddleware(["agent", "attendee","super-admin"]),
   getClosedTickets
 );
 
@@ -74,7 +74,7 @@ router.get(
 router.get(
   "/overdue/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  // roleMiddleware(["agent", "attendee","super-admin"]),
   getOverdueTickets
 );
 
@@ -82,14 +82,14 @@ router.get(
 router.get(
   "/all/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin"]),
+  // roleMiddleware(["agent", "attendee","super-admin"]),
   getAllTickets
 );
 
 router.get(
   "/count/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
+  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketCounts
 );
 
@@ -163,7 +163,7 @@ router.get(
 router.get(
   "/dashboard-counts/:userId",
   authMiddleware,
-  roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  // roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getDashboardCounts
 );
 
