@@ -372,6 +372,7 @@ const mapFunctionDataToFunctionId = (functionDataId) => {
 
 const createTicket = async (req, res) => {
   try {
+    console.log('Incoming ticket creation request body:', req.body);
     const {
       firstName,
       middleName,
@@ -459,7 +460,7 @@ const createTicket = async (req, res) => {
             email: `${allocatedUserUsername}@ttcl.co.tz`,
             role: 'attendee',
             unit_section: finalSection || responsible_unit_name,
-            password: await bcrypt.hash('defaultPassword123', 10),
+            password: await bcrypt.hash('user12345', 10),
             status: 'active',
           });
           assignedUser = newUser;
@@ -828,6 +829,10 @@ const getOpenTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -852,6 +857,10 @@ const getOpenTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -925,6 +934,10 @@ const getAssignedTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -934,7 +947,7 @@ const getAssignedTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: {
           assigned_to_id: userId,
-          status: { [Op.in]: ["Assigned", "Open"] }
+          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] }
         },
         include: [
           {
@@ -952,6 +965,10 @@ const getAssignedTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -974,7 +991,8 @@ const getAssignedTickets = async (req, res) => {
         ...t,
         created_by: user.name
       };
-    });
+    })
+    
     res.status(200).json({
       message: "Assigned tickets fetched successfully",
       totalTickets: tickets.length,
@@ -1029,6 +1047,10 @@ const getInprogressTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1053,6 +1075,10 @@ const getInprogressTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1134,6 +1160,10 @@ const getCarriedForwardTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1158,6 +1188,10 @@ const getCarriedForwardTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1239,6 +1273,10 @@ const getClosedTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1263,6 +1301,10 @@ const getClosedTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1349,6 +1391,10 @@ const getOverdueTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]],
@@ -1377,6 +1423,10 @@ const getOverdueTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]],
@@ -1546,6 +1596,10 @@ const getAllTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1594,6 +1648,10 @@ const getAllTickets = async (req, res) => {
                 attributes: ['id', 'name', 'email']
               }
             ]
+          },
+          {
+            model: RequesterDetails,
+            as: 'RequesterDetail'
           }
         ],
         order: [["created_at", "DESC"]]
@@ -1836,13 +1894,20 @@ const getTicketById = async (req, res) => {
             }
           ],
           order: [['created_at', 'ASC']]
-        }
+        },
+        {
+          model: RequesterDetails,
+          as: 'RequesterDetail',
+        },
       ]
     });
 
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found" });
     }
+
+    // Debug: Log the RequesterDetail association
+    console.log('RequesterDetail', ticket?.RequesterDetail);
 
     return res.status(200).json({ ticket });
   } catch (error) {

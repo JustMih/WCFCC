@@ -50,6 +50,6 @@ const RequesterDetails = sequelize.define(
 );
 
 RequesterDetails.belongsTo(Ticket, { foreignKey: 'ticketId' });
-Ticket.hasOne(RequesterDetails, { foreignKey: 'ticketId' });
+// Ticket.hasOne(RequesterDetails, { foreignKey: 'ticketId' });
 
 module.exports = RequesterDetails; 
