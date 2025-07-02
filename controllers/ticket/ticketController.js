@@ -188,7 +188,7 @@ const getTicketCounts = async (req, res) => {
     const overdueCount = await Ticket.count({
       where: {
         ...whereUserCondition,
-        status: "Open",
+        status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] },
         created_at: { [Op.lt]: tenDaysAgo },
       },
     });
@@ -914,7 +914,7 @@ const getAssignedTickets = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
     let tickets;
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor") {
       // Super admin: Fetch all tickets with status Assigned or Open
       tickets = await Ticket.findAll({
         where: { status: { [Op.in]: ["Assigned", "Open"] } },
@@ -1026,10 +1026,10 @@ const getInprogressTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" ||user.role === "supervisor") {
       // Super admin: Fetch all OPEN tickets
       tickets = await Ticket.findAll({
-        where: { status: "In Progress" }, // Filter by status
+        status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] }, // Filter by status
         attributes: { exclude: ["userId"] },
         include: [
           {
@@ -1058,7 +1058,7 @@ const getInprogressTickets = async (req, res) => {
     } else {
       // Agent: Fetch only OPEN tickets created by this agent
       tickets = await Ticket.findAll({
-        where: { userId, status: "In Progress" }, // Filter by userId and status
+        status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] }, // Filter by userId and status
         include: [
           {
             model: User,
@@ -2428,6 +2428,22 @@ const getDashboardCounts = async (req, res) => {
       })));
       // In Progress: status = 'In Progress'
       const inProgressCount = await Ticket.count({ where: { assigned_to_id: userId, status: 'In Progress' } });
+      // In Progress: tickets ever assigned at least once to this user and not closed
+      const assignedTicketAssignments = await TicketAssignment.findAll({
+        where: { assigned_to_id: userId },
+        attributes: ['ticket_id'],
+        group: ['ticket_id'],
+      });
+      const ticketIds = assignedTicketAssignments.map(a => a.ticket_id);
+      const inProgressEverAssignedCount = await Ticket.count({
+        where: {
+          id: { [Op.in]: ticketIds },
+          status: { [Op.eq]: 'Open' },
+        },
+      });
+      // Debug logs
+      console.log('ticketIds:', ticketIds);
+      console.log('inProgressEverAssignedCount:', inProgressEverAssignedCount);
       return res.status(200).json({
         success: true,
         ticketStats: {
@@ -2436,7 +2452,7 @@ const getDashboardCounts = async (req, res) => {
           escalated: escalatedCount,
           closed: counts.closed || 0,
           carriedForward: counts.carriedforward || 0,
-          inProgress: inProgressCount,
+          inProgress: inProgressEverAssignedCount, // Use the new count here
           overdue: overdueCount || 0,
           newTickets: newTicketsCount || 0,
           inHour: inHourCount || 0,
@@ -2455,7 +2471,7 @@ const getDashboardCounts = async (req, res) => {
     // FOCAL PERSON/MANAGEMENT LOGIC
     if (["focal-person", "claim-focal-person", "compliance-focal-person",
        "head-of-unit", "manager", "supervisor", "director-general", "director",
-        "admin", "super-admin"].includes(user.role)) {
+        "admin", "super-admin", "agrnt", "attendee"].includes(user.role)) {
       // Use focal person dashboard logic
       // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
       // For now, inline the logic:
@@ -2479,7 +2495,7 @@ const getDashboardCounts = async (req, res) => {
       const inProgressInquiries = await Ticket.count({
         where: {
           ...ticketWhere,
-          status: "In Progress",
+          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "In progress"] }
         },
       });
       const openInquiries = await Ticket.count({
@@ -2630,7 +2646,7 @@ const getInProgressAssignments = async (req, res) => {
     const assignments = await TicketAssignment.findAll({
       where: {
         assigned_by_id: userId,
-        action: { [Op.in]: ['Assigned', 'Reassigned'] },
+        action: { [Op.in]: ['Assigned', 'Reassigned', 'Open', 'Forwaeded'] },
       },
       order: [['ticket_id', 'ASC'], ['created_at', 'DESC']],
       include: [
