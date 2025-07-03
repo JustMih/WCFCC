@@ -188,7 +188,7 @@ const getTicketCounts = async (req, res) => {
     const overdueCount = await Ticket.count({
       where: {
         ...whereUserCondition,
-        status: "Open",
+        status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] },
         created_at: { [Op.lt]: tenDaysAgo },
       },
     });
@@ -914,7 +914,7 @@ const getAssignedTickets = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
     let tickets;
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor") {
       // Super admin: Fetch all tickets with status Assigned or Open
       tickets = await Ticket.findAll({
         where: { status: { [Op.in]: ["Assigned", "Open"] } },
@@ -1026,10 +1026,10 @@ const getInprogressTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" ||user.role === "supervisor") {
       // Super admin: Fetch all OPEN tickets
       tickets = await Ticket.findAll({
-        where: { status: "In Progress" }, // Filter by status
+        status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] }, // Filter by status
         attributes: { exclude: ["userId"] },
         include: [
           {
@@ -1058,7 +1058,7 @@ const getInprogressTickets = async (req, res) => {
     } else {
       // Agent: Fetch only OPEN tickets created by this agent
       tickets = await Ticket.findAll({
-        where: { userId, status: "In Progress" }, // Filter by userId and status
+        status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] }, // Filter by userId and status
         include: [
           {
             model: User,
@@ -1282,9 +1282,27 @@ const getClosedTickets = async (req, res) => {
         order: [["created_at", "DESC"]]
       });
     } else {
-      // Agent: Fetch only Closed tickets created by this agent
+      // Find all ticket IDs ever assigned to this user
+      const assignedTicketAssignments = await TicketAssignment.findAll({
+        where: { assigned_to_id: userId },
+        attributes: ['ticket_id'],
+        group: ['ticket_id'],
+      });
+      const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+      // Find all ticket IDs created by this user
+      const createdTickets = await Ticket.findAll({
+        where: { userId },
+        attributes: ['id'],
+      });
+      const createdTicketIds = createdTickets.map(t => t.id);
+      // Combine IDs (remove duplicates)
+      const allRelevantTicketIds = Array.from(new Set([...assignedTicketIds, ...createdTicketIds]));
+      // Fetch closed tickets where id in allRelevantTicketIds
       tickets = await Ticket.findAll({
-        where: { userId, status: "Closed" }, // Filter by userId and status
+        where: {
+          id: { [Op.in]: allRelevantTicketIds },
+          status: 'Closed',
+        },
         include: [
           {
             model: User,
@@ -1363,7 +1381,7 @@ const getOverdueTickets = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Define overdue logic: Open tickets older than 10 days
+    // Define overdue logic: SLA breach for non-super-admin, 10 days for super-admin
     const tenDaysAgo = new Date();
     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
 
@@ -1400,12 +1418,11 @@ const getOverdueTickets = async (req, res) => {
         order: [["created_at", "DESC"]],
       });
     } else {
-      // Agent: Fetch only their overdue tickets
-      tickets = await Ticket.findAll({
+      // Agent: Fetch only their overdue tickets based on SLA breach
+      const assignedTickets = await Ticket.findAll({
         where: {
-          userId,
-          status: "Open",
-          created_at: { [Op.lt]: tenDaysAgo },
+          assigned_to_id: userId,
+          status: { [Op.ne]: "Closed" },
         },
         include: [
           {
@@ -1430,6 +1447,10 @@ const getOverdueTickets = async (req, res) => {
           }
         ],
         order: [["created_at", "DESC"]],
+      });
+      tickets = assignedTickets.filter(ticket => {
+        const { breached } = checkTicketSlaBreach(ticket);
+        return breached;
       });
     }
 
@@ -1534,6 +1555,8 @@ const getAllCustomersTickets = async (req, res) => {
   }
 };
 
+
+// for status on dashboard of agent
 const getAllTickets = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -2428,6 +2451,22 @@ const getDashboardCounts = async (req, res) => {
       })));
       // In Progress: status = 'In Progress'
       const inProgressCount = await Ticket.count({ where: { assigned_to_id: userId, status: 'In Progress' } });
+      // In Progress: tickets ever assigned at least once to this user and not closed
+      const assignedTicketAssignments = await TicketAssignment.findAll({
+        where: { assigned_to_id: userId },
+        attributes: ['ticket_id'],
+        group: ['ticket_id'],
+      });
+      const ticketIds = assignedTicketAssignments.map(a => a.ticket_id);
+      const inProgressEverAssignedCount = await Ticket.count({
+        where: {
+          id: { [Op.in]: ticketIds },
+          status: { [Op.eq]: 'Open' },
+        },
+      });
+      // Debug logs
+      console.log('ticketIds:', ticketIds);
+      console.log('inProgressEverAssignedCount:', inProgressEverAssignedCount);
       return res.status(200).json({
         success: true,
         ticketStats: {
@@ -2436,7 +2475,7 @@ const getDashboardCounts = async (req, res) => {
           escalated: escalatedCount,
           closed: counts.closed || 0,
           carriedForward: counts.carriedforward || 0,
-          inProgress: inProgressCount,
+          inProgress: inProgressEverAssignedCount, // Use the new count here
           overdue: overdueCount || 0,
           newTickets: newTicketsCount || 0,
           inHour: inHourCount || 0,
@@ -2455,7 +2494,7 @@ const getDashboardCounts = async (req, res) => {
     // FOCAL PERSON/MANAGEMENT LOGIC
     if (["focal-person", "claim-focal-person", "compliance-focal-person",
        "head-of-unit", "manager", "supervisor", "director-general", "director",
-        "admin", "super-admin"].includes(user.role)) {
+        "admin", "super-admin", "agrnt", "attendee"].includes(user.role)) {
       // Use focal person dashboard logic
       // You may want to import and call getFocalPersonDashboardCounts here, or inline the logic
       // For now, inline the logic:
@@ -2479,7 +2518,7 @@ const getDashboardCounts = async (req, res) => {
       const inProgressInquiries = await Ticket.count({
         where: {
           ...ticketWhere,
-          status: "In Progress",
+          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "In progress"] }
         },
       });
       const openInquiries = await Ticket.count({
@@ -2630,7 +2669,7 @@ const getInProgressAssignments = async (req, res) => {
     const assignments = await TicketAssignment.findAll({
       where: {
         assigned_by_id: userId,
-        action: { [Op.in]: ['Assigned', 'Reassigned'] },
+        action: { [Op.in]: ['Assigned', 'Reassigned', 'Open', 'Forwaeded'] },
       },
       order: [['ticket_id', 'ASC'], ['created_at', 'DESC']],
       include: [
@@ -2735,7 +2774,351 @@ const reverseTicket = async (req, res) => {
 };
 // ... existing code ...
 
+// --- Ticket Count Endpoints for Sidebar ---
+const getOpenTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin") {
+      count = await Ticket.count({ where: { status: ["Open", "Assigned"] } });
+    } else {
+      count = await Ticket.count({ where: { userId, status: ["Open", "Assigned"] } });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
+const getAssignedTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      count = await Ticket.count({ where: { status: ["Assigned", "Open"] } });
+    } else {
+      count = await Ticket.count({ where: { assigned_to_id: userId, status: ["Assigned", "Open", "Returned", "Forwarded"] } });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getInprogressTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      count = await Ticket.count({ status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded"] } });
+    } else {
+      // Find all ticket IDs ever assigned to this user
+      const assignedTicketAssignments = await TicketAssignment.findAll({
+        where: { assigned_to_id: userId },
+        attributes: ['ticket_id'],
+        group: ['ticket_id'],
+      });
+      const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+      // Find all ticket IDs created by this user
+      const createdTickets = await Ticket.findAll({
+        where: { userId },
+        attributes: ['id'],
+      });
+      const createdTicketIds = createdTickets.map(t => t.id);
+      // Combine IDs (remove duplicates)
+      const allRelevantTicketIds = Array.from(new Set([...assignedTicketIds, ...createdTicketIds]));
+      // Count tickets where id in allRelevantTicketIds and status != 'Closed'
+      count = await Ticket.count({
+        where: {
+          id: { [Op.in]: allRelevantTicketIds },
+          status: { [Op.ne]: 'Closed' },
+        },
+      });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getCarriedForwardTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin") {
+      count = await Ticket.count({ where: { status: "Carried Forward" } });
+    } else {
+      count = await Ticket.count({ where: { userId, status: "Carried Forward" } });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getClosedTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin") {
+      count = await Ticket.count({ where: { status: "Closed" } });
+    } else {
+      // Find all ticket IDs ever assigned to this user
+      const assignedTicketAssignments = await TicketAssignment.findAll({
+        where: { assigned_to_id: userId },
+        attributes: ['ticket_id'],
+        group: ['ticket_id'],
+      });
+      const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+      // Find all ticket IDs created by this user
+      const createdTickets = await Ticket.findAll({
+        where: { userId },
+        attributes: ['id'],
+      });
+      const createdTicketIds = createdTickets.map(t => t.id);
+      // Combine IDs (remove duplicates)
+      const allRelevantTicketIds = Array.from(new Set([...assignedTicketIds, ...createdTicketIds]));
+      // Count tickets where id in allRelevantTicketIds and status == 'Closed'
+      count = await Ticket.count({
+        where: {
+          id: { [Op.in]: allRelevantTicketIds },
+          status: 'Closed',
+        },
+      });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getOverdueTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin") {
+      // Keep current logic for super-admin
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      count = await Ticket.count({
+        where: {
+          status: "Open",
+          created_at: { [Op.lt]: tenDaysAgo }
+        }
+      });
+    } else {
+      // Use SLA logic for overdue
+      const assignedTickets = await Ticket.findAll({
+        where: {
+          assigned_to_id: userId,
+          status: { [Op.ne]: "Closed" }
+        }
+      });
+      let overdueCount = 0;
+      for (const ticket of assignedTickets) {
+        const { breached } = checkTicketSlaBreach(ticket);
+        if (breached) overdueCount++;
+      }
+      count = overdueCount;
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getOverdueTicketsList = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let tickets = [];
+    if (user.role === "super-admin") {
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      tickets = await Ticket.findAll({
+        where: {
+          status: "Open",
+          created_at: { [Op.lt]: tenDaysAgo }
+        }
+      });
+    } else {
+      const assignedTickets = await Ticket.findAll({
+        where: {
+          assigned_to_id: userId,
+          status: { [Op.ne]: "Closed" }
+        }
+      });
+      tickets = assignedTickets.filter(ticket => {
+        const { breached } = checkTicketSlaBreach(ticket);
+        return breached;
+      });
+    }
+    res.status(200).json({ tickets });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getEscalatedTicketsForUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+
+    // Find all ticket IDs where the user was ever assigned and the ticket is escalated
+    const escalatedAssignments = await TicketAssignment.findAll({
+      where: {
+        assigned_to_id: userId,
+        action: 'Escalated'
+      },
+      attributes: ['ticket_id'],
+      group: ['ticket_id']
+    });
+    const escalatedTicketIds = escalatedAssignments.map(a => a.ticket_id);
+
+    // Get the escalated tickets
+    const tickets = await Ticket.findAll({
+      where: {
+        id: { [Op.in]: escalatedTicketIds },
+        is_escalated: true
+      },
+      include: [
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'email']
+            }
+          ]
+        },
+        {
+          model: RequesterDetails,
+          as: 'RequesterDetail'
+        }
+      ],
+      order: [["created_at", "DESC"]]
+    });
+
+    res.status(200).json({
+      message: "Escalated tickets fetched successfully",
+      totalTickets: tickets.length,
+      tickets
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getEverAssignedTickets = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    // Find all ticket IDs ever assigned to this user
+    const assignedTicketAssignments = await TicketAssignment.findAll({
+      where: { assigned_to_id: userId },
+      attributes: ['ticket_id'],
+      group: ['ticket_id'],
+    });
+    const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+    if (assignedTicketIds.length === 0) {
+      return res.status(404).json({ message: "No tickets found." });
+    }
+    const tickets = await Ticket.findAll({
+      where: { id: { [Op.in]: assignedTicketIds } },
+      include: [
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'email']
+            }
+          ]
+        },
+        {
+          model: RequesterDetails,
+          as: 'RequesterDetail'
+        }
+      ],
+      order: [["created_at", "DESC"]]
+    });
+    res.status(200).json({
+      message: "Ever assigned tickets fetched successfully",
+      totalTickets: tickets.length,
+      tickets
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getEverAssignedTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const assignedTicketAssignments = await TicketAssignment.findAll({
+      where: { assigned_to_id: userId },
+      attributes: ['ticket_id'],
+      group: ['ticket_id'],
+    });
+    const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+    res.status(200).json({ count: assignedTicketIds.length });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAllTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin") {
+      count = await Ticket.count();
+    } else {
+      count = await Ticket.count({ where: { userId } });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 module.exports = {
   checkTicketSlaBreach,
@@ -2765,4 +3148,15 @@ module.exports = {
   reassignTicket,
   getInProgressAssignments,
   reverseTicket,
+  getOpenTicketsCount,
+  getAssignedTicketsCount,
+  getInprogressTicketsCount,
+  getCarriedForwardTicketsCount,
+  getClosedTicketsCount,
+  getOverdueTicketsCount,
+  getOverdueTicketsList,
+  getEscalatedTicketsForUser,
+  getEverAssignedTickets,
+  getEverAssignedTicketsCount,
+  getAllTicketsCount,
 };

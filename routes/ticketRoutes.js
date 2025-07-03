@@ -5,7 +5,9 @@ const {
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
   mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers,
   assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers,
-  getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket
+  getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
+  getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
+  getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -187,5 +189,18 @@ router.post(
   authMiddleware,
   reverseTicket
 );
+
+
+router.get('/count/open/:userId', getOpenTicketsCount);
+router.get('/count/assigned/:userId', getAssignedTicketsCount);
+router.get('/count/inprogress/:userId', getInprogressTicketsCount);
+router.get('/count/carried-forward/:userId', getCarriedForwardTicketsCount);
+router.get('/count/closed/:userId', getClosedTicketsCount);
+router.get('/count/overdue/:userId', getOverdueTicketsCount);
+
+// router.get('/ticket/escalated/:userId', getEscalatedTicketsForUser);
+// router.get('/ticket/ever-assigned/:userId', getEverAssignedTickets);
+// router.get('/ticket/ever-assigned-count/:userId', getEverAssignedTicketsCount);
+router.get('/all-count/:userId', getAllTicketsCount);
 
 module.exports = router;
