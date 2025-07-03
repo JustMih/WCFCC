@@ -38,6 +38,8 @@ const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
 
+require('./cron/escalationJob');
+
 require('./amiServer'); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());

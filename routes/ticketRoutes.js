@@ -132,7 +132,7 @@ router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
 router.post(
   '/:ticketId/assign',
   authMiddleware,
-  roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator']),
+  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator']),
   assignTicket
 );
 
@@ -140,7 +140,7 @@ router.post(
 router.get(
   '/admin/attendee',
   authMiddleware,
-  roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator', 'admin']),
+  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator', 'admin']),
   getAllAttendee
 );
 
