@@ -1282,9 +1282,27 @@ const getClosedTickets = async (req, res) => {
         order: [["created_at", "DESC"]]
       });
     } else {
-      // Agent: Fetch only Closed tickets created by this agent
+      // Find all ticket IDs ever assigned to this user
+      const assignedTicketAssignments = await TicketAssignment.findAll({
+        where: { assigned_to_id: userId },
+        attributes: ['ticket_id'],
+        group: ['ticket_id'],
+      });
+      const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+      // Find all ticket IDs created by this user
+      const createdTickets = await Ticket.findAll({
+        where: { userId },
+        attributes: ['id'],
+      });
+      const createdTicketIds = createdTickets.map(t => t.id);
+      // Combine IDs (remove duplicates)
+      const allRelevantTicketIds = Array.from(new Set([...assignedTicketIds, ...createdTicketIds]));
+      // Fetch closed tickets where id in allRelevantTicketIds
       tickets = await Ticket.findAll({
-        where: { userId, status: "Closed" }, // Filter by userId and status
+        where: {
+          id: { [Op.in]: allRelevantTicketIds },
+          status: 'Closed',
+        },
         include: [
           {
             model: User,
@@ -3018,6 +3036,90 @@ const getEscalatedTicketsForUser = async (req, res) => {
   }
 };
 
+const getEverAssignedTickets = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    // Find all ticket IDs ever assigned to this user
+    const assignedTicketAssignments = await TicketAssignment.findAll({
+      where: { assigned_to_id: userId },
+      attributes: ['ticket_id'],
+      group: ['ticket_id'],
+    });
+    const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+    if (assignedTicketIds.length === 0) {
+      return res.status(404).json({ message: "No tickets found." });
+    }
+    const tickets = await Ticket.findAll({
+      where: { id: { [Op.in]: assignedTicketIds } },
+      include: [
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: TicketAssignment,
+          as: 'assignments',
+          include: [
+            {
+              model: User,
+              as: 'assignee',
+              attributes: ['id', 'name', 'email']
+            }
+          ]
+        },
+        {
+          model: RequesterDetails,
+          as: 'RequesterDetail'
+        }
+      ],
+      order: [["created_at", "DESC"]]
+    });
+    res.status(200).json({
+      message: "Ever assigned tickets fetched successfully",
+      totalTickets: tickets.length,
+      tickets
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getEverAssignedTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const assignedTicketAssignments = await TicketAssignment.findAll({
+      where: { assigned_to_id: userId },
+      attributes: ['ticket_id'],
+      group: ['ticket_id'],
+    });
+    const assignedTicketIds = assignedTicketAssignments.map(a => a.ticket_id);
+    res.status(200).json({ count: assignedTicketIds.length });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getAllTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: "User ID is required" });
+    const user = await User.findOne({ where: { id: userId }, attributes: ["id", "role"] });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    let count;
+    if (user.role === "super-admin") {
+      count = await Ticket.count();
+    } else {
+      count = await Ticket.count({ where: { userId } });
+    }
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   checkTicketSlaBreach,
   escalateAndUpdateTicketOnSlaBreach,
@@ -3054,4 +3156,7 @@ module.exports = {
   getOverdueTicketsCount,
   getOverdueTicketsList,
   getEscalatedTicketsForUser,
+  getEverAssignedTickets,
+  getEverAssignedTicketsCount,
+  getAllTicketsCount,
 };
