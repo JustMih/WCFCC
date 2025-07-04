@@ -33,6 +33,11 @@ const getAllCoordinatorTickets = async (req, res) => {
           model: User,
           as: 'creator',
           attributes: ['id', 'name', 'username', 'email']
+        },
+        {
+          model: User,
+          as: 'ratedByUser',
+          attributes: ['id', 'name', 'email']
         }
       ]
     });
@@ -515,6 +520,11 @@ const getTicketsByCategoryAndType = async (req, res) => {
         model: User,
         as: "creator",
         attributes: ["id", "name", "username", "email"]
+      },
+      {
+        model: User,
+        as: "ratedByUser",
+        attributes: ["id", "name", "email"]
       }
     ];
 

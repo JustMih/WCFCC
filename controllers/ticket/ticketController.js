@@ -1068,6 +1068,8 @@ const getOpenTickets = async (req, res) => {
           action: a.action,
           created_at: a.created_at
         }));
+      // Debug: Log the RequesterDetail for each ticket
+      console.log("OPEN DEBUG - Ticket ID:", t.id, "RequesterDetail:", t.RequesterDetail);
       return {
         ...t,
         created_by: user.name
@@ -1175,6 +1177,8 @@ const getAssignedTickets = async (req, res) => {
           action: a.action,
           created_at: a.created_at
         }));
+      // Debug: Log the RequesterDetail for each ticket
+      console.log("ASSIGNED DEBUG - Ticket ID:", t.id, "RequesterDetail:", t.RequesterDetail);
       return {
         ...t,
         created_by: user.name
@@ -1295,6 +1299,8 @@ const getInprogressTickets = async (req, res) => {
           action: a.action,
           created_at: a.created_at
         }));
+      // Debug: Log the RequesterDetail for each ticket
+      console.log("INPROGRESS DEBUG - Ticket ID:", t.id, "RequesterDetail:", t.RequesterDetail);
       return {
         ...t,
         created_by: user.name
@@ -1410,6 +1416,8 @@ const getCarriedForwardTickets = async (req, res) => {
           action: a.action,
           created_at: a.created_at
         }));
+      // Debug: Log the RequesterDetail for each ticket
+      console.log("CARRIED FORWARD DEBUG - Ticket ID:", t.id, "RequesterDetail:", t.RequesterDetail);
       return {
         ...t,
         created_by: user.name
@@ -1547,6 +1555,8 @@ const getClosedTickets = async (req, res) => {
           action: a.action,
           created_at: a.created_at
         }));
+      // Debug: Log the RequesterDetail for each ticket
+      console.log("CLOSED DEBUG - Ticket ID:", t.id, "RequesterDetail:", t.RequesterDetail);
       return {
         ...t,
         created_by: user.name
@@ -2064,11 +2074,9 @@ const getTicketById = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found" });
     }
-
     // Debug: Log the RequesterDetail association
     console.log("RequesterDetail", ticket?.RequesterDetail);
-
-    return res.status(200).json({ ticket });
+    return res.status(200).json({ ticket: ticket.toJSON() });
   } catch (error) {
     console.error("Error fetching ticket:", error);
     return res
