@@ -3,6 +3,7 @@ const User = require("../../models/User");
 const { Op } = require("sequelize");
 const Ticket = require("../../models/Ticket");
 const { sendEmail } = require("../../services/emailService");
+const { Sequelize } = require("sequelize");
 
 // Create a notification
 const createNotification = async (req, res) => {
@@ -268,11 +269,33 @@ const getNotificationsByTicketId = async (req, res) => {
   }
 };
 
+// Get count of unique tickets the user was notified about
+const getNotifiedTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+    // Find all notifications for this user, group by ticket_id
+    const notifiedTickets = await Notification.findAll({
+      where: { recipient_id: userId },
+      attributes: [[Sequelize.fn('DISTINCT', Sequelize.col('ticket_id')), 'ticket_id']],
+    });
+    res.status(200).json({
+      notifiedTicketCount: notifiedTickets.length,
+      ticketIds: notifiedTickets.map(n => n.ticket_id),
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   createNotification,
   listNotifications,
   markAsRead,
   getUnreadCount,
   getNotificationById,
-  getNotificationsByTicketId
+  getNotificationsByTicketId,
+  getNotifiedTicketsCount,
 };

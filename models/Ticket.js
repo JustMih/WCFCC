@@ -67,7 +67,7 @@ const Ticket = sequelize.define(
     status: {
       type: DataTypes.ENUM(
         'Open', 'Assigned', 'Carried Forward', 'In Progress',
-        'Returned', 'Closed', 'Pending Review', 'Pending Approval'
+        'Returned', 'Closed', 'Pending Review', 'Pending Approval', 'Escalated'
       ),
       defaultValue: 'Open'
     },
@@ -141,6 +141,7 @@ Ticket.associate = (models) => {
 
   Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
   Ticket.hasMany(models.Notification, { foreignKey: 'ticket_id', as: 'notifications' });
+  Ticket.hasOne(models.RequesterDetails, { foreignKey: 'ticketId', as: 'RequesterDetail' });
 };
 
 module.exports = Ticket;
