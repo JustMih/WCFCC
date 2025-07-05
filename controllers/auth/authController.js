@@ -31,64 +31,11 @@ const registerSuperAdmin = async () => {
   }
 };
 
-<<<<<<< HEAD
 const authenticateActiveDirectory = async (username, password) => {
-  const url = "ldap://10.0.7.78";
-  const baseDN = "dc=ttcl,dc=co,dc=tz";
-  const bindDN = `TTCLHQ\\${username}`;
+  const url = "ldap://192.168.1.15";
+  const baseDN = "dc=wcf,dc=go,dc=tz";
+  const bindDN = `WCF\\${username}`;
   const client = new Client({ url });
-=======
-// const authenticateActiveDirectory = async (username, password) => {
-//   const url = "ldap://10.0.7.78";
-//   const baseDN = "dc=ttcl,dc=co,dc=tz";
-//   const bindDN = `TTCLHQ\\${username}`;
-//   const client = new Client({ url });
-
-//   try {
-//     // LDAP bind (authenticate user)
-//     await client.bind(bindDN, password);
-//     console.log(`LDAP bind successful for ${username}`);
-
-//     // LDAP search for user
-//     const { searchEntries } = await client.search(baseDN, {
-//       scope: "sub",
-//       filter: `(sAMAccountName=${username})`,
-//       attributes: ["employeeID", "mail"],
-//     });
-
-//     if (searchEntries.length === 0) {
-//       throw new Error("User not found in LDAP.");
-//     }
-
-//     const ldapUser = searchEntries[0];
-//     return ldapUser; // Successfully found user in Active Directory
-//   } catch (error) {
-//     console.error("LDAP error:", error);
-//     throw new Error("Failed to authenticate user in Active Directory.");
-//   } finally {
-//     await client.unbind();
-//   }
-// };
-
-const authenticateActiveDirectory = async (username, password) => {
-  // Fetch environment variables
-  const url = `ldap://${process.env.LDAP_HOST}:${process.env.LDAP_PORT}`;
-  const baseDN = process.env.LDAP_BASE_DN;
-  const bindDN = `${process.env.LDAP_USERNAME}\\${username}`;
-  const ldapPassword = process.env.LDAP_PASSWORD; // If needed, but not used directly here
-  const timeout = process.env.LDAP_TIMEOUT || 5;
-  const useSSL = process.env.LDAP_SSL === "true";
-  const useTLS = process.env.LDAP_TLS === "true";
-  const useSASL = process.env.LDAP_SASL === "true";
-
-  const client = new Client({
-    url,
-    timeout: timeout * 1000, // Convert seconds to milliseconds
-    tlsOptions: useTLS ? { rejectUnauthorized: false } : null, // Optional TLS configuration
-    sasl: useSASL, // Optional SASL configuration
-    bindDN, // This will authenticate the client with a bind DN
-  });
->>>>>>> e8ced1fa9ea45a3ec7de5af6e40fc320f60cc032
 
   try {
     // LDAP bind (authenticate user)

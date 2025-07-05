@@ -1,4 +1,4 @@
-const VoiceNote = require('../models/VoiceNote');
+// const VoiceNote = require('../models/VoiceNote');
 const User = require('../models/User');
 const VoiceNoteAssignmentTracker = require('../models/VoiceNoteAssignmentTracker');
 const sequelize = require('../config/mysql_connection'); // Ensure Sequelize instance is available
