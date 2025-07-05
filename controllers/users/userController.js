@@ -1,9 +1,12 @@
 const User = require("../../models/User");
 const AgentLoginLog = require("../../models/agent_activity_logs");
 const ChatMassage = require("../../models/chart_message");
+const Pjsip_Endpoints = require("../../models/pjsip_endpoints");
 const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
+const { Sequelize } = require("sequelize");
+const sequelize = require("../../config/mysql_connection");
 
 const createUser = async (req, res) => {
   try {
@@ -103,21 +106,6 @@ const getAdmin = async (req, res) => {
   }
 };
 
-// get users by role
-// "attendee",
-// "coordinator",
-// "focal-person",
-// "director-general",
-// "directorate of operations",
-// "directorate of assessment services",
-// "directorate of finance, planning and investment",
-// "legal unit",
-// "ict unit",
-// "actuarial statistics and risk management",
-// "public relation unit",
-// "procurement management unit",
-// "human resource management and attachment unit"
-
 const getUsersByRole = async (req, res) => {
   const { role } = req.params;
   try {
@@ -187,7 +175,7 @@ const unReadMessage = async (req, res) => {
     console.error("Error fetching unread messages count:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
-}
+};
 
 // function to get sender and receiver unread messages count
 const getSenderReceiverUnreadCount = async (req, res) => {
@@ -214,7 +202,10 @@ const getSenderReceiverUnreadCount = async (req, res) => {
       receiverUnreadCount,
     });
   } catch (error) {
-    console.error("Error fetching sender and receiver unread messages count:", error);
+    console.error(
+      "Error fetching sender and receiver unread messages count:",
+      error
+    );
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -263,8 +254,6 @@ const updateIsRead = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
-
 
 const getAgentOnline = async (req, res) => {
   try {
@@ -449,6 +438,63 @@ const deactivateUser = async (req, res) => {
   }
 };
 
+// const updateUser = async (req, res) => {
+//   const userId = req.params.id;
+//   const { name, email, password, role, isActive, extension } = req.body;
+
+//   try {
+//     // Find the user by ID
+//     const user = await User.findByPk(userId);
+//     if (!user) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     // Validate input fields (you can extend this logic as needed)
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
+
+//     // Check if email is being updated and ensure it's unique
+//     if (email && email !== user.email) {
+//       const existingUser = await User.findOne({ where: { email } });
+//       if (existingUser) {
+//         return res.status(400).json({ message: "Email already in use" });
+//       }
+//       user.email = email;
+//     }
+
+//     // Update other fields if provided
+//     if (name) user.name = name;
+//     if (password) {
+//       // Hash new password if provided
+//       const hashedPassword = await bcrypt.hash(password, 10);
+//       user.password = hashedPassword;
+//     }
+//     if (role) user.role = role; // Optional: Only allow certain roles for admins
+//     if (extension) user.extension = extension;
+//     if (isActive) user.isActive = isActive;
+
+//     // Save updated user to the database
+//     await user.save();
+
+//     // Return the updated user data
+//     res.status(200).json({
+//       message: "User updated successfully",
+//       user: {
+//         id: user.id,
+//         name: user.name,
+//         email: user.email,
+//         extension: user.extension,
+//         role: user.role,
+//         isActive: user.isActive,
+//       },
+//     });
+//   } catch (error) {
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
 const updateUser = async (req, res) => {
   const userId = req.params.id;
   const { name, email, password, role, isActive, extension } = req.body;
@@ -486,6 +532,42 @@ const updateUser = async (req, res) => {
     if (extension) user.extension = extension;
     if (isActive) user.isActive = isActive;
 
+    // If role is 'agent', handle extension logic
+    if (role === "agent" && extension) {
+      // Check if extension exists in the pjsip_endpoints table
+      const [existingEndpoint] = await sequelize.query(
+        `SELECT * FROM pjsip_endpoints WHERE id = :extension`,
+        {
+          replacements: { extension },
+          type: Sequelize.QueryTypes.SELECT,
+        }
+      );
+
+      if (!existingEndpoint) {
+        // Insert new record in pjsip_endpoints if extension does not exist
+        await sequelize.query(
+          `INSERT INTO pjsip_endpoints (
+            id, transport, aors, auth, context, disallow, allow, direct_media, 
+            from_domain, qualify_frequency, media_address, dtmf_mode, force_rport, 
+            comedia, rtp_symmetric, createdAt, updatedAt, trust_id_inbound, 
+            ignore_183_without_sdp, inband_progress, early_media, rewrite_contact, 
+            insecure, \`match\`, trust_id_outbound, media_encryption, 
+            dtls_auto_generate_cert, webrtc, ice_support, force_avp, rtcp_mux, 
+            user_id, mailboxes
+          ) VALUES (
+            :extension, "transport-wss", :extension, :extension, "internal", "all", "ulaw", 
+            "no", NULL, 60, "10.7.8.194", "auto", "yes", "yes", "yes", NOW(), NOW(), 
+            NULL, NULL, NULL, NULL, "yes", Null, NULL, NULL, "yes", "dtls", "yes", "yes", "yes", "yes", 
+            :userId, NULL
+          )`,
+          {
+            replacements: { extension, userId },
+            type: Sequelize.QueryTypes.INSERT,
+          }
+        );
+      }
+    }
+
     // Save updated user to the database
     await user.save();
 
@@ -513,7 +595,15 @@ const updateUserStatus = async (req, res) => {
 
   try {
     // Check if the status value is valid (you can adjust this validation as per your requirements)
-    const validStatuses = ["online", "offline", "idle", "pause", "active", "force-pause", "mission"];
+    const validStatuses = [
+      "online",
+      "offline",
+      "idle",
+      "pause",
+      "active",
+      "force-pause",
+      "mission",
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
@@ -527,7 +617,6 @@ const updateUserStatus = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
 
 const resetUserPassword = async (req, res) => {
   const userId = req.params.id;

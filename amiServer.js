@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 
 // ✅ Connect to Asterisk AMI
-const ami = new AsteriskManager(5038, '10.52.0.19', 'admin', '@Ttcl123', true);
+const ami = new AsteriskManager(5038, '192.168.1.170', 'admin', '@Ttcl123', true);
 ami.keepConnected();
 
 ami.on('connect', () => {
@@ -141,17 +141,10 @@ setInterval(() => {
 app.get('/api/call-summary', async (req, res) => {
   try {
     const [rows] = await db.execute(`
-<<<<<<< HEAD
-      SELECT linkedid, uniqueid, eventtype, eventtime, cid_num, cid_dnid, channame, exten
-      FROM cel
-      WHERE eventtime >= NOW() - INTERVAL 10 MINUTE
-      ORDER BY eventtime DESC
-=======
       SELECT linkedid, uniqueid, eventtype, eventtime, cid_num, cid_dnid, channame
       FROM cel
       WHERE eventtime >= NOW() - INTERVAL 2 MINUTE
       ORDER BY linkedid, eventtime ASC
->>>>>>> bf570ba3a94e4c0adc5dc993967073528fe145b6
     `);
 
     const calls = {};
