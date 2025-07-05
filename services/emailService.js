@@ -42,26 +42,14 @@ const sendEmail = async ({ to, subject, htmlBody }) => {
   };
 
   try {
-    // Try primary transporter first
-    console.log('Attempting to send email using primary transporter...');
+    // Use only the primary transporter (WCF settings)
+    console.log('Attempting to send email using WCF transporter...');
     const info = await primaryTransporter.sendMail(mailOptions);
-    console.log('Email sent successfully with primary transporter:', info.messageId);
+    console.log('Email sent successfully with WCF transporter:', info.messageId);
     return info;
   } catch (primaryError) {
-    console.error('Primary transporter failed:', primaryError.message);
-    
-    try {
-      // Fallback to secondary transporter
-      console.log('Attempting to send email using fallback transporter...');
-      const fallbackInfo = await fallbackTransporter.sendMail(mailOptions);
-      console.log('Email sent successfully with fallback transporter:', fallbackInfo.messageId);
-      return fallbackInfo;
-    } catch (fallbackError) {
-      console.error('Fallback transporter also failed:', fallbackError.message);
-      console.error('Primary error:', primaryError);
-      console.error('Fallback error:', fallbackError);
-      throw new Error(`Email sending failed with both transporters. Primary: ${primaryError.message}, Fallback: ${fallbackError.message}`);
-    }
+    console.error('WCF transporter failed:', primaryError.message);
+    throw new Error(`Email sending failed with WCF transporter: ${primaryError.message}`);
   }
 };
 
