@@ -5,9 +5,9 @@ require("dotenv").config();
 const sequelize = new Sequelize(
   process.env.DB_NAME || "asterisk",
   process.env.DB_USER || "asterisk",
-  process.env.DB_PASS || "@Ttcl123",
+  process.env.DB_PASS || "Wcf@1234",
   {
-    host: process.env.DB_HOST || "127.0.0.1",
+    host: process.env.DB_HOST || "192.168.1.170",
     port: process.env.DB_PORT || 3306,
     dialect: "mysql",
     logging: false,
