@@ -147,13 +147,28 @@ io.on("connection", (socket) => {
     try {
       await ChatMassage.create({ senderId, receiverId, message });
 
-      [receiverId, senderId].forEach(id => {
+      [receiverId, senderId].forEach((id) => {
         if (users[id]) {
-          io.to(users[id]).emit("private_message", { senderId, receiverId, message });
+          io.to(users[id]).emit("private_message", {
+            senderId,
+            receiverId,
+            message,
+          });
         }
       });
     } catch (error) {
       console.error("❌ Failed to store or emit message:", error);
+    }
+  });
+
+  // Mark a message as read when received
+  socket.on("messageRead", async (messageId) => {
+    try {
+      // Update the message as read in the database
+      await ChatMassage.update({ isRead: true }, { where: { id: messageId } });
+      console.log(`Message ${messageId} marked as read`);
+    } catch (error) {
+      console.error("❌ Error marking message as read:", error);
     }
   });
 
