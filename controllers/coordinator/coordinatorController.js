@@ -13,15 +13,17 @@ const getAllCoordinatorTickets = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
+        assigned_to_id: req.user.userId,
         category: {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         },
         [Op.and]: [
           {
             [Op.or]: [
-              { status: null },
+              { status: '' },
               { status: 'Open' },
-              { status: 'Returned' }
+              { status: 'Returned' },
+              { status: 'Assigned' }
             ]
           },
           // { converted_to: null },
@@ -36,7 +38,7 @@ const getAllCoordinatorTickets = async (req, res) => {
         },
         {
           model: User,
-          as: 'ratedByUser',
+          as: 'ratedBy',
           attributes: ['id', 'name', 'email']
         }
       ]
@@ -523,7 +525,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
       },
       {
         model: User,
-        as: "ratedByUser",
+        as: "ratedBy",
         attributes: ["id", "name", "email"]
       }
     ];
