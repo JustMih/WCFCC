@@ -4,10 +4,12 @@ const sequelize = require('../config/mysql_connection');
 const VoiceNoteAssignmentTracker = sequelize.define('VoiceNoteAssignmentTracker', {
   id: {
     type: DataTypes.INTEGER,
-    primaryKey: true
+    primaryKey: true,
+    autoIncrement: true, // Add this if `id` is auto-incremented in the DB
+    allowNull: false
   },
   last_assigned_agent_id: {
-    type: DataTypes.CHAR(36),
+    type: DataTypes.STRING(36), // STRING is generally preferred over CHAR in Sequelize unless CHAR is required
     allowNull: true
   }
 }, {

@@ -28,4 +28,6 @@ const MissedCall = sequelize.define("MissedCall", {
   timestamps: true, // adds createdAt and updatedAt
 });
 
+
+
 module.exports = MissedCall;
