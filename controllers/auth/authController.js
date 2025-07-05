@@ -32,8 +32,6 @@ const registerSuperAdmin = async () => {
 };
 
 const authenticateActiveDirectory = async (username, password) => {
-  // const url = "ldap://10.0.7.78";
-  // const bindDN = `TTCLHQ\\${username}`;
   const url = "ldap://192.168.1.15";
   const baseDN = "dc=wcf,dc=go,dc=tz";
   const bindDN = `WCF\\${username}`;
