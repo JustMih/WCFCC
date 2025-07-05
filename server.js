@@ -37,6 +37,7 @@ const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
+const baseAudioPath = process.env.audio_recorded_path || "/home/wcf/WCFCC/";
 
 require('./cron/escalationJob');
 
@@ -78,14 +79,14 @@ app.get("/api/voice-notes/:id/audio", async (req, res) => {
 });
 
 // Static folders for voice and recorded audio
-app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
+app.use("/voice", express.static(`${baseAudioPath}voice`, {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.wav')) {
       res.set('Content-Type', 'audio/wav');
     }
   }
 }));
-app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
+app.use("/recordings", express.static(`${baseAudioPath}recorded`));
 
 /* ------------------------------ API ROUTES ------------------------------ */
 // Static ticket attachment files
