@@ -11,13 +11,13 @@ app.use(cors());
 
 const ami = new AsteriskManager(5038, '192.168.1.170', 'admin', '@Ttcl123', true);
 
-const ami = new AsteriskManager(
-  5038,
-  "10.52.0.19",
-  "admin",
-  "@Ttcl123",
-  true
-);
+// const ami = new AsteriskManager(
+//   5038,
+//   "10.52.0.19",
+//   "admin",
+//   "@Ttcl123",
+//   true
+// );
 ami.keepConnected();
 
 ami.on('connect', () => {
