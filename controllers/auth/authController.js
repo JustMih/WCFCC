@@ -32,9 +32,11 @@ const registerSuperAdmin = async () => {
 };
 
 const authenticateActiveDirectory = async (username, password) => {
-  const url = "ldap://10.0.7.78";
-  const baseDN = "dc=ttcl,dc=co,dc=tz";
-  const bindDN = `TTCLHQ\\${username}`;
+  // const url = "ldap://10.0.7.78";
+  // const bindDN = `TTCLHQ\\${username}`;
+  const url = "ldap://192.168.1.15";
+  const baseDN = "dc=wcf,dc=go,dc=tz";
+  const bindDN = `WCF\\${username}`;
   const client = new Client({ url });
 
   try {
@@ -87,19 +89,30 @@ const login = async (req, res) => {
       if (!isMatch) {
         return res.status(400).json({ message: "Invalid password" });
       }
+    } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
+      // If username is an email, authenticate using DB only
+      user = await User.findOne({
+        where: { email: username },
+      });
+
+      if (!user) {
+        return res.status(400).json({ message: "Authentication failed. User not found." });
+      }
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(400).json({ message: "Authentication failed. Invalid password." });
+      }
+      if (user.isActive === false) {
+        return res.status(400).json({
+          message:
+            "Your account is inactive. Please wait for the super admin to activate it.",
+        });
+      }
     } else {
-      // Step 2: Try LDAP authentication first
-      let ldapSuccess = false;
+      // If not an email, authenticate using LDAP only
       try {
         await authenticateActiveDirectory(username, password);
-        ldapSuccess = true;
-      } catch (ldapError) {
-        // LDAP failed, fallback to local DB authentication
-        // console.log('LDAP failed, trying local DB:', ldapError.message);
-      }
-
-      if (ldapSuccess) {
-        // Step 3: Check if user exists in the local database
+        // LDAP success, now check or create user in DB
         user = await User.findOne({
           where: { email: `${username}@wcf.go.tz` },
         });
@@ -107,44 +120,24 @@ const login = async (req, res) => {
         if (!user) {
           // If user doesn't exist, create a new user with inactive status
           user = await User.create({
-            name: username, // Set name as the username from input
-            email: `${username}@wcf.go.tz`, // Set email as username@wcf.go.tz
-            password: "wcf12345", // Password will be updated later by the super admin
+            name: username,
+            email: `${username}@wcf.go.tz`,
+            password: "wcf12345",
             extension: null,
             role: "agent",
-            isActive: false, // Set as inactive initially
+            isActive: false,
           });
           console.log(`User ${username} created with inactive status.`);
         }
 
-        // Step 4: Check if the account is active
         if (user.isActive === false) {
           return res.status(400).json({
             message:
               "Your account is inactive. Please wait for the super admin to activate it.",
           });
         }
-      } else {
-        // LDAP failed, fallback to local DB authentication
-        user = await User.findOne({
-          where: { username },
-        });
-        if (!user) {
-          user = await User.findOne({ where: { email: username } });
-        }
-        if (!user) {
-          return res.status(400).json({ message: "Authentication failed. User not found." });
-        }
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-          return res.status(400).json({ message: "Authentication failed. Invalid password." });
-        }
-        if (user.isActive === false) {
-          return res.status(400).json({
-            message:
-              "Your account is inactive. Please wait for the super admin to activate it.",
-          });
-        }
+      } catch (ldapError) {
+        return res.status(400).json({ message: "LDAP authentication failed." });
       }
     }
 
@@ -182,7 +175,14 @@ const login = async (req, res) => {
         unit_section: user.unit_section,
         extension: user.extension,
       },
+      credentials: {
+        username: username,
+        password: password
+      }
     });
+    
+    // Debug log to verify credentials are being sent
+    console.log("Login response includes credentials for user:", username);
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ message: "Server error", error: error.message });

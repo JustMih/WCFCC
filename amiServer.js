@@ -7,7 +7,11 @@ const app = express();
 app.use(cors());
 
 // ✅ Connect to Asterisk AMI
+<<<<<<< HEAD
 const ami = new AsteriskManager(5038, 'localhost', 'admin', '@Ttcl123', true);
+=======
+const ami = new AsteriskManager(5038, '192.168.1.170', 'admin', '@Ttcl123', true);
+>>>>>>> 2e5641cc1ab0d73213dbe8aecab0a5378483c65a
 ami.keepConnected();
 
 ami.on('connect', () => {

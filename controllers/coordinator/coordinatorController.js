@@ -13,15 +13,17 @@ const getAllCoordinatorTickets = async (req, res) => {
   try {
     const complaints = await Ticket.findAll({
       where: {
+        assigned_to_id: req.user.userId,
         category: {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         },
         [Op.and]: [
           {
             [Op.or]: [
-              { status: null },
+              { status: '' },
               { status: 'Open' },
-              { status: 'Returned' }
+              { status: 'Returned' },
+              { status: 'Assigned' }
             ]
           },
           // { converted_to: null },
@@ -33,6 +35,11 @@ const getAllCoordinatorTickets = async (req, res) => {
           model: User,
           as: 'creator',
           attributes: ['id', 'name', 'username', 'email']
+        },
+        {
+          model: User,
+          as: 'ratedBy',
+          attributes: ['id', 'name', 'email']
         }
       ]
     });
@@ -385,16 +392,13 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       }
     });
 
-    // Escalated Tickets: older than 10 days
+    // Escalated Tickets: 
     const escalatedTicketsCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
-          { converted_to: null },
-          { responsible_unit_name: null },
-          { complaint_type: { [Op.is]: null } },
-          { created_at: { [Op.lt]: threeDaysAgo } }
+          { [Op.or]: [{ status: '' }, { status: "Escalated" }] },
+        
         ]
       }
     });
@@ -518,6 +522,11 @@ const getTicketsByCategoryAndType = async (req, res) => {
         model: User,
         as: "creator",
         attributes: ["id", "name", "username", "email"]
+      },
+      {
+        model: User,
+        as: "ratedBy",
+        attributes: ["id", "name", "email"]
       }
     ];
 
@@ -538,8 +547,13 @@ const getTicketsByCategoryAndType = async (req, res) => {
             };
             break;
           case "escalated":
-            whereClause = {  created_at: { [Op.gte]: threeDaysAgo } ,
-            category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] }, };
+            whereClause = {
+              category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+              [Op.or]: [
+                { status: 'Escalated' },
+                { status: '' }
+              ]
+            };
             break;
         }
         break;
@@ -815,7 +829,7 @@ const getClosedTickets = async (req, res) => {
 const getOverdueTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, "Open", true);
+    const { tickets, user } = await getTicketsByStatus(userId, "Escalated", "", true);
 
     if (tickets.length === 0) {
       return res.status(404).json({ message: "No overdue tickets found" });
@@ -859,22 +873,15 @@ const getTicketsByStatus = async (req, res) => {
           { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
         ];
         break;
-      case "escalated":
-        whereClause.category = {
-          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
-        };
-        whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
-          { converted_to: { [Op.is]: null } },
-          { responsible_unit_name: { [Op.is]: null } },
-          { complaint_type: { [Op.is]: null } },
-          {
-            created_at: {
-              [Op.lt]: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // > 10 days
-            }
-          }
-        ];
-        break;
+        case "escalated":
+          whereClause = {
+            category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
+            [Op.or]: [
+              { status: 'Escalated' },
+              { status: '' }
+            ]
+          };
+          break;
       case "complaints":
         whereClause.category = { [Op.in]: ["Complaint"] };
         whereClause[Op.and] = [
@@ -898,7 +905,7 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "" }, { status: "Open" }, {status:"Assigned"},{ status: "Returned" }] },
           { responsible_unit_name:  { [Op.like]: "%Directorate%" } },
           
         ];
@@ -908,7 +915,7 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "" }, { status: "Open" },  {status:"Assigned"},{ status: "Returned" }] },
           { responsible_unit_name: { [Op.like]: "%unit%" } },
         ];
         break;

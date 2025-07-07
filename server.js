@@ -37,13 +37,18 @@ const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
+// const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+const baseAudioPath =
+  process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+
+require('./cron/escalationJob');
 
 require('./amiServer'); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());
 app.use(cors({
   origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
@@ -76,14 +81,14 @@ app.get("/api/voice-notes/:id/audio", async (req, res) => {
 });
 
 // Static folders for voice and recorded audio
-app.use("/voice", express.static("/opt/wcf_call_center_backend/voice", {
+app.use("/voice", express.static(`${baseAudioPath}voice`, {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.wav')) {
       res.set('Content-Type', 'audio/wav');
     }
   }
 }));
-app.use('/recordings', express.static('/opt/wcf_call_center_backend/recorded'));
+app.use("/recordings", express.static(`${baseAudioPath}recorded`));
 
 /* ------------------------------ API ROUTES ------------------------------ */
 // Static ticket attachment files
