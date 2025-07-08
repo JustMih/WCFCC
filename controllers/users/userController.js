@@ -255,6 +255,24 @@ const updateIsRead = async (req, res) => {
   }
 };
 
+const getOnlineUser = async (req, res) => {
+  try {
+    const onlineUser = await User.findAll({
+      where: {
+        role: {
+          [Op.in]: ["agent", "supervisor"], // Check if role is either 'agent' or 'supervisor'
+        },
+        status: "online", // Check if status is 'online'
+      },
+    });
+
+    res.status(200).json({ onlineUser });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
 const getAgentOnline = async (req, res) => {
   try {
     const agents = await User.findAll({
@@ -675,4 +693,5 @@ module.exports = {
   unReadMessage,
   getSenderReceiverUnreadCount,
   updateIsRead,
+  getOnlineUser,
 };
