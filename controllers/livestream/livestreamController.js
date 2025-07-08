@@ -45,10 +45,17 @@ const getAllLiveCalls = async (req, res) => {
   try {
     const events = await CEL.findAll({
       where: {
-        eventtype: ['CHAN_START', 'ANSWER', 'HANGUP', 'APP_START', 'APP_END'],
-        eventtime: { [Op.gte]: moment().subtract(5, 'minutes').toDate() }
+        eventtype: [
+          "CHAN_START",
+          "ANSWER",
+          "HANGUP",
+          "APP_START",
+          "APP_END",
+          "BRIDGE_ENTER",
+        ],
+        eventtime: { [Op.gte]: moment().subtract(5, "minutes").toDate() },
       },
-      order: [['eventtime', 'ASC']]
+      order: [["eventtime", "ASC"]],
     });
 
     const calls = {};
@@ -77,43 +84,52 @@ const getAllLiveCalls = async (req, res) => {
       const c = calls[key];
 
       switch (row.eventtype) {
-        case 'CHAN_START':
+        case "CHAN_START":
           if (!c.call_start) {
             c.call_start = row.eventtime;
             c.queue_entry_time = row.eventtime;
             console.log(`📞 CHAN_START: ${key} at ${row.eventtime}`);
           }
-          c.status = 'calling';
+          c.status = "calling";
           break;
 
-        case 'ANSWER':
+        case "ANSWER":
           if (!c.call_answered) {
             c.call_answered = row.eventtime;
-            c.status = 'active';
+            c.status = "calling";
             console.log(`✅ ANSWER: ${key} at ${row.eventtime}`);
           }
           break;
 
-        case 'HANGUP':
+        case "BRIDGE_ENTER":
+          // If call has not been answered and Bridge Enter event occurs, mark it as answered and active
+          // if (!c.call_answered) {
+            // c.call_answered = row.eventtime; // Mark call as answered
+            c.status = "active"; // Set status to active since the call is bridged
+            console.log(`🔗 BRIDGE_ENTER: ${key} at ${row.eventtime}`);
+          // }
+          break;
+
+        case "HANGUP":
           c.call_end = row.eventtime;
 
           if (!c.call_answered && c.queue_entry_time) {
-            c.status = 'lost';
+            c.status = "lost";
           } else if (!c.call_answered && !c.queue_entry_time) {
-            c.status = 'dropped';
+            c.status = "dropped";
           } else {
-            c.status = 'ended';
+            c.status = "ended";
           }
 
           console.log(`📴 HANGUP: ${key} => ${c.status} at ${row.eventtime}`);
           break;
 
-        case 'APP_START':
-          if (row.appname === 'Queue') {
+        case "APP_START":
+          if (row.appname === "Queue") {
             c.queue_entry_time = row.eventtime;
             console.log(`📥 Queue Entered: ${key} at ${row.eventtime}`);
           }
-          if (row.appname === 'VoiceMail') {
+          if (row.appname === "VoiceMail") {
             c.voicemail_path = `/recorded/voicemails/${key}.wav`;
             console.log(`🗣️ Voicemail triggered for ${key}`);
           }

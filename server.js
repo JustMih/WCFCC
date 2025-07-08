@@ -37,7 +37,9 @@ const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require('./routes/recordedAudioRoutes');
 const reportsRoutes = require('./routes/reports.routes');
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
-const baseAudioPath = process.env.audio_recorded_path || "/home/wcf/WCFCC/";
+// const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+const baseAudioPath =
+  process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
 
 require('./cron/escalationJob');
 
