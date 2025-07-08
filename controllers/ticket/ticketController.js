@@ -549,7 +549,13 @@ const createTicket = async (req, res) => {
       employerStatus,
       employerAllocatedStaffId,
       employerAllocatedStaffName,
-      employerAllocatedStaffUsername
+      employerAllocatedStaffUsername,
+      // New fields for representative
+      representative_name,
+      representative_phone,
+      representative_email,
+      representative_address,
+      representative_relationship
     } = req.body;
 
     // Initialize finalSection before any use
@@ -726,7 +732,12 @@ const createTicket = async (req, res) => {
       assigned_to: assignedUser.id,
       assigned_to_id: assignedUser.id,
       assigned_to_role: assignedUser.role,
-      employerId: ticketEmployerId
+      employerId: ticketEmployerId,
+      representative_name,
+      representative_phone,
+      representative_email,
+      representative_address,
+      representative_relationship
     };
     if (shouldClose) {
       ticketData.resolution_details =
@@ -852,46 +863,65 @@ const createTicket = async (req, res) => {
       ticket_id: newTicket.id,
       sender_id: userId,
       recipient_id: assignedUser.id,
-      message: `New ${category} ticket ${
-        shouldClose ? "(Closed)" : ""
-      } assigned to you: ${subject}`,
+      message: `New ${category} ticket ${shouldClose ? "(Closed)" : ""} assigned to you: ${subject}`,
       channel: channel,
       status: "unread"
     });
     // --- Email to Supervisor if Closed on Creation ---
+    let supervisor = null;
     if (shouldClose) {
-      const supervisor = await User.findOne({
+      supervisor = await User.findOne({
         where: {
           role: "supervisor",
           unit_section: newTicket.section
         },
         attributes: ["id", "name", "email"]
       });
-      if (supervisor && supervisor.email) {
-        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-        const emailBody = `The following ticket has been closed by the agent: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-        try {
-          // await sendEmail({ to: supervisor.email, subject: emailSubject, htmlBody: emailBody });
-          await sendEmail({
-            to: "rehema.said3@ttcl.co.tz",
-            subject: emailSubject,
-            htmlBody: emailHtmlBody
-          });
-        } catch (emailError) {
-          console.error(
-            "Error sending email to supervisor:",
-            emailError.message
-          );
-          emailWarning += " (Warning: Failed to send email to supervisor.)";
-        }
-      }
     }
-    return res.status(201).json({
-      message: `Ticket created successfully${
-        shouldClose ? " and closed" : ""
-      }${emailWarning}`,
+    // --- Respond to client immediately ---
+    res.status(201).json({
+      message: `Ticket created successfully${shouldClose ? " and closed" : ""}${emailWarning}`,
       ticket: newTicket
     });
+    // --- Send email to assignee in background ---
+    if (assignedUser.email) {
+      const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedUser.name},</p>
+        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${newTicket.subject}</li>
+          <li><strong>Category:</strong> ${newTicket.category}</li>
+          <li><strong>Description:</strong> ${newTicket.description}</li>
+          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+          <li><strong>Channel:</strong> ${newTicket.channel}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      sendEmail({
+        to: "rehema.said3@ttcl.co.tz",
+        subject: emailSubject,
+        htmlBody: emailHtmlBody
+      }).catch(emailError => {
+        console.error("Error sending email:", emailError.message);
+      });
+    }
+    // --- Email to Supervisor if Closed on Creation (background) ---
+    if (shouldClose && supervisor && supervisor.email) {
+      const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+      const emailBody = `The following ticket has been closed by the agent: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+      sendEmail({
+        to: "rehema.said3@ttcl.co.tz",
+        subject: emailSubject,
+        htmlBody: emailBody
+      }).catch(emailError => {
+        console.error("Error sending email to supervisor:", emailError.message);
+      });
+    }
+    return;
   } catch (error) {
     console.error("Ticket creation error:", error);
     return res.status(500).json({
