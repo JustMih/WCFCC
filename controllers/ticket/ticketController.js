@@ -2136,8 +2136,10 @@ async function notifyUsersByRole(
   }
   for (const user of users) {
     if (user.email) {
-      // await sendEmail({ to: user.email, subject, htmlBody });
-      await sendEmail({ to: "rehema.said3@ttcl.co.tz", subject, htmlBody });
+      setImmediate(() => {
+        sendEmail({ to: [user.email, "rehema.said3@ttcl.co.tz"], subject, htmlBody })
+          .catch(e => console.error("Error sending notifyUsersByRole email:", e.message));
+      });
     }
     await Notification.create({
       ticket_id: ticketId,
@@ -2220,13 +2222,14 @@ const closeTicket = async (req, res) => {
       { where: { ticket_id: ticketId, status: "Active" } }
     );
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "Ticket closed successfully",
       ticket: {
         ...ticket.toJSON(),
         attended_by_name
       }
     });
+    return;
   } catch (error) {
     console.error("Error closing ticket:", error);
     return res.status(500).json({
@@ -2332,7 +2335,7 @@ const closeCoordinatorTicket = async (req, res) => {
       { where: { ticket_id: ticketId, status: "Active" } }
     );
 
-    return res.status(200).json({
+    res.status(200).json({
       message: `${ticket.category} closed successfully`,
       ticket: {
         ...ticket.toJSON(),
@@ -2340,6 +2343,7 @@ const closeCoordinatorTicket = async (req, res) => {
         resolved_by: coordinator.name
       }
     });
+    return;
   } catch (error) {
     console.error("Error closing ticket:", error);
     return res.status(500).json({
