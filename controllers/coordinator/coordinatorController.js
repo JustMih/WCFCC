@@ -250,16 +250,24 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
-      const unit = await Section.findOne({
+      // Find the Section by name
+      const section = await Section.findOne({
         where: { name: responsible_unit_name },
         transaction
       });
-
-      if (!unit) {
+      if (!section) {
         await transaction.rollback();
-        return res
-          .status(404)
-          .json({ message: `Unit '${responsible_unit_name}' not found` });
+        return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+      }
+
+      // Find the Function for this Section
+      const func = await FunctionModel.findOne({
+        where: { section_id: section.id },
+        transaction
+      });
+      if (!func) {
+        await transaction.rollback();
+        return res.status(404).json({ message: `No function found for unit '${responsible_unit_name}'` });
       }
 
       // Find the head of the unit (head-of-unit role)
@@ -270,16 +278,13 @@ const convertOrForwardTicket = async (req, res) => {
         },
         transaction
       });
-
       if (!unitHead) {
         await transaction.rollback();
-        return res
-          .status(404)
-          .json({ message: `No head-of-unit found for unit '${responsible_unit_name}'` });
+        return res.status(404).json({ message: `No head-of-unit found for unit '${responsible_unit_name}'` });
       }
 
-      ticket.responsible_unit_id = unit.id;
-      ticket.responsible_unit_name = unit.name;
+      ticket.responsible_unit_id = func.id;
+      ticket.responsible_unit_name = section.name;
       ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
       ticket.assigned_to_role = unitHead.role;
