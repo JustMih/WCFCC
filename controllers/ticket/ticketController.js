@@ -206,30 +206,33 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   // Send email notifications to previous and new assignee
   const previousAssignee = await User.findOne({ where: { id: lastAssignment.assigned_to_id } });
   if (previousAssignee && previousAssignee.email) {
-    await sendEmail({
-      // to: previousAssignee.email,
-      to:'rehema.said3@ttcl.co.tz',
-      subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
-      htmlBody: `
-        <p>Dear ${previousAssignee.name},</p>
-        <p>The ticket <b>${ticket.ticket_id || ticket.id}</b> has been escalated from your queue to <b>${nextUser.name}</b> (${nextRole}) due to SLA breach.</p>
-        <p>Please log in to the system for more details.</p>
-      `
+    setImmediate(() => {
+      sendEmail({
+        to: [previousAssignee.email, 'rehema.said3@ttcl.co.tz'],
+        subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
+        htmlBody: `
+          <p>Dear ${previousAssignee.name},</p>
+          <p>The ticket <b>${ticket.ticket_id || ticket.id}</b> has been escalated from your queue to <b>${nextUser.name}</b> (${nextRole}) due to SLA breach.</p>
+          <p>Please log in to the system for more details.</p>
+        `
+      }).catch(e => console.error('Error sending escalation email:', e.message));
     });
   }
   if (nextUser && nextUser.email) {
-    await sendEmail({
-      to: nextUser.email,
-      subject: `New Escalated Ticket Assigned: ${ticket.ticket_id || ticket.id}`,
-      htmlBody: `
-        <p>Dear ${nextUser.name},</p>
-        <p>A ticket <b>${ticket.ticket_id || ticket.id}</b> has been escalated to you for action. Please review and resolve as soon as possible.</p>
-        <p>Details:<br>
-        Subject: ${ticket.subject}<br>
-        Category: ${ticket.category}<br>
-        </p>
-        <p>Please log in to the system for more details.</p>
-      `
+    setImmediate(() => {
+      sendEmail({
+        to: [nextUser.email, 'rehema.said3@ttcl.co.tz'],
+        subject: `New Escalated Ticket Assigned: ${ticket.ticket_id || ticket.id}`,
+        htmlBody: `
+          <p>Dear ${nextUser.name},</p>
+          <p>A ticket <b>${ticket.ticket_id || ticket.id}</b> has been escalated to you for action. Please review and resolve as soon as possible.</p>
+          <p>Details:<br>
+          Subject: ${ticket.subject}<br>
+          Category: ${ticket.category}<br>
+          </p>
+          <p>Please log in to the system for more details.</p>
+        `
+      }).catch(e => console.error('Error sending escalation email:', e.message));
     });
   }
 
@@ -2408,7 +2411,20 @@ const assignTicket = async (req, res) => {
         console.error("Error sending assignment email:", emailError.message);
       }
     }
-    return res.json({ message: "Ticket assigned successfully" });
+    res.json({ message: "Ticket assigned successfully" });
+    // Send assignment email in background
+    if (assignedTo.email) {
+      setImmediate(() => {
+        sendEmail({
+          to: [assignedTo.email, 'rehema.said3@ttcl.co.tz'],
+          subject: emailSubject,
+          htmlBody: emailHtmlBody
+        }).catch(emailError => {
+          console.error("Error sending assignment email:", emailError.message);
+        });
+      });
+    }
+    return;
   } catch (error) {
     console.error("Error assigning ticket:", error);
     return res
