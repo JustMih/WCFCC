@@ -25,6 +25,7 @@ const {
   getSenderReceiverUnreadCount,
   updateIsRead,
   getOnlineUser,
+  getInActiveUser,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -105,6 +106,13 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   getAgentOnline
+);
+
+router.get(
+  "/in-active-user",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  getInActiveUser
 );
 
 router.get(
