@@ -750,17 +750,6 @@ const createTicket = async (req, res) => {
     }
     // --- Ticket Creation ---
     const newTicket = await Ticket.create(ticketData);
-    // Save representative details if applicable
-    if (requester === "Representative") {
-      await RequesterDetails.create({
-        ticketId: newTicket.id,
-        name: requesterName,
-        phoneNumber: requesterPhoneNumber,
-        email: requesterEmail,
-        address: requesterAddress,
-        relationshipToEmployee: relationshipToEmployee
-      });
-    }
     // --- Create AssignedOfficer record for initial assignment ---
     if (!shouldClose) {
       // await AssignedOfficer.create({
@@ -801,7 +790,7 @@ const createTicket = async (req, res) => {
         ticket_id: newTicket.id,
         assigned_by_id: userId,
         assigned_to_id: userId,
-        assigned_to_role: attended_by_role,
+        assigned_to_role: closingUser.role,
         action: "Closed",
         reason: resolution_details || "Ticket closed by agent",
         created_at: new Date()
@@ -814,7 +803,9 @@ const createTicket = async (req, res) => {
       .replace(/^0/, "255");
     const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
 
+    // Only send SMS if ticket is NOT closed at creation
     if (
+      !shouldClose &&
       (requester === "Employee" || requester === "Representative") &&
       isValidTzPhone(smsRecipient)
     ) {
@@ -825,13 +816,13 @@ const createTicket = async (req, res) => {
       } catch (smsError) {
         console.error("Error sending SMS:", smsError.message);
       }
-    } else {
+    } else if (!shouldClose) {
       console.log("Not sending SMS, invalid phone:", smsRecipient);
     }
 
     // --- Email Notification to Assignee ---
     let emailWarning = "";
-    if (assignedUser.email) {
+    if (assignedUser.email && !shouldClose) {
       const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
         <p>Dear ${assignedUser.name},</p>
@@ -870,16 +861,45 @@ const createTicket = async (req, res) => {
       channel: channel,
       status: "unread"
     });
-    // --- Email to Supervisor if Closed on Creation ---
-    let supervisor = null;
+    // --- Email to Head of Unit if Closed on Creation (background) ---
     if (shouldClose) {
-      supervisor = await User.findOne({
+      // Find head-of-unit for the ticket's section/unit
+      let headOfUnit = await User.findOne({
         where: {
-          role: "supervisor",
+          role: "head-of-unit",
           unit_section: newTicket.section
         },
         attributes: ["id", "name", "email"]
       });
+      
+      // Get the agent's name who closed the ticket
+      const closingAgent = await User.findOne({
+        where: { id: userId },
+        attributes: ["id", "name"]
+      });
+      
+      if (headOfUnit && headOfUnit.email) {
+        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        const emailBody = `
+          <p>The following ticket has been closed by agent <strong>${closingAgent ? closingAgent.name : 'Unknown Agent'}</strong>:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${newTicket.subject}</li>
+            <li><strong>Category:</strong> ${newTicket.category}</li>
+            <li><strong>Requester:</strong> ${requesterFullName}</li>
+            <li><strong>Closed by:</strong> ${closingAgent ? closingAgent.name : 'Unknown Agent'}</li>
+            <li><strong>Resolution:</strong> ${resolution_details || description || 'Ticket resolved during creation'}</li>
+          </ul>
+          <p>Please review the resolution details above.</p>
+        `;
+        sendEmail({
+          to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+          subject: emailSubject,
+          htmlBody: emailBody
+        }).catch(emailError => {
+          console.error("Error sending email to head-of-unit:", emailError.message);
+        });
+      }
     }
     // --- Respond to client immediately ---
     res.status(201).json({
@@ -887,7 +907,7 @@ const createTicket = async (req, res) => {
       ticket: newTicket
     });
     // --- Send email to assignee in background ---
-    if (assignedUser.email) {
+    if (assignedUser.email && !shouldClose) {
       const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
         <p>Dear ${assignedUser.name},</p>
@@ -913,15 +933,66 @@ const createTicket = async (req, res) => {
       });
     }
     // --- Email to Supervisor if Closed on Creation (background) ---
-    if (shouldClose && supervisor && supervisor.email) {
-      const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-      const emailBody = `The following ticket has been closed by the agent: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+    if (shouldClose) {
+      // Find head-of-unit for the ticket's section/unit
+      let headOfUnit = await User.findOne({
+        where: {
+          role: "head-of-unit",
+          unit_section: newTicket.section
+        },
+        attributes: ["id", "name", "email"]
+      });
+      
+      // Get the agent's name who closed the ticket
+      const closingAgent = await User.findOne({
+        where: { id: userId },
+        attributes: ["id", "name"]
+      });
+      
+      if (headOfUnit && headOfUnit.email) {
+        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        const emailBody = `
+          <p>The following ticket has been closed by agent <strong>${closingAgent ? closingAgent.name : 'Unknown Agent'}</strong>:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${newTicket.subject}</li>
+            <li><strong>Category:</strong> ${newTicket.category}</li>
+            <li><strong>Requester:</strong> ${requesterFullName}</li>
+            <li><strong>Closed by:</strong> ${closingAgent ? closingAgent.name : 'Unknown Agent'}</li>
+            <li><strong>Resolution:</strong> ${resolution_details || description || 'Ticket resolved during creation'}</li>
+          </ul>
+          <p>Please review the resolution details above.</p>
+        `;
+        sendEmail({
+          to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+          subject: emailSubject,
+          htmlBody: emailBody
+        }).catch(emailError => {
+          console.error("Error sending email to head-of-unit:", emailError.message);
+        });
+      }
+    }
+    // Notify the creator (agent) by email if available
+    if (ticket.creator && ticket.creator.email) {
+      const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      const emailBody = `
+        <p>Dear ${ticket.creator.name},</p>
+        <p>Your ticket has been closed. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Resolution:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+        </ul>
+        <p>Thank you for using the WCF Customer Care System.</p>
+      `;
       sendEmail({
-        to: "rehema.said3@ttcl.co.tz",
+        to: [ticket.creator.email, 'rehema.said3@ttcl.co.tz'],
         subject: emailSubject,
         htmlBody: emailBody
       }).catch(emailError => {
-        console.error("Error sending email to supervisor:", emailError.message);
+        console.error("Error sending closure email to creator:", emailError.message);
       });
     }
     return;
@@ -2155,7 +2226,7 @@ async function notifyUsersByRole(
 const closeTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { resolution_details, userId } = req.body;
+    const { resolution_details, userId, resolution_type } = req.body;
 
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
@@ -2176,10 +2247,19 @@ const closeTicket = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
+    // Handle attachment if uploaded
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`; // Save relative path
+      console.log("Attachment uploaded:", attachmentPath);
+    }
+
     // Update ticket status and add resolution details
     await ticket.update({
       status: "Closed",
       resolution_details: resolution_details || "Ticket closed by agent",
+      resolution_type: resolution_type || "Resolved",
+      attachment_path: attachmentPath, // Save attachment path to ticket
       date_of_resolution: new Date(),
       attended_by_id: userId
     });
@@ -2196,6 +2276,30 @@ const closeTicket = async (req, res) => {
       userId,
       notifyMsg
     );
+
+    // Notify the creator (agent) by email if available
+    if (ticket.creator && ticket.creator.email) {
+      const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      const emailBody = `
+        <p>Dear ${ticket.creator.name},</p>
+        <p>Your ticket has been closed. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Resolution:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+        </ul>
+        <p>Thank you for using the WCF Customer Care System.</p>
+      `;
+      sendEmail({
+        to: ticket.creator.email,
+        subject: emailSubject,
+        htmlBody: emailBody
+      }).catch(emailError => {
+        console.error("Error sending closure email to creator:", emailError.message);
+      });
+    }
 
     // Fetch attended_by user name and role
     let attended_by_name = null;
@@ -2214,6 +2318,7 @@ const closeTicket = async (req, res) => {
       assigned_to_role: attended_by_role,
       action: "Closed",
       reason: resolution_details || "Ticket closed by agent",
+      attachment_path: attachmentPath, // Save attachment path to assignment record
       created_at: new Date()
     });
 
@@ -2226,7 +2331,8 @@ const closeTicket = async (req, res) => {
       message: "Ticket closed successfully",
       ticket: {
         ...ticket.toJSON(),
-        attended_by_name
+        attended_by_name,
+        attachment_path: attachmentPath
       }
     });
     return;
@@ -2305,6 +2411,30 @@ const closeCoordinatorTicket = async (req, res) => {
       date_of_resolution: new Date(),
       attended_by_id: userId
     });
+
+    // Notify the creator (agent) by email if available
+    if (ticket.creator && ticket.creator.email) {
+      const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      const emailBody = `
+        <p>Dear ${ticket.creator.name},</p>
+        <p>Your ticket has been closed by a coordinator. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Resolution:</strong> ${resolution_details || "Ticket closed by coordinator"}</li>
+        </ul>
+        <p>Thank you for using the WCF Customer Care System.</p>
+      `;
+      sendEmail({
+        to: [ticket.creator.email, 'rehema.said3@ttcl.co.tz'],
+        subject: emailSubject,
+        htmlBody: emailBody
+      }).catch(emailError => {
+        console.error("Error sending closure email to creator:", emailError.message);
+      });
+    }
 
     // Notify all coordinators and supervisors
     const notifySubject2 = `Ticket Closed: ${ticket.subject}`;
