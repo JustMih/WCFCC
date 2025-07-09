@@ -330,6 +330,18 @@ const getAgentActive = async (req, res) => {
   }
 };
 
+const getInActiveUser = async (req, res) => {
+  try {
+    const inActiveUser = await User.findAll({
+      where: { isActive: 0 }
+    });
+
+    res.status(200).json({ inActiveUser });
+  } catch (error) {
+    res.status(500).json({message: "Server Error", error: error.message})
+  }
+}
+
 const getAgentPause = async (req, res) => {
   try {
     const agents = await User.findAll({
@@ -694,4 +706,5 @@ module.exports = {
   getSenderReceiverUnreadCount,
   updateIsRead,
   getOnlineUser,
+  getInActiveUser,
 };
