@@ -146,6 +146,17 @@ const isValidUUID = (uuid) => {
   return uuidRegex.test(uuid);
 };
 
+// Helper to safely rollback a transaction
+async function safeRollback(transaction) {
+  if (transaction && !transaction.finished) {
+    try {
+      await transaction.rollback();
+    } catch (e) {
+      console.error('Safe rollback failed:', e.message);
+    }
+  }
+}
+
 const convertOrForwardTicket = async (req, res) => {
   const { userId, category, responsible_unit_name, complaintType } = req.body;
   const { id: ticketId } = req.params;
@@ -159,13 +170,13 @@ const convertOrForwardTicket = async (req, res) => {
     // Find the ticket
     const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
-      await transaction.rollback();
+      await safeRollback(transaction);
       return res.status(404).json({ message: "Ticket not found" });
     }
 
     // Check if any action parameters are provided
     if (!category && !responsible_unit_name && !complaintType) {
-      await transaction.rollback();
+      await safeRollback(transaction);
       return res.status(400).json({
         message: "Please provide a rating (complaintType) and select a unit to forward to. Category conversion is optional."
       });
@@ -173,14 +184,14 @@ const convertOrForwardTicket = async (req, res) => {
 
     // Check if required parameters are provided
     if (!complaintType) {
-      await transaction.rollback();
+      await safeRollback(transaction);
       return res.status(400).json({
         message: "Rating is required. Please provide complaintType (Minor or Major)."
       });
     }
 
     if (!responsible_unit_name) {
-      await transaction.rollback();
+      await safeRollback(transaction);
       return res.status(400).json({
         message: "Forwarding is required. Please select a unit to forward the ticket to."
       });
@@ -193,7 +204,7 @@ const convertOrForwardTicket = async (req, res) => {
     // Handle rating (if provided)
     if (complaintType) {
       if (!["Minor", "Major"].includes(complaintType)) {
-        await transaction.rollback();
+        await safeRollback(transaction);
         return res.status(400).json({ 
           message: "Invalid complaint type. Use 'Minor' or 'Major'." 
         });
@@ -209,7 +220,7 @@ const convertOrForwardTicket = async (req, res) => {
     if (category) {
       const validCategories = ["Inquiry"];
       if (!validCategories.includes(category)) {
-        await transaction.rollback();
+        await safeRollback(transaction);
         return res
           .status(400)
           .json({
@@ -228,7 +239,7 @@ const convertOrForwardTicket = async (req, res) => {
     if (responsible_unit_name) {
       // Check if ticket is already forwarded in this session
       if (forwardingDone) {
-        await transaction.rollback();
+        await safeRollback(transaction);
         return res.status(400).json({
           message: "Ticket is already being forwarded in this request. Cannot forward multiple times."
         });
@@ -236,7 +247,7 @@ const convertOrForwardTicket = async (req, res) => {
 
       // Check if ticket was already forwarded previously
       if (ticket.forwarded_at && ticket.responsible_unit_name) {
-        await transaction.rollback();
+        await safeRollback(transaction);
         return res.status(400).json({
           message: `Ticket is already forwarded to '${ticket.responsible_unit_name}' on ${new Date(ticket.forwarded_at).toLocaleDateString()}. Cannot forward again.`
         });
@@ -244,7 +255,7 @@ const convertOrForwardTicket = async (req, res) => {
 
       // Validate that ticket is rated before forwarding
       if (!ticket.complaint_type && !ratingDone) {
-        await transaction.rollback();
+        await safeRollback(transaction);
         return res.status(400).json({
           message: "Ticket must be rated (Minor or Major) before it can be forwarded"
         });
@@ -256,40 +267,24 @@ const convertOrForwardTicket = async (req, res) => {
         transaction
       });
       if (!section) {
-        await transaction.rollback();
+        await safeRollback(transaction);
         return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
       }
 
-      // Find the Function for this Section
-      const func = await FunctionModel.findOne({
-        where: { section_id: section.id },
+      // Only update responsible_unit_name, do not require section/function/unit head
+      ticket.responsible_unit_name = responsible_unit_name;
+      // Find a user in the selected unit with role 'head-of-unit'
+      const unitUser = await User.findOne({
+        where: { unit_section: responsible_unit_name, role: 'head-of-unit' },
         transaction
       });
-      if (!func) {
-        await transaction.rollback();
-        return res.status(404).json({ message: `No function found for unit '${responsible_unit_name}'` });
+      if (unitUser) {
+        ticket.assigned_to_role = unitUser.role;
+      } else {
+        ticket.assigned_to_role = null;
       }
-
-      // Find the head of the unit (head-of-unit role)
-      const unitHead = await User.findOne({
-        where: {
-          unit_section: responsible_unit_name,
-          role: "head-of-unit"
-        },
-        transaction
-      });
-      if (!unitHead) {
-        await transaction.rollback();
-        return res.status(404).json({ message: `No head-of-unit found for unit '${responsible_unit_name}'` });
-      }
-
-      ticket.responsible_unit_id = func.id;
-      ticket.responsible_unit_name = section.name;
       ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
-      ticket.assigned_to_role = unitHead.role;
-      ticket.assigned_to_id = unitHead.id;
-      ticket.assigned_to = unitHead.id;
       ticket.status = "Assigned";
       forwardingDone = true;
 
@@ -297,8 +292,8 @@ const convertOrForwardTicket = async (req, res) => {
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
-        assigned_to_id: unitHead.id,
-        assigned_to_role: unitHead.role,
+        assigned_to_id: unitUser.id,
+        assigned_to_role: unitUser.role,
         action: "Forwarded",
         reason: `Ticket forwarded to ${responsible_unit_name} by coordinator`,
         created_at: new Date()
@@ -335,7 +330,7 @@ const convertOrForwardTicket = async (req, res) => {
     });
   } catch (error) {
     // Rollback transaction on error
-    await transaction.rollback();
+    await safeRollback(transaction);
     console.error("Convert/Forward Error:", error);
     return res
       .status(500)

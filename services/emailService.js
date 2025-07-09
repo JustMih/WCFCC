@@ -1,18 +1,7 @@
 const nodemailer = require('nodemailer');
 
-// Create primary transporter object using SMTP transport
-const primaryTransporter = nodemailer.createTransport({
-    host: '196.192.79.145', // Replace with your SMTP host
-    port: 25,               // Replace with the appropriate port
-    tls: {
-        rejectUnauthorized: false // Do not fail on invalid certs
-    },
-    logger: true, // Enable logging to console
-    debug: true   // Show detailed logs
-});
-
 // Create fallback transporter object using SMTP transport
-const fallbackTransporter = nodemailer.createTransport({
+const emailTransporter = nodemailer.createTransport({
   host: process.env.MAIL_HOST || 'smtp.wcf.go.tz',
   port: process.env.MAIL_PORT ? parseInt(process.env.MAIL_PORT) : 587,
   secure: false, // STARTTLS for port 587
@@ -44,7 +33,7 @@ const sendEmail = async ({ to, subject, htmlBody }) => {
   try {
     // Use only the primary transporter (WCF settings)
     console.log('Attempting to send email using WCF transporter...');
-    const info = await primaryTransporter.sendMail(mailOptions);
+    const info = await emailTransporter.sendMail(mailOptions);
     console.log('Email sent successfully with WCF transporter:', info.messageId);
     return info;
   } catch (primaryError) {
