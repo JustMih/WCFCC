@@ -9,6 +9,16 @@ const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
 const { sendEmail } = require("../../services/emailService");
 
+// Helper to get requester display name
+function getRequesterDisplayName(ticket) {
+  if (ticket.requester === 'Representative' && ticket.representative_name) {
+    return ticket.representative_name;
+  }
+  const name = [ticket.first_name, ticket.last_name, ticket.middle_name].filter(Boolean).join(' ').trim();
+  if (name) return name;
+  if (ticket.institution) return ticket.institution;
+  return '-';
+}
 
 const getAllCoordinatorTickets = async (req, res) => {
   try {
@@ -1179,6 +1189,7 @@ const closeCoordinatorTicket = async (req, res) => {
           <li><strong>Subject:</strong> ${ticket.subject}</li>
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
           <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by coordinator'}</li>
         </ul>
         <p>Thank you for using the WCF Customer Care System.</p>
