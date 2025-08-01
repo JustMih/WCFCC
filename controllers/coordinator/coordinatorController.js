@@ -7,6 +7,7 @@ const FunctionModel = require("../../models/Function");
 const Section = require("../../models/Section");
 const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
+const { sendEmail } = require("../../services/emailService");
 
 
 const getAllCoordinatorTickets = async (req, res) => {
@@ -1126,7 +1127,7 @@ const channelComplaint = async (req, res) => {
 const closeCoordinatorTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { resolution_details } = req.body;
+    const { resolution_details, resolution_type } = req.body;
     const coordinatorId = req.user.userId;
 
     const ticket = await Ticket.findOne({
@@ -1137,14 +1138,24 @@ const closeCoordinatorTicket = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
+    // Handle attachment if uploaded
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`; // Save relative path
+      console.log("Attachment uploaded:", attachmentPath);
+    }
+
+    // Update ticket with resolution details and attachment path
     await ticket.update({
       status: 'Closed',
       resolution_details: resolution_details || 'Ticket closed by coordinator',
+      resolution_type: resolution_type || 'Resolved',
+      attachment_path: attachmentPath, // Save attachment path to ticket
       date_of_resolution: new Date(),
       attended_by_id: coordinatorId
     });
 
-    // Record in Ticket_assignments
+    // Record in Ticket_assignments with attachment path
     await TicketAssignment.create({
       ticket_id: ticket.id,
       assigned_by_id: coordinatorId,
@@ -1152,12 +1163,42 @@ const closeCoordinatorTicket = async (req, res) => {
       assigned_to_role: 'coordinator',
       action: 'Closed',
       reason: resolution_details || 'Ticket closed by coordinator',
+      attachment_path: attachmentPath, // Save attachment path to assignment record
       created_at: new Date()
     });
-    console.error("Closing ticket details");
+
+    // Notify the creator (agent) by email if available
+    const creator = await User.findOne({ where: { id: ticket.userId } });
+    if (creator && creator.email) {
+      const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      const emailBody = `
+        <p>Dear ${creator.name || 'User'},</p>
+        <p>Your ticket has been closed by a coordinator. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by coordinator'}</li>
+        </ul>
+        <p>Thank you for using the WCF Customer Care System.</p>
+      `;
+      sendEmail({
+        to:'rehema.said3@ttcl.co.tz',
+        subject: emailSubject,
+        htmlBody: emailBody
+      }).catch(emailError => {
+        console.error("Error sending closure email to creator:", emailError.message);
+      });
+    }
+
+    console.log("Closing ticket details with attachment:", attachmentPath);
     res.status(200).json({
       message: "Ticket closed successfully by coordinator",
-      ticket
+      ticket: {
+        ...ticket.toJSON(),
+        attachment_path: attachmentPath
+      }
     });
   } catch (error) {
     console.error("Error closing ticket by coordinator:", error);

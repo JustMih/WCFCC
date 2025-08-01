@@ -1,4 +1,7 @@
 const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
@@ -14,6 +17,24 @@ const { roleMiddleware } = require("../middleware/roleMiddleware");
 const { body } = require('express-validator'); // For validation
 const router = express.Router();
 const { Op } = require("sequelize");
+
+// Set up multer storage for ticket attachments
+const ticketAttachmentsDirectory = path.join(__dirname, "..", "ticket_attachments");
+if (!fs.existsSync(ticketAttachmentsDirectory)) {
+  fs.mkdirSync(ticketAttachmentsDirectory);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, ticketAttachmentsDirectory);
+  },
+  filename: (req, file, cb) => {
+    const fileName = Date.now() + "_" + file.originalname;
+    cb(null, fileName);
+  },
+});
+
+const upload = multer({ storage: storage });
 
 // Create User route
 router.post(
@@ -95,6 +116,20 @@ router.get(
   getTicketCounts
 );
 
+// Get attachment file
+router.get('/attachment/:filename', (req, res) => {
+  const { filename } = req.params;
+  const filePath = path.join(ticketAttachmentsDirectory, filename);
+  
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ message: 'Attachment not found' });
+  }
+  
+  // Serve the file
+  res.download(filePath);
+});
+
 // Get all customer tickets
 router.get(
   "/all-customer-tickets",
@@ -149,6 +184,7 @@ router.post(
   '/:ticketId/close',
   authMiddleware,
   roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  upload.single("attachment"),
   closeTicket
 );
 
