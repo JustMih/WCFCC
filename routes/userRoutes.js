@@ -89,7 +89,7 @@ router.get(
 router.get(
   "/agents",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "supervisor"]),
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   getAgents
 );
 

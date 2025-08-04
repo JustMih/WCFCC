@@ -63,10 +63,12 @@ const getAgents = async (req, res) => {
     });
 
     const agentCount = agents.length;
+    const total = agents.length;
 
     res.status(200).json({
       agents,
       count: agentCount,
+      total: total,
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
