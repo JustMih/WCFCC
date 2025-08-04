@@ -147,6 +147,7 @@ Ticket.associate = (models) => {
   Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
   Ticket.hasMany(models.Notification, { foreignKey: 'ticket_id', as: 'notifications' });
   Ticket.hasOne(models.RequesterDetails, { foreignKey: 'ticketId', as: 'RequesterDetail' });
+  Ticket.hasMany(models.TicketJustification, { foreignKey: 'ticket_id', as: 'justifications' });
 };
 
 module.exports = Ticket;

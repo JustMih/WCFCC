@@ -1,0 +1,144 @@
+==============================================================
+FOR ERROR Final Fix for Laravel logging error
+==============================================================
+
+sudo chown -R apache:apache /var/www/html/nidc/storage
+sudo chown -R apache:apache /var/www/html/nidc/bootstrap/cache
+sudo chmod -R 775 /var/www/html/nidc/storage
+sudo chmod -R 775 /var/www/html/nidc/bootstrap/cache
+
+sudo systemctl restart php-fpm
+sudo systemctl restart nginx
+
+
+========================================================================
+Unable to write in the "/var/www/html/nidc/public/img/blogs" directory
+=========================================================================
+sudo chown -R apache:apache /var/www/html/nidc/public/img/blogs
+sudo chmod -R 775 /var/www/html/nidc/public/img/blogs
+
+
+
+
+==========================================================
+ Optional: Protect other folders
+=======================================================
+
+If you want to keep nidcweb01 as the owner of everything else (for deployments, git, etc.), you can:
+
+# Keep main project under nidcweb01
+sudo chown -R nidcweb01:nidcweb01 /var/www/html/nidc
+
+# Then override only storage and cache
+sudo chown -R apache:apache /var/www/html/nidc/storage
+sudo chown -R apache:apache /var/www/html/nidc/bootstrap/cache
+
+
+
+632  history
+  633  sudo chown -R nginx:nginx /var/www/html/nidc/
+  634  sudo chown -R nginx:nginx /var/www/html/nidc/storage/
+  635  sudo chown -R nginx:nginx /var/www/html/nidc/bootstrap/cache/
+  636  sudo chmod -R 0777 /var/www/html/nidc/storage/
+  637  sudo chmod -R 0775 /var/www/html/nidc/bootstrap/cache/
+sudo systemctl reload nginx
+
+
+Error Unable to write in the "/var/www/html/nidc/public/img/sliders" directory. 
+Solution
+sudo chmod 777 /var/www/html/nidc/app/Http/Controllers/ServiceApplicationController.php
+sudo chown nginx:nginx /var/www/html/nidc/app/Http/Controllers/ServiceApplicationController.php
+
+Confirm the Permissions and Ownership: Verify that the changes were applied:
+
+ls -l /var/www/html/nidc/app/Http/Controllers/ServiceApplicationController.php
+
+The output should now look something like this:
+
+-rwxrwxrwx 1 nginx nginx 29027 Oct 21 11:49 /var/www/html/nidc/app/Http/Controllers/ServiceApplicationController.php
+
+$ sudo chmod -R 775 /var/www/html/nidc/public/img/sliders
+$ sudo chmod -R 777 /var/www/html/nidc/public/img/sliders
+
+If SELinux is enabled, it can block write access even with correct permissions. To allow write access for the web server:
+
+sudo chcon -R -t httpd_sys_rw_content_t /var/www/html/nidc/public/img/services/pdf
+
+If you’re unsure about SELinux, check its status:
+
+sestatus
+If it's enabled and causing issues, the above command will fix it.
+$ sudo systemctl restart nginx
+
+
+HOSTING 
+navigate to 
+$ cd /etc/nginx/conf.d
+create a file according to your project project.conf
+inside the project.conf write the below code
+
+server {
+    listen 80;  # The port on which Nginx will listen for incoming connections
+    server_name 10.49.0.11;  # Your domain names or IP addresses
+
+
+    root /var/www/html/forms/public;  # The root directory of your web application
+
+    index index.php index.html index.htm;  # Default index files
+
+    add_header X-Frame-Options "DENY";
+
+     charset utf-8;
+       gzip on;
+        gzip_types text/css application/javascript text/javascript application/x-javascript  image/svg+xml
+ text/plain text/xsd text/xsl text/xml image/x-icon;
+
+        location / {    try_files $uri $uri/ /index.php?$query_string;
+        }
+
+        location ~ \.php {
+                include fastcgi.conf;
+                fastcgi_split_path_info ^(.+\.php)(/.+)$;
+                fastcgi_pass unix:/run/php-fpm/www.sock;
+
+        location ~ /\.ht {
+                deny all;
+        }
+
+
+
+}
+
+copy file from nidc1 to nidc
+
+cp /var/www/html/nidc1/public/img/slider-6.png /var/www/html/nidc/public/img/new-name.png
+
+====================================================================================================================================================
+file_put_contents(/var/www/html/forms/storage/framework/sessions/0EphCbCfHeTu9zOfrHsKiSVG13zutgeeRZlR7QAE): Failed to open stream: Permission denied
+=====================================================================================================================================================
+
+It also may be SELinux. (Centos, RedHat)
+
+Determine status of SElinux on terminal:
+
+$ sestatus
+
+If status is enabled, write command to disable SElinux
+
+$ setenforce Permissive
+
+Or you may execute this command
+
+$ sudo setenforce 0
+
+
+============================================================
+ZIPPING FILE IN LINUX
+============================================================
+->Make sure you have the package installed for zipping if not
+    -sudo apt install zip    # For Debian/Ubuntu-based systems
+     -sudo yum install zip    # For RHEL/CentOS-based systems
+
+->zip -r forms.zip forms
+
+     
