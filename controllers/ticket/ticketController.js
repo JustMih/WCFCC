@@ -16,6 +16,7 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
+const Dependent = require("../../models/Dependent");
 
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
@@ -516,10 +517,14 @@ const mapFunctionDataToFunctionId = (functionDataId) => {
 };
 
 const createTicket = async (req, res) => {
+  console.log("🎯 CREATE TICKET ENDPOINT CALLED!");
+  console.log("Request body received:", req.body);
+  
   try {
     console.log("Incoming ticket creation request body:", req.body);
     console.log("Subject field received:", req.body.subject);
     console.log("FunctionId field received:", req.body.functionId);
+    console.log("Dependents field received:", req.body.dependents);
     
     const {
       firstName,
@@ -565,7 +570,9 @@ const createTicket = async (req, res) => {
       representative_phone,
       representative_email,
       representative_address,
-      representative_relationship
+      representative_relationship,
+      // New fields for dependents
+      dependents
     } = req.body;
 
     // Initialize finalSection before any use
@@ -760,13 +767,24 @@ const createTicket = async (req, res) => {
       representative_phone,
       representative_email,
       representative_address,
-      representative_relationship
+      representative_relationship,
+      // Add dependents as comma-separated string
+      dependents: Array.isArray(dependents) ? dependents.join(', ') : dependents
     };
     
+    console.log("Final dependents value to be saved:", ticketData.dependents);
     console.log("Ticket data section:", ticketData.section);
-    console.log("Ticket data sub_section:", ticketData.sub_section);
-    console.log("Responsible unit name:", responsible_unit_name);
-    console.log("Final section:", finalSection);
+    
+    // Log complete ticket data being saved
+    console.log("🎯 COMPLETE TICKET DATA BEING SAVED:");
+    console.log("=====================================");
+    console.log(JSON.stringify(ticketData, null, 2));
+    console.log("=====================================");
+    console.log("🔍 DEPENDENTS DETAILS:");
+    console.log("- Type:", typeof ticketData.dependents);
+    console.log("- Value:", ticketData.dependents);
+    console.log("- Length:", ticketData.dependents ? ticketData.dependents.length : 0);
+    console.log("=====================================");
     
     if (shouldClose) {
       ticketData.resolution_details =
@@ -776,6 +794,19 @@ const createTicket = async (req, res) => {
     }
     // --- Ticket Creation ---
     const newTicket = await Ticket.create(ticketData);
+    
+    // Log what was actually saved to the database
+    console.log("✅ TICKET CREATED SUCCESSFULLY:");
+    console.log("=====================================");
+    console.log("Ticket ID:", newTicket.id);
+    console.log("Saved Dependents:", newTicket.dependents);
+    console.log("Dependents Type:", typeof newTicket.dependents);
+    console.log("Dependents Length:", newTicket.dependents ? newTicket.dependents.length : 0);
+    console.log("=====================================");
+    
+    // Dependents are now stored as comma-separated string in the Tickets table
+    // No need for separate Dependent records
+
     // --- Create AssignedOfficer record for initial assignment ---
     if (!shouldClose) {
       // await AssignedOfficer.create({

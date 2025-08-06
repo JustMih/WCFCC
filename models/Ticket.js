@@ -104,6 +104,7 @@ const Ticket = sequelize.define(
     representative_email: { type: DataTypes.STRING(100), allowNull: true },
     representative_address: { type: DataTypes.STRING(200), allowNull: true },
     representative_relationship: { type: DataTypes.STRING(50), allowNull: true },
+    dependents: { type: DataTypes.STRING(1000), allowNull: true },
   },
   {
     tableName: 'Tickets',
