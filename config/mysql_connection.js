@@ -9,7 +9,21 @@ const sequelize = new Sequelize(
     port: process.env.DB_PORT || 3306,
     dialect: "mysql",
     logging: false,
-    dialectOptions: { connectTimeout: 10000 },
+    dialectOptions: {
+      connectTimeout: 60000, // Increased to 60 seconds
+      acquireTimeout: 60000,
+      timeout: 60000,
+      reconnect: true,
+    },
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 60000,
+      idle: 10000,
+    },
+    retry: {
+      max: 3,
+    },
   }
 );
 
@@ -19,7 +33,6 @@ sequelize
   .catch((err) => console.error("MySQL Connection Error:", err));
 
 module.exports = sequelize;
-
 
 // const { Sequelize } = require("sequelize");
 // require("dotenv").config();
@@ -43,4 +56,3 @@ module.exports = sequelize;
 //   .catch((err) => console.error("MySQL Connection Error:", err));
 
 // module.exports = sequelize;
-
