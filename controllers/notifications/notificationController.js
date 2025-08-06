@@ -16,7 +16,7 @@ const createNotification = async (req, res) => {
     if (!ticket_id) missingFields.push("ticket_id");
     if (!userId) missingFields.push("sender_id");
     if (!channel) missingFields.push("channel");
-    if (!message) missingFields.push("message");
+    if (!message || message.trim() === "") missingFields.push("message");
 
     // Step 2: Fetch the recipient user (by ID if provided, else fallback to role)
     let recipientUser = null;
@@ -290,6 +290,47 @@ const getNotifiedTicketsCount = async (req, res) => {
   }
 };
 
+// Get all notifications for a ticket sent to a specific user
+const getNotificationsByTicketAndRecipient = async (req, res) => {
+  try {
+    const { ticketId, userId } = req.params;
+    const notifications = await Notification.findAll({
+      where: {
+        ticket_id: ticketId,
+        recipient_id: userId
+      },
+      include: [
+        {
+          model: Ticket,
+          as: "ticket",
+          attributes: [
+            "id",
+            "ticket_id",
+            "subject",
+            "category",
+            "status",
+            "description"
+          ]
+        },
+        {
+          model: require("../../models/User"),
+          as: "sender",
+          attributes: ["id", "name"]
+        },
+        {
+          model: require("../../models/User"),
+          as: "recipient",
+          attributes: ["id", "name"]
+        }
+      ],
+      order: [["created_at", "DESC"]]
+    });
+    return res.status(200).json({ notifications });
+  } catch (error) {
+    return res.status(500).json({ message: "Error fetching notifications", error: error.message });
+  }
+};
+
 module.exports = {
   createNotification,
   listNotifications,
@@ -298,4 +339,5 @@ module.exports = {
   getNotificationById,
   getNotificationsByTicketId,
   getNotifiedTicketsCount,
+  getNotificationsByTicketAndRecipient,
 };

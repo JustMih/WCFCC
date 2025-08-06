@@ -9,27 +9,29 @@ const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
 const { sendEmail } = require("../../services/emailService");
 
+// Helper to get requester display name
+function getRequesterDisplayName(ticket) {
+  if (ticket.requester === 'Representative' && ticket.representative_name) {
+    return ticket.representative_name;
+  }
+  const name = [ticket.first_name, ticket.last_name, ticket.middle_name].filter(Boolean).join(' ').trim();
+  if (name) return name;
+  if (ticket.institution) return ticket.institution;
+  return '-';
+}
 
 const getAllCoordinatorTickets = async (req, res) => {
   try {
-    const complaints = await Ticket.findAll({
+    // Get tickets assigned to the coordinator with status "Open" or "Assigned"
+    const allTickets = await Ticket.findAll({
       where: {
         assigned_to_id: req.user.userId,
         category: {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         },
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { status: '' },
-              { status: 'Open' },
-              { status: 'Returned' },
-              { status: 'Assigned' }
-            ]
-          },
-          // { converted_to: null },
-          // { responsible_unit_name: null }
-        ]
+        status: {
+          [Op.ne]: ["Closed"]
+        }
       },
       include: [
         {
@@ -45,18 +47,18 @@ const getAllCoordinatorTickets = async (req, res) => {
       ]
     });
 
-    if (!complaints.length) {
+    if (!allTickets.length) {
       return res.status(404).json({
-        message: "No coordinator-eligible complaints found."
+        message: "No tickets assigned to coordinator found."
       });
     }
 
     res.status(200).json({
-      message: "Complaints routed to Coordinator fetched successfully.",
-      complaints
+      message: "All tickets assigned to Coordinator fetched successfully.",
+      tickets: allTickets
     });
   } catch (error) {
-    console.error("Error fetching Coordinator complaints:", error);
+    console.error("Error fetching all Coordinator tickets:", error);
     res.status(500).json({
       message: "Server error",
       error: error.message
@@ -472,11 +474,21 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       }
     });
 
+    // Count major complaints that have been returned from head of unit
+    const majorReturnedCount = await Ticket.count({
+      where: {
+        complaint_type: "Major",
+        category: "Complaint",
+        status: "Returned"
+      }
+    });
+
     const ticketStatus = {
       "On Progress": onProgressCount,
       Closed: closedCount,
       Minor: minorCount,
-      Major: majorCount
+      Major: majorCount,
+      "Major Returned": majorReturnedCount
       // add other statuses if needed
     };
 
@@ -534,29 +546,13 @@ const getTicketsByCategoryAndType = async (req, res) => {
     // Build where clause based on category and type
     switch (category) {
       case "new":
-        switch (type) {
-          case "complaints":
-            whereClause = {
-              category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-              [Op.and]: [
-                { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
-                // { converted_to: { [Op.is]: null } },
-                // { responsible_unit_name: { [Op.is]: null } },
-                // { complaint_type: { [Op.is]: null } },
-                // { created_at: { [Op.gte]: threeDaysAgo } }
-              ]
-            };
-            break;
-          case "escalated":
-            whereClause = {
-              category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
-              [Op.or]: [
-                { status: 'Escalated' },
-                { status: '' }
-              ]
-            };
-            break;
-        }
+        whereClause = {
+          category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+          assigned_to_id: req.user.userId,
+          status: {
+            [Op.ne]: ["Closed", "Escalated"]
+          }
+        };
         break;
 
       case "converted":
@@ -870,9 +866,8 @@ const getTicketsByStatus = async (req, res) => {
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
-        whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
-        ];
+        whereClause.status = { [Op.notIn]: ["Closed", "Escalated", "Pending Review", "Forwarded"] };
+        whereClause.assigned_to_id = req.user.userId;
         break;
         case "escalated":
           whereClause = {
@@ -962,13 +957,11 @@ const getTicketsByStatus = async (req, res) => {
           { status: { [Op.ne]: "Closed" } }
         ];
         break;
-      case "major":
-        whereClause.category = {
-          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
-        };
+      case "major-returned":
+        whereClause.category = "Complaint";
         whereClause[Op.and] = [
           { complaint_type: "Major" },
-          { status: { [Op.ne]: "Closed" } }
+          { status: "Returned" }
         ];
         break;
       default:
@@ -1179,6 +1172,7 @@ const closeCoordinatorTicket = async (req, res) => {
           <li><strong>Subject:</strong> ${ticket.subject}</li>
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
           <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by coordinator'}</li>
         </ul>
         <p>Thank you for using the WCF Customer Care System.</p>

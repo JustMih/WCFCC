@@ -1,5 +1,4 @@
 const express = require("express");
-const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const {
@@ -22,23 +21,17 @@ const {
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
 
+// Import enhanced multer configuration
+const { 
+  uploadSingle, 
+  handleMulterError,
+  ticketAttachmentsDirectory 
+} = require("../config/multerConfig");
+
 // Set up multer storage for ticket attachments
-const ticketAttachmentsDirectory = path.join(__dirname, "..", "ticket_attachments");
 if (!fs.existsSync(ticketAttachmentsDirectory)) {
   fs.mkdirSync(ticketAttachmentsDirectory);
 }
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, ticketAttachmentsDirectory);
-  },
-  filename: (req, file, cb) => {
-    const fileName = Date.now() + "_" + file.originalname;
-    cb(null, fileName);
-  },
-});
-
-const upload = multer({ storage: storage });
 
 const router = express.Router();
 
@@ -149,7 +142,8 @@ router.post(
   "/:ticketId/close",
   authMiddleware,
   // roleMiddleware(['coordinator']),
-  upload.single("attachment"),
+  uploadSingle,
+  handleMulterError,
   closeCoordinatorTicket
 );
 

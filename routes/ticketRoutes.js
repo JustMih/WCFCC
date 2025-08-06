@@ -1,5 +1,4 @@
 const express = require("express");
-const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const {
@@ -10,7 +9,8 @@ const {
   assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers,
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
-  getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount
+  getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
+  forwardToDirectorGeneral, getUserAgingStats
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -18,23 +18,19 @@ const { body } = require('express-validator'); // For validation
 const router = express.Router();
 const { Op } = require("sequelize");
 
+// Import enhanced multer configuration
+const { 
+  uploadSingle, 
+  uploadMultiple, 
+  uploadEvidence, 
+  handleMulterError,
+  ticketAttachmentsDirectory 
+} = require("../config/multerConfig");
+
 // Set up multer storage for ticket attachments
-const ticketAttachmentsDirectory = path.join(__dirname, "..", "ticket_attachments");
 if (!fs.existsSync(ticketAttachmentsDirectory)) {
   fs.mkdirSync(ticketAttachmentsDirectory);
 }
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, ticketAttachmentsDirectory);
-  },
-  filename: (req, file, cb) => {
-    const fileName = Date.now() + "_" + file.originalname;
-    cb(null, fileName);
-  },
-});
-
-const upload = multer({ storage: storage });
 
 // Create User route
 router.post(
@@ -184,7 +180,8 @@ router.post(
   '/:ticketId/close',
   authMiddleware,
   roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
-  upload.single("attachment"),
+  uploadSingle,
+  handleMulterError,
   closeTicket
 );
 
@@ -226,6 +223,14 @@ router.post(
   reverseTicket
 );
 
+// Route for coordinator to forward major complaint to Director General
+router.post(
+  '/:ticketId/forward-to-dg',
+  authMiddleware,
+  roleMiddleware(['coordinator']),
+  forwardToDirectorGeneral
+);
+
 
 router.get('/count/open/:userId', getOpenTicketsCount);
 router.get('/count/assigned/:userId', getAssignedTicketsCount);
@@ -233,6 +238,13 @@ router.get('/count/inprogress/:userId', getInprogressTicketsCount);
 router.get('/count/carried-forward/:userId', getCarriedForwardTicketsCount);
 router.get('/count/closed/:userId', getClosedTicketsCount);
 router.get('/count/overdue/:userId', getOverdueTicketsCount);
+
+// Get user aging statistics
+router.get(
+  '/aging-stats/:userId',
+  authMiddleware,
+  getUserAgingStats
+);
 
 // router.get('/ticket/escalated/:userId', getEscalatedTicketsForUser);
 // router.get('/ticket/ever-assigned/:userId', getEverAssignedTickets);

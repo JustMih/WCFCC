@@ -127,16 +127,15 @@ const attendAndRecommend = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    // Update ticket
+    // Update ticket with attendee's recommendation
     await ticket.update({
-      status: 'Pending Review',
       resolution_details: recommendation,
       evidence_url,
       date_of_resolution: new Date(),
       attended_by_id: attendeeId
     });
 
-    // Create assignment record
+    // Create assignment record for attendee
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: attendeeId,
@@ -147,8 +146,46 @@ const attendAndRecommend = async (req, res) => {
       created_at: new Date()
     });
 
+    // Find Head of Unit for the ticket's section/unit
+    const section = ticket.section || ticket.unit_section;
+    let headOfUnit = await User.findOne({
+      where: {
+        role: 'head-of-unit',
+        unit_section: section
+      }
+    });
+    let assignedRole = 'head-of-unit';
+    let assignedUser = headOfUnit;
+    if (!headOfUnit) {
+      // Fallback: assign to coordinator
+      const coordinator = await User.findOne({ where: { role: 'coordinator' } });
+      if (!coordinator) {
+        return res.status(404).json({ message: "No Head of Unit or Coordinator found for assignment" });
+      }
+      assignedRole = 'coordinator';
+      assignedUser = coordinator;
+    }
+
+    // Assign ticket to Head of Unit or Coordinator
+    await ticket.update({
+      assigned_to_id: assignedUser.id,
+      assigned_to_role: assignedRole,
+      status: 'Assigned'
+    });
+
+    // Create assignment record for Head of Unit or Coordinator
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: attendeeId,
+      assigned_to_id: assignedUser.id,
+      assigned_to_role: assignedRole,
+      action: 'Assigned',
+      reason: `Ticket recommended by attendee and assigned to ${assignedRole.replace('-', ' ')}`,
+      created_at: new Date()
+    });
+
     res.status(200).json({
-      message: "Recommendation submitted successfully",
+      message: "Recommendation submitted and ticket assigned to Head of Unit",
       data: ticket
     });
   } catch (error) {
