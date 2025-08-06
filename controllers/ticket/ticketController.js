@@ -571,7 +571,7 @@ const createTicket = async (req, res) => {
     // Initialize finalSection before any use
     let finalSection = inputSection;
     if (finalSection === "Unit") {
-      finalSection = sub_section;
+      finalSection = section; // Use section instead of undefined sub_section
     }
 
     const userId = req?.user?.userId;
@@ -646,16 +646,22 @@ const createTicket = async (req, res) => {
       
       // If no allocated user from search response, assign to focal-person with matching section
       if (!assignedUser) {
-        // Get the section from ticket data
-        const ticketSection = responsible_unit_name || finalSection || sub_section || section;
+        // Get the section from ticket data - use inputSection instead of undefined sub_section
+        const ticketSection = responsible_unit_name || finalSection || inputSection || section;
         
-        assignedUser = await User.findOne({
-          where: {
-            role: "focal-person",
-            unit_section: ticketSection
-          },
-          attributes: ["id", "name", "email", "role", "unit_section"]
-        });
+        console.log("TicketSection for focal-person assignment:", ticketSection);
+        
+        // Only query if ticketSection is defined and not empty
+        if (ticketSection && ticketSection.trim() !== "") {
+          assignedUser = await User.findOne({
+            where: {
+              role: "focal-person",
+              unit_section: ticketSection
+            },
+            attributes: ["id", "name", "email", "role", "unit_section"]
+          });
+          console.log("Found focal-person with matching section:", assignedUser?.name);
+        }
       }
       
       // Fallback to any focal-person if no matching section found
@@ -688,6 +694,11 @@ const createTicket = async (req, res) => {
       where: { id: mappedResponsibleUnitId },
       include: [{ model: Section, as: "section" }]
     });
+    
+    console.log("ResponsibleUnit found:", responsibleUnit);
+    console.log("ResponsibleUnit section:", responsibleUnit?.section);
+    console.log("Mapped responsible unit ID:", mappedResponsibleUnitId);
+    
     const initialStatus = shouldClose ? "Closed" : status || "Open";
     let ticketEmployerId = null;
     let ticketPhoneNumber = phoneNumber;
@@ -735,8 +746,8 @@ const createTicket = async (req, res) => {
       category,
       responsible_unit_id: mappedResponsibleUnitId,
       responsible_unit_name: responsible_unit_name,
-      section: responsibleUnit?.section?.name || "Unit",
-      sub_section: responsibleUnit?.name || finalSection,
+      section: responsibleUnit?.section?.name || responsible_unit_name || "Unit",
+      sub_section: responsibleUnit?.name || finalSection || "Unit",
       subject: finalSubject || "",
       description,
       status: initialStatus,
@@ -751,6 +762,12 @@ const createTicket = async (req, res) => {
       representative_address,
       representative_relationship
     };
+    
+    console.log("Ticket data section:", ticketData.section);
+    console.log("Ticket data sub_section:", ticketData.sub_section);
+    console.log("Responsible unit name:", responsible_unit_name);
+    console.log("Final section:", finalSection);
+    
     if (shouldClose) {
       ticketData.resolution_details =
         resolution_details || description || "Ticket resolved during creation";
