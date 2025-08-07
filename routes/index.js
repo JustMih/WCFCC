@@ -21,6 +21,7 @@ const focalPersonRoutes = require("./focalPersonRoutes");
 const instagramComments = require("./instagramWebhookRoutes");
 const performanceRoutes = require("./performanceRoutes");
 const workflowRoutes = require("./workflowRoutes");
+const externalRoutes = require("./externalRoutes");
 const router = express.Router();
 // const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
@@ -49,6 +50,7 @@ router.use("/missed-calls", missedCallRoutes);
 router.use("/performance", performanceRoutes);
 router.use("/queue-status", queueStatusRoutes);
 router.use("/workflow", workflowRoutes);
+router.use("/external", externalRoutes);
 
 
 

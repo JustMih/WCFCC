@@ -31,6 +31,10 @@ const getAllCoordinatorTickets = async (req, res) => {
         },
         status: {
           [Op.ne]: ["Closed"]
+        },
+        
+        complaint_type: {
+          [Op.is]: [null]
         }
       },
       include: [

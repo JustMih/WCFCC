@@ -104,6 +104,7 @@ const Ticket = sequelize.define(
     representative_email: { type: DataTypes.STRING(100), allowNull: true },
     representative_address: { type: DataTypes.STRING(200), allowNull: true },
     representative_relationship: { type: DataTypes.STRING(50), allowNull: true },
+    dependents: { type: DataTypes.STRING(1000), allowNull: true },
   },
   {
     tableName: 'Tickets',
@@ -147,7 +148,6 @@ Ticket.associate = (models) => {
   Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
   Ticket.hasMany(models.Notification, { foreignKey: 'ticket_id', as: 'notifications' });
   Ticket.hasOne(models.RequesterDetails, { foreignKey: 'ticketId', as: 'RequesterDetail' });
-  Ticket.hasMany(models.TicketJustification, { foreignKey: 'ticket_id', as: 'justifications' });
 };
 
 module.exports = Ticket;

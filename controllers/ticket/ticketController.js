@@ -17,6 +17,7 @@ const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 
+
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
  * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.
@@ -516,8 +517,15 @@ const mapFunctionDataToFunctionId = (functionDataId) => {
 };
 
 const createTicket = async (req, res) => {
+  console.log("🎯 CREATE TICKET ENDPOINT CALLED!");
+  console.log("Request body received:", req.body);
+  
   try {
     console.log("Incoming ticket creation request body:", req.body);
+    console.log("Subject field received:", req.body.subject);
+    console.log("FunctionId field received:", req.body.functionId);
+    console.log("Dependents field received:", req.body.dependents);
+    
     const {
       firstName,
       middleName,
@@ -562,13 +570,15 @@ const createTicket = async (req, res) => {
       representative_phone,
       representative_email,
       representative_address,
-      representative_relationship
+      representative_relationship,
+      // New fields for dependents
+      dependents
     } = req.body;
 
     // Initialize finalSection before any use
     let finalSection = inputSection;
     if (finalSection === "Unit") {
-      finalSection = sub_section;
+      finalSection = section; // Use section instead of undefined sub_section
     }
 
     const userId = req?.user?.userId;
@@ -577,15 +587,38 @@ const createTicket = async (req, res) => {
         .status(400)
         .json({ message: "User ID is required to create a ticket." });
     }
-    if (!subject) {
-      return res.status(400).json({ message: "Subject is required." });
-    }
-    // Validate inquiry_type for Inquiry category - REMOVED as no longer required
-    
+
     // Map function_data ID to function ID if needed
     const mappedResponsibleUnitId = mapFunctionDataToFunctionId(
       responsible_unit_id || functionId
     );
+
+    // Get the function name to use as subject if subject is not provided
+    let finalSubject = subject;
+    console.log("Initial finalSubject:", finalSubject);
+    
+    if (!finalSubject && functionId) {
+      console.log("Subject not provided, trying to get from functionId:", functionId);
+      try {
+        const functionData = await FunctionData.findOne({
+          where: { id: functionId },
+          include: [{ model: Function, as: "function" }]
+        });
+        console.log("FunctionData found:", functionData);
+        if (functionData && functionData.function) {
+          finalSubject = functionData.function.name;
+          console.log("Using function name as subject:", finalSubject);
+        }
+      } catch (error) {
+        console.error("Error fetching function name:", error);
+      }
+    }
+
+    console.log("Final subject to be used:", finalSubject);
+
+    if (!finalSubject) {
+      return res.status(400).json({ message: "Subject is required." });
+    }
 
     // --- Assignment Logic ---
     let assignedUser = null;
@@ -620,16 +653,22 @@ const createTicket = async (req, res) => {
       
       // If no allocated user from search response, assign to focal-person with matching section
       if (!assignedUser) {
-        // Get the section from ticket data
-        const ticketSection = responsible_unit_name || finalSection || sub_section || section;
+        // Get the section from ticket data - use inputSection instead of undefined sub_section
+        const ticketSection = responsible_unit_name || finalSection || inputSection || section;
         
-        assignedUser = await User.findOne({
-          where: {
-            role: "focal-person",
-            unit_section: ticketSection
-          },
-          attributes: ["id", "name", "email", "role", "unit_section"]
-        });
+        console.log("TicketSection for focal-person assignment:", ticketSection);
+        
+        // Only query if ticketSection is defined and not empty
+        if (ticketSection && ticketSection.trim() !== "") {
+          assignedUser = await User.findOne({
+            where: {
+              role: "focal-person",
+              unit_section: ticketSection
+            },
+            attributes: ["id", "name", "email", "role", "unit_section"]
+          });
+          console.log("Found focal-person with matching section:", assignedUser?.name);
+        }
       }
       
       // Fallback to any focal-person if no matching section found
@@ -662,6 +701,11 @@ const createTicket = async (req, res) => {
       where: { id: mappedResponsibleUnitId },
       include: [{ model: Section, as: "section" }]
     });
+    
+    console.log("ResponsibleUnit found:", responsibleUnit);
+    console.log("ResponsibleUnit section:", responsibleUnit?.section);
+    console.log("Mapped responsible unit ID:", mappedResponsibleUnitId);
+    
     const initialStatus = shouldClose ? "Closed" : status || "Open";
     let ticketEmployerId = null;
     let ticketPhoneNumber = phoneNumber;
@@ -709,9 +753,9 @@ const createTicket = async (req, res) => {
       category,
       responsible_unit_id: mappedResponsibleUnitId,
       responsible_unit_name: responsible_unit_name,
-      section: responsibleUnit?.section?.name || "Unit",
-      sub_section: responsibleUnit?.name || finalSection,
-      subject: subject || "",
+      section: responsibleUnit?.section?.name || responsible_unit_name || "Unit",
+      sub_section: responsibleUnit?.name || finalSection || "Unit",
+      subject: finalSubject || "",
       description,
       status: initialStatus,
       userId: userId,
@@ -723,8 +767,25 @@ const createTicket = async (req, res) => {
       representative_phone,
       representative_email,
       representative_address,
-      representative_relationship
+      representative_relationship,
+      // Add dependents as comma-separated string
+      dependents: Array.isArray(dependents) ? dependents.join(', ') : dependents
     };
+    
+    console.log("Final dependents value to be saved:", ticketData.dependents);
+    console.log("Ticket data section:", ticketData.section);
+    
+    // Log complete ticket data being saved
+    console.log("🎯 COMPLETE TICKET DATA BEING SAVED:");
+    console.log("=====================================");
+    console.log(JSON.stringify(ticketData, null, 2));
+    console.log("=====================================");
+    console.log("🔍 DEPENDENTS DETAILS:");
+    console.log("- Type:", typeof ticketData.dependents);
+    console.log("- Value:", ticketData.dependents);
+    console.log("- Length:", ticketData.dependents ? ticketData.dependents.length : 0);
+    console.log("=====================================");
+    
     if (shouldClose) {
       ticketData.resolution_details =
         resolution_details || description || "Ticket resolved during creation";
@@ -733,6 +794,19 @@ const createTicket = async (req, res) => {
     }
     // --- Ticket Creation ---
     const newTicket = await Ticket.create(ticketData);
+    
+    // Log what was actually saved to the database
+    console.log("✅ TICKET CREATED SUCCESSFULLY:");
+    console.log("=====================================");
+    console.log("Ticket ID:", newTicket.id);
+    console.log("Saved Dependents:", newTicket.dependents);
+    console.log("Dependents Type:", typeof newTicket.dependents);
+    console.log("Dependents Length:", newTicket.dependents ? newTicket.dependents.length : 0);
+    console.log("=====================================");
+    
+    // Dependents are now stored as comma-separated string in the Tickets table
+    // No need for separate Dependent records
+
     // --- Create AssignedOfficer record for initial assignment ---
     if (!shouldClose) {
       // await AssignedOfficer.create({
@@ -749,7 +823,7 @@ const createTicket = async (req, res) => {
         ticket_id: newTicket.id,
         sender_id: userId,
         recipient_id: assignedUser.id,
-        message: `New ${category} ticket assigned to you: ${subject}`,
+        message: `New ${category} ticket assigned to you: ${finalSubject}`,
         channel: channel,
         status: "unread",
         category: category
@@ -806,7 +880,7 @@ const createTicket = async (req, res) => {
     // --- Email Notification to Assignee ---
     let emailWarning = "";
     if (assignedUser.email && !shouldClose) {
-      const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
+      const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
         <p>Dear ${assignedUser.name},</p>
         <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
@@ -840,7 +914,7 @@ const createTicket = async (req, res) => {
       ticket_id: newTicket.id,
       sender_id: userId,
       recipient_id: assignedUser.id,
-      message: `New ${category} ticket ${shouldClose ? "(Closed)" : ""} assigned to you: ${subject}`,
+      message: `New ${category} ticket ${shouldClose ? "(Closed)" : ""} assigned to you: ${finalSubject}`,
       channel: channel,
       status: "unread"
     });
@@ -892,7 +966,7 @@ const createTicket = async (req, res) => {
     });
     // --- Send email to assignee in background ---
     if (assignedUser.email && !shouldClose) {
-      const emailSubject = `New ${category} Ticket Assigned: ${subject} (ID: ${newTicket.ticket_id})`;
+      const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
         <p>Dear ${assignedUser.name},</p>
         <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
@@ -4020,6 +4094,117 @@ const getUserAgingStats = async (req, res) => {
   }
 };
 
+// External API endpoint for ticket status lookup
+const getTicketStatusExternal = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    if (!ticketId) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Ticket ID is required",
+        error: "MISSING_TICKET_ID"
+      });
+    }
+
+    // Find ticket with minimal data for external systems
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      attributes: [
+        'id',
+        'ticket_id',
+        'status',
+        'category',
+        'complaint_type',
+        'subject',
+        'created_at',
+        'updated_at',
+        'phone_number',
+        'region',
+        'responsible_unit_name'
+      ],
+      include: [
+        {
+          model: User,
+          as: "assignee",
+          attributes: ["id", "name", "role"]
+        },
+        {
+          model: TicketAssignment,
+          as: "assignments",
+          attributes: ['id', 'created_at', 'status'],
+          include: [
+            {
+              model: User,
+              as: "assignee",
+              attributes: ["id", "name", "role"]
+            }
+          ],
+          order: [["created_at", "DESC"]],
+          limit: 1
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ 
+        success: false,
+        message: "Ticket not found",
+        error: "TICKET_NOT_FOUND",
+        ticket_id: ticketId
+      });
+    }
+
+    // Calculate ticket age
+    const createdAt = new Date(ticket.created_at);
+    const now = new Date();
+    const ageInDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+
+    // Prepare response for external systems
+    const response = {
+      success: true,
+      ticket: {
+        id: ticket.id,
+        ticket_id: ticket.ticket_id,
+        status: ticket.status,
+        category: ticket.category,
+        complaint_type: ticket.complaint_type,
+        subject: ticket.subject,
+        phone_number: ticket.phone_number,
+        region: ticket.region,
+        responsible_unit: ticket.responsible_unit_name,
+        created_at: ticket.created_at,
+        updated_at: ticket.updated_at,
+        age_in_days: ageInDays,
+        current_assignee: ticket.assignee ? {
+          id: ticket.assignee.id,
+          name: ticket.assignee.name,
+          role: ticket.assignee.role
+        } : null,
+        last_assignment: ticket.assignments && ticket.assignments.length > 0 ? {
+          assigned_at: ticket.assignments[0].created_at,
+          assigned_to: ticket.assignments[0].assignee ? {
+            id: ticket.assignments[0].assignee.id,
+            name: ticket.assignments[0].assignee.name,
+            role: ticket.assignments[0].assignee.role
+          } : null
+        } : null
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    return res.status(200).json(response);
+
+  } catch (error) {
+    console.error("Error in getTicketStatusExternal:", error);
+    return res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: "INTERNAL_ERROR"
+    });
+  }
+};
+
 module.exports = {
   checkTicketSlaBreach,
   escalateAndUpdateTicketOnSlaBreach,
@@ -4061,5 +4246,6 @@ module.exports = {
   getAllTicketsCount,
   getEscalatedFromTickets,
   forwardToDirectorGeneral,
-  getUserAgingStats
+  getUserAgingStats,
+  getTicketStatusExternal
 };
