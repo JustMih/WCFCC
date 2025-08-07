@@ -67,7 +67,7 @@ const Ticket = sequelize.define(
     status: {
       type: DataTypes.ENUM(
         'Open', 'Assigned', 'Carried Forward', 'In Progress',
-        'Returned', 'Closed', 'Pending Review', 'Pending Approval', 'Escalated'
+        'Returned', 'Closed', 'Pending Review', 'Pending Approval', 'Escalated', 'Reversed'
       ),
       defaultValue: 'Open'
     },

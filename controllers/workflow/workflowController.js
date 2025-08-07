@@ -25,8 +25,8 @@ const assignToAttendee = async (req, res) => {
     }
 
     const supervisor = await User.findByPk(supervisorId);
-    if (supervisor.role !== 'supervisor') {
-      return res.status(403).json({ message: "Only supervisors can assign to attendees" });
+    if (supervisor.role !== 'supervisor' && supervisor.role !== 'head-of-unit') {
+      return res.status(403).json({ message: "Only supervisors or head of unit can assign to attendees" });
     }
 
     const attendee = await User.findByPk(attendeeId);
@@ -53,15 +53,25 @@ const assignToAttendee = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: "Ticket assigned to attendee successfully",
       data: {
         ticket,
-        assignedTo: attendee
+        assignedTo: attendee,
+        assignmentDetails: {
+          assignedBy: supervisor.name,
+          assignedTo: attendee.name,
+          reason: justification || 'Assigned by Head of Unit'
+        }
       }
     });
   } catch (error) {
     console.error("Error assigning to attendee:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -102,12 +112,21 @@ const attendAndClose = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: "Ticket attended and closed successfully",
-      data: ticket
+      data: {
+        ticket,
+        closedBy: supervisor.name,
+        resolutionDetails: resolution_details
+      }
     });
   } catch (error) {
     console.error("Error attending and closing:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -185,12 +204,22 @@ const attendAndRecommend = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: "Recommendation submitted and ticket assigned to Head of Unit",
-      data: ticket
+      data: {
+        ticket,
+        recommendation: recommendation,
+        assignedTo: assignedUser,
+        assignedRole: assignedRole
+      }
     });
   } catch (error) {
     console.error("Error attending and recommending:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -224,12 +253,22 @@ const uploadEvidence = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: "Evidence uploaded successfully",
-      data: ticket
+      data: {
+        ticket,
+        uploadedBy: userId,
+        evidenceUrl: evidence_url,
+        notes: notes
+      }
     });
   } catch (error) {
     console.error("Error uploading evidence:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -279,6 +318,73 @@ const approveAndClose = async (req, res) => {
   } catch (error) {
     console.error("Error approving and closing:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// DG approves and forwards to coordinator
+const approveAndForward = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { approval_notes } = req.body;
+    const dgId = req.user.userId;
+
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Find coordinator
+    const coordinator = await User.findOne({ where: { role: 'coordinator' } });
+    if (!coordinator) {
+      return res.status(404).json({ message: "Coordinator not found" });
+    }
+
+    // Update ticket to assign to coordinator
+    await ticket.update({
+      assigned_to_id: coordinator.id,
+      assigned_to_role: 'coordinator',
+      status: 'Assigned',
+      dg_notes: approval_notes
+    });
+
+    // Create assignment record for DG approval
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: dgId,
+      assigned_to_id: dgId,
+      assigned_to_role: 'director-general',
+      action: 'Approved and Forwarded',
+      reason: approval_notes,
+      created_at: new Date()
+    });
+
+    // Create assignment record for coordinator
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: dgId,
+      assigned_to_id: coordinator.id,
+      assigned_to_role: 'coordinator',
+      action: 'Assigned',
+      reason: `Forwarded by Director General: ${approval_notes}`,
+      created_at: new Date()
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Ticket approved and forwarded to coordinator successfully",
+      data: {
+        ticket,
+        forwardedTo: coordinator,
+        dgNotes: approval_notes
+      }
+    });
+  } catch (error) {
+    console.error("Error approving and forwarding:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -340,16 +446,23 @@ const reverseTicket = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: "Ticket reversed successfully",
       data: {
         ticket,
         previousRole,
-        previousAssignee: previousAssignment.assigned_to_id
+        previousAssignee: previousAssignment.assigned_to_id,
+        reversedBy: userId,
+        reversalReason: reversal_reason || 'Ticket reversed'
       }
     });
   } catch (error) {
     console.error("Error reversing ticket:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -388,12 +501,22 @@ const reviewAndRecommend = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: "Review completed successfully",
-      data: ticket
+      data: {
+        ticket,
+        reviewedBy: userId,
+        reviewNotes: review_notes,
+        recommendation: recommendation
+      }
     });
   } catch (error) {
     console.error("Error reviewing:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -408,6 +531,7 @@ module.exports = {
   
   // DG actions
   approveAndClose,
+  approveAndForward,
   
   // General actions
   reverseTicket,

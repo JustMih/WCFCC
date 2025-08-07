@@ -30,12 +30,9 @@ const getAllCoordinatorTickets = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         },
         status: {
-          [Op.ne]: ["Closed"]
+          [Op.notIn]: ["Closed", "Forwarded"]
         },
-        
-        complaint_type: {
-          [Op.is]: [null]
-        }
+        complaint_type: null
       },
       include: [
         {
@@ -287,12 +284,14 @@ const convertOrForwardTicket = async (req, res) => {
       });
       if (unitUser) {
         ticket.assigned_to_role = unitUser.role;
+        ticket.assigned_to_id = unitUser.id; // Add this line to assign to the head of unit
       } else {
         ticket.assigned_to_role = null;
+        // If no head of unit found, keep assigned to coordinator
       }
       ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
-      ticket.status = "Assigned";
+      ticket.status = "Forwarded";
       forwardingDone = true;
 
       // Create ticket assignment record
@@ -353,7 +352,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     const baseNewTicketConditions = [
       { responsible_unit_name: null },
       { complaint_type: { [Op.is]: null } },
-      { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+      { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
       { converted_to: null },
       { created_at: { [Op.gte]: threeDaysAgo } }
     ];
@@ -362,7 +361,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: "Complaint",
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] }
         ]
       }
     });
@@ -554,7 +553,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
           assigned_to_id: req.user.userId,
           status: {
-            [Op.ne]: ["Closed", "Escalated"]
+            [Op.in]: ["Open", "Assigned", "Reversed", "Returned"]
           }
         };
         break;
@@ -870,7 +869,9 @@ const getTicketsByStatus = async (req, res) => {
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
-        whereClause.status = { [Op.notIn]: ["Closed", "Escalated", "Pending Review", "Forwarded"] };
+        whereClause.status = {
+          [Op.in]: ["Open", "Assigned", "Reversed", "Returned"]
+        };
         whereClause.assigned_to_id = req.user.userId;
         break;
         case "escalated":

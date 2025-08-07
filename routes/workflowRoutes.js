@@ -3,16 +3,14 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { roleMiddleware } = require('../middleware/roleMiddleware');
 const {
-  // Head of Unit actions
   assignToAttendee,
   attendAndClose,
-  
-  // Attendee actions
   attendAndRecommend,
   uploadEvidence,
   
   // DG actions
   approveAndClose,
+  approveAndForward,
   
   // General actions
   reverseTicket,
@@ -27,7 +25,7 @@ const {
 router.post(
   '/:ticketId/assign-attendee',
   authMiddleware,
-  roleMiddleware(['supervisor']),
+  roleMiddleware(['supervisor', 'head-of-unit']),
   assignToAttendee
 );
 
@@ -35,7 +33,7 @@ router.post(
 router.post(
   '/:ticketId/attend-and-close',
   authMiddleware,
-  roleMiddleware(['supervisor']),
+  roleMiddleware(['supervisor', 'head-of-unit']),
   attendAndClose
 );
 
@@ -55,7 +53,7 @@ router.post(
 router.post(
   '/:ticketId/upload-evidence',
   authMiddleware,
-  roleMiddleware(['attendee', 'supervisor', 'director-general']),
+  roleMiddleware(['attendee', 'supervisor', 'head-of-unit', 'director-general']),
   uploadEvidence
 );
 
@@ -71,6 +69,14 @@ router.post(
   approveAndClose
 );
 
+// DG approves and forwards to coordinator
+router.post(
+  '/:ticketId/approve-and-forward',
+  authMiddleware,
+  roleMiddleware(['director-general']),
+  approveAndForward
+);
+
 /**
  * General Routes
  */
@@ -79,7 +85,7 @@ router.post(
 router.post(
   '/:ticketId/reverse',
   authMiddleware,
-  roleMiddleware(['supervisor', 'attendee', 'director-general']),
+  roleMiddleware(['supervisor', 'head-of-unit', 'attendee', 'director-general']),
   reverseTicket
 );
 
@@ -87,7 +93,7 @@ router.post(
 router.post(
   '/:ticketId/review-and-recommend',
   authMiddleware,
-  roleMiddleware(['supervisor', 'director-general']),
+  roleMiddleware(['supervisor', 'head-of-unit', 'director-general']),
   reviewAndRecommend
 );
 

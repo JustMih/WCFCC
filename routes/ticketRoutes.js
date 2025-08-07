@@ -10,7 +10,7 @@ const {
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToCoordinator, reverseAndAssignToCoordinator
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -167,6 +167,14 @@ router.post(
   assignTicket
 );
 
+// Add reassign route
+router.post(
+  '/:ticketId/reassign',
+  authMiddleware,
+  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator']),
+  reassignTicket
+);
+
 // Add after other ticket routes
 router.get(
   '/admin/attendee',
@@ -179,7 +187,7 @@ router.get(
 router.post(
   '/:ticketId/close',
   authMiddleware,
-  roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
   uploadSingle,
   handleMulterError,
   closeTicket
@@ -220,7 +228,18 @@ router.get(
 router.post(
   '/:ticketId/reverse',
   authMiddleware,
+  uploadSingle,
+  handleMulterError,
   reverseTicket
+);
+
+// Add reverse-complaint route
+router.post(
+  '/:ticketId/reverse-complaint',
+  authMiddleware,
+  uploadSingle,
+  handleMulterError,
+  reverseComplaint
 );
 
 // Route for coordinator to forward major complaint to Director General
@@ -229,6 +248,22 @@ router.post(
   authMiddleware,
   roleMiddleware(['coordinator']),
   forwardToDirectorGeneral
+);
+
+// Route for Director General to approve and forward to coordinator
+router.post(
+  '/:ticketId/approve-and-forward',
+  authMiddleware,
+  roleMiddleware(['director-general']),
+  approveAndForwardToCoordinator
+);
+
+// Route for Director General to reverse and assign to coordinator
+router.post(
+  '/:ticketId/reverse-and-assign',
+  authMiddleware,
+  roleMiddleware(['director-general']),
+  reverseAndAssignToCoordinator
 );
 
 

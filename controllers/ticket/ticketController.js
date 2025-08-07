@@ -1244,7 +1244,7 @@ const getAssignedTickets = async (req, res) => {
     if (user.role === "super-admin" || user.role === "supervisor") {
       // Super admin: Fetch all tickets with status Assigned or Open
       tickets = await Ticket.findAll({
-        where: { status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended"] } },
+        where: { status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended","Reversed","Returned"] } },
         include: [
           {
             model: User,
@@ -2508,6 +2508,13 @@ const closeCoordinatorTicket = async (req, res) => {
       attended_by_id: userId
     });
 
+    // Update resolution details if coordinator edited them
+    // if (resolution_details) {
+    //   await ticket.update({
+    //     resolution_details: resolution_details
+    //   });
+    // }
+
     // Notify the creator (agent) by email if available
     if (ticket.creator && ticket.creator.email) {
       const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
@@ -2690,11 +2697,49 @@ const assignTicket = async (req, res) => {
 
 const getAllAttendee = async (req, res) => {
   try {
+    const currentUserId = req.user.userId;
+    
+    // Get the current user's unit/section
+    const currentUser = await User.findByPk(currentUserId);
+    if (!currentUser) {
+      return res.status(404).json({ message: "Current user not found" });
+    }
+    
+    console.log(`DEBUG: Current user - Role: ${currentUser.role}, Unit: ${currentUser.unit_section}`);
+    
+    // Build the where clause to filter attendees by the same unit/section
+    let whereClause = { 
+      role: "attendee",
+      isActive: true // Only active attendees
+    };
+    
+    // If current user has a unit_section, filter attendees by the same unit
+    // This ensures Head of Unit users only see attendees from their own unit
+    if (currentUser.unit_section) {
+      whereClause.unit_section = currentUser.unit_section;
+      console.log(`DEBUG: Filtering attendees by unit_section: ${currentUser.unit_section}`);
+    } else {
+      console.log(`DEBUG: No unit_section found for current user, showing all attendees`);
+    }
+    
     const attendee = await User.findAll({
-      where: { role: "attendee" }
+      where: whereClause,
+      attributes: ['id', 'name', 'username', 'email', 'role', 'unit_section']
     });
-    res.status(200).json({ attendees: attendee });
+    
+    console.log(`DEBUG: Found ${attendee.length} attendees matching criteria`);
+    
+    res.status(200).json({ 
+      attendees: attendee,
+      currentUserUnit: currentUser.unit_section || 'No unit assigned',
+      currentUserRole: currentUser.role,
+      debug: {
+        filteredByUnit: !!currentUser.unit_section,
+        attendeeCount: attendee.length
+      }
+    });
   } catch (error) {
+    console.error("Error fetching attendees:", error);
     res.status(500).json({ message: "server error", error: error.message });
   }
 };
@@ -3213,35 +3258,75 @@ const reassignTicket = async (req, res) => {
       req.body;
     const assigned_by_id = req.user?.userId;
 
-    // Mark previous assignment as 'Reassigned'
-    await AssignedOfficer.update(
-      {
-        status: "Reassigned",
-        completed_at: new Date(),
-        reassignment_reason: reassignment_reason || null
-      },
-      { where: { ticket_id: ticketId, status: "Active" } }
-    );
+    // Validate required fields
+    if (!assigned_to_id || !assigned_to_role) {
+      return res.status(400).json({
+        success: false,
+        message: "assigned_to_id and assigned_to_role are required"
+      });
+    }
 
-    // Insert new assignment row
-    await AssignedOfficer.create({
+    // Get the current ticket to verify it exists
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found"
+      });
+    }
+
+    // Create a new assignment record for the reassignment
+    await TicketAssignment.create({
       ticket_id: ticketId,
+      assigned_by_id,
       assigned_to_id,
       assigned_to_role,
-      assigned_by_id,
-      status: "Active",
-      assigned_at: new Date(),
-      notes: notes || "Reassignment"
+      action: "Reassigned",
+      reason: reassignment_reason || notes || "Ticket reassigned",
+      created_at: new Date()
     });
 
     // Update the ticket's current assignee
     await Ticket.update(
       {
         assigned_to_id,
-        assigned_to_role
+        assigned_to_role,
+        status: "Assigned" // Ensure status is set to Assigned
       },
       { where: { id: ticketId } }
     );
+
+    // Send notification to the new assignee (optional)
+    try {
+      const newAssignee = await User.findByPk(assigned_to_id);
+      if (newAssignee && newAssignee.email) {
+        const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
+        const htmlBody = `
+          <p>Hello ${newAssignee.name || ""},</p>
+          <p>The following ticket has been <b>reassigned</b> to you:</p>
+          <ul>
+            <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
+            <li><b>Subject:</b> ${ticket.subject}</li>
+            <li><b>Category:</b> ${ticket.category}</li>
+            <li><b>Requester:</b> ${getRequesterDisplayName(ticket)}</li>
+            <li><b>Status:</b> Assigned</li>
+            <li><b>Reassignment Reason:</b> ${reassignment_reason || notes || "Ticket reassigned"}</li>
+          </ul>
+          <p>Please log into the system to review and take action.</p>
+          <p>Regards,<br/>WCF Support Desk</p>
+        `;
+        try {
+          // await sendEmail({ to: newAssignee.email, subject, htmlBody });
+          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+        } catch (emailErr) {
+          console.error("Failed to send reassignment email:", emailErr.message);
+          // Do not fail the reassignment if email fails
+        }
+      }
+    } catch (notificationError) {
+      console.error("Error sending notification:", notificationError);
+      // Do not fail the reassignment if notification fails
+    }
 
     res.status(200).json({
       success: true,
@@ -3310,7 +3395,11 @@ const getInProgressAssignments = async (req, res) => {
 const reverseTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, reason } = req.body;
+    const { userId, reason, status } = req.body;
+
+    if (!ticketId) {
+      return res.status(400).json({ message: "Ticket ID is required" });
+    }
 
     // Get assignment history, ordered by created_at DESC
     const assignments = await TicketAssignment.findAll({
@@ -3327,15 +3416,36 @@ const reverseTicket = async (req, res) => {
     // The previous user is the second most recent assignment
     const prevAssignment = assignments[1];
 
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name"]
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Handle file upload if present
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`; // Save relative path
+      console.log("Attachment uploaded:", attachmentPath);
+    }
+
     // Update the ticket to assign to the previous user
-    await Ticket.update(
-      {
-        assigned_to_id: prevAssignment.assigned_to_id,
-        assigned_to_role: prevAssignment.assigned_to_role,
-        status: "Returned"
-      },
-      { where: { id: ticketId } }
-    );
+    await ticket.update({
+      assigned_to_id: prevAssignment.assigned_to_id,
+      assigned_to_role: prevAssignment.assigned_to_role,
+      status: "Reversed",
+      attachment_path: attachmentPath, // Save attachment path to ticket
+      attended_by_id: userId
+    });
 
     // Add a new assignment record for the reversal
     await TicketAssignment.create({
@@ -3345,12 +3455,49 @@ const reverseTicket = async (req, res) => {
       assigned_to_role: prevAssignment.assigned_to_role,
       action: "Reversed",
       reason: reason || "Ticket reversed to previous user",
+      attachment_path: attachmentPath, // Use attachment_path instead of attachment
       created_at: new Date()
     });
 
-    // Fetch ticket and previous user details for email
-    const ticket = await Ticket.findByPk(ticketId);
+    // Fetch attended_by user name and role
+    let attended_by_name = null;
+    let attended_by_role = null;
+    if (userId) {
+      const attendedByUser = await User.findOne({ where: { id: userId } });
+      attended_by_name = attendedByUser ? attendedByUser.name : null;
+      attended_by_role = attendedByUser ? attendedByUser.role : null;
+    }
+
+    // Fetch previous user details
     const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+
+    // Notify all coordinators and supervisors
+    const notifySubject = `Ticket Reversed: ${ticket.subject}`;
+    const notifyHtml = `
+      <p><strong>Ticket Reversed</strong></p>
+      <p>The following ticket has been reversed:</p>
+      <ul>
+        <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+        <li><strong>Subject:</strong> ${ticket.subject}</li>
+        <li><strong>Category:</strong> ${ticket.category}</li>
+        <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+        <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
+        <li><strong>Reversed To:</strong> ${prevUser ? prevUser.name : 'Unknown'} (${prevAssignment.assigned_to_role || 'Unknown Role'})</li>
+        <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+        <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
+      </ul>
+    `;
+    const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.name : 'Unknown'}.`;
+    await notifyUsersByRole(
+      ["coordinator", "supervisor"],
+      notifySubject,
+      notifyHtml,
+      ticketId,
+      userId,
+      notifyMsg
+    );
+
+    // Send email to the previous user
     if (prevUser && prevUser.email) {
       const subject = `Ticket Reversed: ${ticket.ticket_id || ticket.id}`;
       const htmlBody = `
@@ -3361,10 +3508,10 @@ const reverseTicket = async (req, res) => {
           <li><b>Subject:</b> ${ticket.subject}</li>
           <li><b>Category:</b> ${ticket.category}</li>
           <li><b>Requester:</b> ${getRequesterDisplayName(ticket)}</li>
-          <li><b>Status:</b> Returned</li>
-          <li><b>Reversal Reason:</b> ${
-            reason || "Ticket reversed to previous user"
-          }</li>
+          <li><b>Status:</b> Reversed</li>
+          <li><b>Reversed By:</b> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
+          <li><b>Reversal Reason:</b> ${reason || "Ticket reversed to previous user"}</li>
+          ${attachmentPath ? `<li><b>Attachment:</b> Included</li>` : ''}
         </ul>
         <p>Please log into the system to review and take action.</p>
         <p>Regards,<br/>WCF Support Desk</p>
@@ -3857,7 +4004,7 @@ function getRequesterDisplayName(ticket) {
 const forwardToDirectorGeneral = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, coordinator_notes, resolution_details } = req.body;
+    const { userId, resolution_details, assignmentId } = req.body; // Added assignmentId
 
     if (!ticketId || !userId) {
       return res.status(400).json({ message: "Ticket ID and user ID are required" });
@@ -3883,12 +4030,17 @@ const forwardToDirectorGeneral = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    // Check if this is a major complaint assigned to coordinator
-    if (ticket.category !== "Complaint" || 
-        ticket.complaint_type !== "Major" || 
-        ticket.assigned_to_id !== userId) {
+    // Check if this is a major complaint assigned to coordinator OR a reversed ticket assigned to coordinator
+    const isMajorComplaint = ticket.category === "Complaint" && 
+                            ticket.complaint_type === "Major" && 
+                            ticket.assigned_to_id === userId;
+    
+    const isReversedTicket = ticket.status === "Reversed" && 
+                            ticket.assigned_to_id === userId;
+    
+    if (!isMajorComplaint && !isReversedTicket) {
       return res.status(400).json({ 
-        message: "This ticket is not a major complaint assigned to you" 
+        message: "This ticket is not a major complaint or reversed ticket assigned to you" 
       });
     }
 
@@ -3906,65 +4058,80 @@ const forwardToDirectorGeneral = async (req, res) => {
     // Update resolution details if coordinator edited them
     if (resolution_details) {
       await ticket.update({
-        resolution_details: resolution_details,
-        coordinator_notes: coordinator_notes || "Coordinator reviewed and approved resolution"
-      });
-    } else {
-      // If no edits, just add coordinator notes
-      await ticket.update({
-        coordinator_notes: coordinator_notes || "Coordinator reviewed and approved resolution"
+        resolution_details: resolution_details
       });
     }
 
-    // Assign to Director General
-    await ticket.update({
-      assigned_to_id: directorGeneral.id,
-      assigned_to_role: "director-general",
-      status: "Assigned"
-    });
+    // Find the attendee's assignment record and update the description
+    if (resolution_details && assignmentId) {
+      // Find the specific assignment record by ID (primary key)
+      const attendeeAssignment = await TicketAssignment.findByPk(assignmentId);
+
+      if (attendeeAssignment) {
+        // Update the attendee's assignment record with the new description
+        await attendeeAssignment.update({
+          reason: resolution_details
+        });
+      }
+    }
+
+    // Assign to Director General using normal assignment process
+    await Ticket.update(
+      {
+        assigned_to_id: directorGeneral.id,
+        assigned_to_role: directorGeneral.role,
+        status: "Forwarded"
+      },
+      { where: { id: ticketId } }
+    );
 
     // Record the assignment to Director General
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: userId,
       assigned_to_id: directorGeneral.id,
-      assigned_to_role: "director-general",
-      action: "Forwarded to Director General",
-      reason: coordinator_notes || "Coordinator reviewed and forwarded to DG for approval",
-      coordinator_notes: coordinator_notes,
-      workflow_step: "Forwarded to DG",
+      assigned_to_role: directorGeneral.role,
+      action: "Forwarded",
+      reason: "Coordinator reviewed and forwarded to Director General for final approval",
       created_at: new Date()
     });
 
-    // Notify Director General by email
+    // Send email to assigned Director General (if email exists)
     if (directorGeneral.email) {
-      const emailSubject = `Major Complaint for Approval: ${ticket.subject} (ID: ${ticket.ticket_id})`;
-      const emailBody = `
-        <p>Dear ${directorGeneral.name},</p>
-        <p>A major complaint has been forwarded to you for approval:</p>
+      const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
+      const emailHtmlBody = `
+        <p>Dear ${directorGeneral.name || directorGeneral.username},</p>
+        <p>A ticket has been assigned to you for review. Details:</p>
         <ul>
-          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${ticket.subject}</li>
-          <li><strong>Category:</strong> ${ticket.category}</li>
-          <li><strong>Resolution:</strong> ${ticket.resolution_details}</li>
-          <li><strong>Coordinator Notes:</strong> ${coordinator_notes || "No additional notes"}</li>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
+          <li><strong>Description:</strong> ${ticket.description || ""}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Resolution Details:</strong> ${ticket.resolution_details || "No resolution provided"}</li>
+          <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
         </ul>
-        <p>Please review and approve or reverse to coordinator.</p>
+        <p>Please log in to the system to review and handle this ticket.</p>
         <p>Thank you,</p>
         <p>WCF Customer Care System</p>
       `;
-      
-      sendEmail({
-        to: [directorGeneral.email, 'rehema.said3@ttcl.co.tz'],
-        subject: emailSubject,
-        htmlBody: emailBody
-      }).catch(emailError => {
-        console.error("Error sending email to DG:", emailError.message);
-      });
+      try {
+        // Send assignment email in background
+        setImmediate(() => {
+          sendEmail({
+            to: ['rehema.said3@ttcl.co.tz'],
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          }).catch(emailError => {
+            console.error("Error sending assignment email:", emailError.message);
+          });
+        });
+      } catch (emailError) {
+        console.error("Error sending assignment email:", emailError.message);
+      }
     }
 
     res.status(200).json({
-      message: "Major complaint forwarded to Director General for approval",
+      message: `${isMajorComplaint ? "Major complaint" : "Reversed ticket"} assigned to Director General for review`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: directorGeneral.name
@@ -4015,7 +4182,7 @@ const getUserAgingStats = async (req, res) => {
     // Calculate aging for each assignment
     const assignmentsWithAging = calculateAssignmentsAging(assignments, endDate, 'calendar');
     
-    // Group by aging status
+    // Group by aging dg
     const stats = {
       total: assignmentsWithAging.length,
       onTime: 0,
@@ -4205,6 +4372,409 @@ const getTicketStatusExternal = async (req, res) => {
   }
 };
 
+const reverseComplaint = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, recommendation } = req.body;
+
+    if (!ticketId) {
+      return res.status(400).json({ message: "Ticket ID is required" });
+    }
+
+    if (!userId || !recommendation) {
+      return res.status(400).json({ 
+        message: "User ID and recommendation are required" 
+      });
+    }
+
+    // Get the current user to determine their role
+    const currentUser = await User.findByPk(userId);
+    if (!currentUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name"]
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Handle file upload if present
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`; // Save relative path
+      console.log("Attachment uploaded:", attachmentPath);
+    }
+
+    let targetUserId = null;
+    let targetUserRole = null;
+    let targetUserName = null;
+
+    // Determine where to send the ticket based on current user role
+    if (currentUser.role === "attendee" || currentUser.role === "agent") {
+      // If attendee/agent reverses, send to coordinator
+      const coordinator = await User.findOne({
+        where: { role: "coordinator" },
+        order: [["createdAt", "ASC"]] // Get the first coordinator
+      });
+      
+      if (!coordinator) {
+        return res.status(404).json({ message: "No coordinator found to reverse to" });
+      }
+      
+      targetUserId = coordinator.id;
+      targetUserRole = coordinator.role;
+      targetUserName = coordinator.name;
+    } else {
+      // For other roles, use the previous assignment logic
+      const assignments = await TicketAssignment.findAll({
+        where: { ticket_id: ticketId },
+        order: [["created_at", "DESC"]]
+      });
+
+      if (assignments.length < 2) {
+        return res
+          .status(400)
+          .json({ message: "No previous user to reverse to." });
+      }
+
+      // The previous user is the second most recent assignment
+      const prevAssignment = assignments[1];
+      targetUserId = prevAssignment.assigned_to_id;
+      targetUserRole = prevAssignment.assigned_to_role;
+      
+      const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+      targetUserName = prevUser ? prevUser.name : "Unknown";
+    }
+
+    // Update the ticket to assign to the target user
+    await ticket.update({
+      assigned_to_id: targetUserId,
+      assigned_to_role: targetUserRole,
+      status: "Reversed",
+      attachment_path: attachmentPath, // Save attachment path to ticket
+      attended_by_id: userId
+    });
+
+    // Add a new assignment record for the reversal
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: targetUserId,
+      assigned_to_role: targetUserRole,
+      action: "Reversed",
+      reason: recommendation || "Complaint reversed with recommendation",
+      attachment_path: attachmentPath, // Use attachment_path for consistency
+      created_at: new Date()
+    });
+
+    // Fetch attended_by user name and role
+    let attended_by_name = currentUser.name;
+    let attended_by_role = currentUser.role;
+
+    // Notify all coordinators and supervisors
+    const notifySubject = `Complaint Reversed: ${ticket.subject}`;
+    const notifyHtml = `
+      <p><strong>Complaint Reversed</strong></p>
+      <p>The following complaint has been reversed:</p>
+      <ul>
+        <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+        <li><strong>Subject:</strong> ${ticket.subject}</li>
+        <li><strong>Category:</strong> ${ticket.category}</li>
+        <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+        <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
+        <li><strong>Reversed To:</strong> ${targetUserName} (${targetUserRole || 'Unknown Role'})</li>
+        <li><strong>Agent Recommendation:</strong> ${recommendation}</li>
+        <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
+      </ul>
+    `;
+    const notifyMsg = `Complaint ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${targetUserName}.`;
+    await notifyUsersByRole(
+      ["coordinator", "supervisor"],
+      notifySubject,
+      notifyHtml,
+      ticketId,
+      userId,
+      notifyMsg
+    );
+
+    // Send email to the target user
+    const targetUser = await User.findByPk(targetUserId);
+    if (targetUser && targetUser.email) {
+      const subject = `Complaint Reversed: ${ticket.ticket_id || ticket.id}`;
+      const htmlBody = `
+        <p>Hello ${targetUser.name || ""},</p>
+        <p>The following complaint has been <b>reversed</b> to you:</p>
+        <ul>
+          <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
+          <li><b>Subject:</b> ${ticket.subject}</li>
+          <li><b>Category:</b> ${ticket.category}</li>
+          <li><b>Requester:</b> ${getRequesterDisplayName(ticket)}</li>
+          <li><b>Status:</b> Reversed</li>
+          <li><b>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
+          <li><b>Agent Recommendation:</b> ${recommendation}</li>
+          ${attachmentPath ? `<li><b>Attachment:</b> Included</li>` : ''}
+        </ul>
+        <p>Please log into the system to review and take action.</p>
+        <p>Regards,<br/>WCF Support Desk</p>
+      `;
+      try {
+        // await sendEmail({ to: targetUser.email, subject, htmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+      } catch (emailErr) {
+        console.error("Failed to send reversal email:", emailErr.message);
+        // Do not fail the reversal if email fails
+      }
+    }
+
+    res
+      .status(200)
+      .json({ message: "Complaint reversed with recommendation successfully." });
+  } catch (error) {
+    console.error("Error in reverseComplaint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to reverse complaint",
+      error: error.message
+    });
+  }
+};
+
+// DG approves and forwards to coordinator
+const approveAndForwardToCoordinator = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, dg_notes } = req.body;
+
+    if (!ticketId || !userId) {
+      return res.status(400).json({ message: "Ticket ID and user ID are required" });
+    }
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name"]
+        },
+        {
+          model: User,
+          as: "ratedBy",
+          attributes: ["id", "name", "email"]
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    
+
+    // Find Coordinator
+    const coordinator = await User.findOne({
+      where: { role: "coordinator" }
+    });
+
+    if (!coordinator) {
+      return res.status(404).json({ 
+        message: "Coordinator not found" 
+      });
+    }
+
+    // Forward to Coordinator
+    await Ticket.update(
+      {
+        assigned_to_id: coordinator.id,
+        assigned_to_role: coordinator.role,
+        status: "Assigned"
+      },
+      { where: { id: ticketId } }
+    );
+
+    // Record the assignment to Coordinator
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: coordinator.id,
+      assigned_to_role: coordinator.role,
+      action: "Forwarded",
+      reason: dg_notes || "Director General approved and forwarded to coordinator",
+      created_at: new Date()
+    });
+
+    // Send email to assigned Coordinator (if email exists)
+    if (coordinator.email) {
+      const emailSubject = `Ticket Forwarded: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
+      const emailHtmlBody = `
+        <p>Dear ${coordinator.name || coordinator.username},</p>
+        <p>A ticket has been forwarded to you by the Director General. Details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
+          <li><strong>Description:</strong> ${ticket.description || ""}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>DG Notes:</strong> ${dg_notes || "No notes provided"}</li>
+          <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        setImmediate(() => {
+          sendEmail({
+            to: ['rehema.said3@ttcl.co.tz'],
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          }).catch(emailError => {
+            console.error("Error sending assignment email:", emailError.message);
+          });
+        });
+      } catch (emailError) {
+        console.error("Error sending assignment email:", emailError.message);
+      }
+    }
+
+    res.status(200).json({
+      message: "Ticket approved and forwarded to coordinator successfully",
+      ticket: {
+        ...ticket.toJSON(),
+        assigned_to_name: coordinator.name
+      }
+    });
+  } catch (error) {
+    console.error("Error approving and forwarding to coordinator:", error);
+    return res.status(500).json({
+      message: "Failed to approve and forward to coordinator",
+      error: error.message
+    });
+  }
+};
+
+// DG reverses and assigns to coordinator
+const reverseAndAssignToCoordinator = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, dg_notes } = req.body;
+
+    if (!ticketId || !userId) {
+      return res.status(400).json({ message: "Ticket ID and user ID are required" });
+    }
+
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name"]
+        },
+        {
+          model: User,
+          as: "ratedBy",
+          attributes: ["id", "name", "email"]
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+   
+
+    // Find Coordinator
+    const coordinator = await User.findOne({
+      where: { role: "coordinator" }
+    });
+
+    if (!coordinator) {
+      return res.status(404).json({ 
+        message: "Coordinator not found" 
+      });
+    }
+
+    // Assign to Coordinator
+    await Ticket.update(
+      {
+        assigned_to_id: coordinator.id,
+        assigned_to_role: coordinator.role,
+        status: "Assigned"
+      },
+      { where: { id: ticketId } }
+    );
+
+    // Record the assignment to Coordinator
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: coordinator.id,
+      assigned_to_role: coordinator.role,
+      action: "Assigned",
+      reason: dg_notes || "Director General reversed and assigned to coordinator for more clarification",
+      created_at: new Date()
+    });
+
+    // Send email to assigned Coordinator (if email exists)
+    if (coordinator.email) {
+      const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
+      const emailHtmlBody = `
+        <p>Dear ${coordinator.name || coordinator.username},</p>
+        <p>A ticket has been assigned to you by the Director General for more clarification. Details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
+          <li><strong>Description:</strong> ${ticket.description || ""}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>DG Notes:</strong> ${dg_notes || "No notes provided"}</li>
+          <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        setImmediate(() => {
+          sendEmail({
+            to: ['rehema.said3@ttcl.co.tz'],
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          }).catch(emailError => {
+            console.error("Error sending assignment email:", emailError.message);
+          });
+        });
+      } catch (emailError) {
+        console.error("Error sending assignment email:", emailError.message);
+      }
+    }
+
+    res.status(200).json({
+      message: "Ticket reversed and assigned to coordinator successfully",
+      ticket: {
+        ...ticket.toJSON(),
+        assigned_to_name: coordinator.name
+      }
+    });
+  } catch (error) {
+    console.error("Error reversing and assigning to coordinator:", error);
+    return res.status(500).json({
+      message: "Failed to reverse and assign to coordinator",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   checkTicketSlaBreach,
   escalateAndUpdateTicketOnSlaBreach,
@@ -4247,5 +4817,8 @@ module.exports = {
   getEscalatedFromTickets,
   forwardToDirectorGeneral,
   getUserAgingStats,
-  getTicketStatusExternal
+  getTicketStatusExternal,
+  reverseComplaint,
+  approveAndForwardToCoordinator,
+  reverseAndAssignToCoordinator
 };
