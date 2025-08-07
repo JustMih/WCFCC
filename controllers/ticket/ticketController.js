@@ -17,7 +17,6 @@ const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 
-
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
  * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.

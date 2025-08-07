@@ -10,7 +10,7 @@ const sequelize = require("../../config/mysql_connection");
 
 const createUser = async (req, res) => {
   try {
-    const { name, email, password, extension, role, isActive } = req.body;
+    const { name, email, password, extension, role, isActive, unit_section } = req.body;
 
     if (
       ![
@@ -37,6 +37,7 @@ const createUser = async (req, res) => {
       extension,
       role,
       isActive,
+      unit_section,
     });
 
     res
@@ -529,7 +530,7 @@ const deactivateUser = async (req, res) => {
 
 const updateUser = async (req, res) => {
   const userId = req.params.id;
-  const { name, email, password, role, isActive, extension } = req.body;
+  const { name, email, password, role, isActive, extension, unit_section } = req.body;
 
   try {
     // Find the user by ID
@@ -563,6 +564,7 @@ const updateUser = async (req, res) => {
     if (role) user.role = role; // Optional: Only allow certain roles for admins
     if (extension) user.extension = extension;
     if (isActive) user.isActive = isActive;
+    if (unit_section !== undefined) user.unit_section = unit_section;
 
     // If role is 'agent', handle extension logic
     if (role === "agent" && extension) {
@@ -613,6 +615,7 @@ const updateUser = async (req, res) => {
         extension: user.extension,
         role: user.role,
         isActive: user.isActive,
+        unit_section: user.unit_section,
       },
     });
   } catch (error) {
