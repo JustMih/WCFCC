@@ -54,7 +54,7 @@ const sequelize = new Sequelize(
   process.env.DB_USER || "asterisk",
   process.env.DB_PASS || "Wcf@1234",
   {
-    host: process.env.DB_HOST || "192.168.1.170",
+    host: process.env.DB_HOST || "192.168.21.70",
     port: process.env.DB_PORT || 3306,
     dialect: "mysql",
     logging: false,
