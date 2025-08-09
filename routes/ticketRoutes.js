@@ -17,6 +17,7 @@ const { roleMiddleware } = require("../middleware/roleMiddleware");
 const { body } = require('express-validator'); // For validation
 const router = express.Router();
 const { Op } = require("sequelize");
+const { uploadSingle } = require('../config/multerConfig');
 
 // Import enhanced multer configuration
 const { 
