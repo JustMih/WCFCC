@@ -421,6 +421,43 @@ const GetAgentLogs = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+const getSupervisorOnline = async (req, res) => {
+  try {
+    const supervisors = await User.findAll({
+      where: { role: "supervisor", status: "online" },
+    });
+
+    const supervisorCount = supervisors.length;
+
+    // Debugging: Check how many online agents were found
+    console.log(`Found ${supervisorCount} online supervisors`);
+
+    res.status(200).json({ supervisors, supervisorCount });
+  } catch (error) {
+    console.error("Error fetching online supervisors:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getSupervisorOffline = async (req, res) => {
+  try {
+    const supervisors = await User.findAll({
+      where: { role: "supervisor", status: "offline" },
+    });
+
+    const supervisorCount = supervisors.length;
+
+    // Debugging: Check how many online agents were found
+    console.log(`Found ${supervisorCount} offline supervisors`);
+
+    res.status(200).json({ supervisors, supervisorCount });
+  } catch (error) {
+    console.error("Error fetching offline supervisors:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 const deleteUser = async (req, res) => {
   const userId = req.params.id;
 
@@ -703,6 +740,8 @@ module.exports = {
   getAgentPause,
   GetAgentLogs,
   getSupervisor,
+  getSupervisorOnline,
+  getSupervisorOffline,
   getMessage,
   updateAgentStatus,
   updateUserStatus,

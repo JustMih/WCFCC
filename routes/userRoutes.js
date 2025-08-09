@@ -17,6 +17,8 @@ const {
   getAgentPause,
   GetAgentLogs,
   getSupervisor,
+  getSupervisorOnline,
+  getSupervisorOffline,
   getMessage,
   updateAgentStatus,
   updateUserStatus,
@@ -84,6 +86,20 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin", "agent"]),
   getSupervisor
+);
+
+router.get(
+  "/supervisors-online",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent"]),
+  getSupervisorOnline
+);
+
+router.get(
+  "/supervisors-offline",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent"]),
+  getSupervisorOffline
 );
 
 router.get(
