@@ -27,11 +27,6 @@ const {
   ticketAttachmentsDirectory 
 } = require("../config/multerConfig");
 
-// Set up multer storage for ticket attachments
-if (!fs.existsSync(ticketAttachmentsDirectory)) {
-  fs.mkdirSync(ticketAttachmentsDirectory);
-}
-
 // Create User route
 router.post(
   "/create-ticket",
