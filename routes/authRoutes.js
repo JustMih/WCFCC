@@ -6,7 +6,6 @@ const {
   getTotalAgentStatus,
   getAgentLoginTime,
   loginRedirect,
-  proxyMacApp,
 } = require("../controllers/auth/authController");
 const router = express.Router();
 
