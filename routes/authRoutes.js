@@ -18,8 +18,6 @@ router.post("/logout", logout);
 // Login redirect route
 router.post("/login_redirect", loginRedirect);
 
-// Proxy MAC application route
-router.get("/proxy-mac", proxyMacApp);
 
 // Route to get the total online time of the agent for today
 router.get("/online-time", getAgentOnlineTime);
