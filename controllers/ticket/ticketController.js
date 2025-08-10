@@ -3283,28 +3283,102 @@ const getDashboardCounts = async (req, res) => {
     }
     // COORDINATOR LOGIC (add as needed)
     if (user.role === "coordinator") {
+      // Use the same logic as coordinator dashboard
+      const newTicketsCount = await Ticket.count({
+        where: {
+          category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+          status: { [Op.ne]: "Closed" },
+          assigned_to_id: userId,
+          [Op.and]: [
+            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+          ]
+        }
+      });
+
+      const escalatedTicketsCount = await Ticket.count({
+        where: {
+          category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+          [Op.and]: [
+            { [Op.or]: [{ status: '' }, { status: "Escalated" }] },
+            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+          ]
+        }
+      });
+
+      const complaintsCount = await Ticket.count({
+        where: {
+          category: "Complaint",
+          [Op.and]: [
+            { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
+            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+          ]
+        }
+      });
+
+      const suggestionsCount = await Ticket.count({
+        where: {
+          category: "Suggestion",
+          [Op.and]: [
+            { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+          ]
+        }
+      });
+
+      const complementsCount = await Ticket.count({
+        where: {
+          category: "Compliment",
+          [Op.and]: [
+            { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+          ]
+        }
+      });
+
+      const directorateCount = await Ticket.count({
+        where: {
+          responsible_unit_name: { [Op.like]: "%Directorate%" },
+          category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+          status: { [Op.ne]: "Closed" }
+        }
+      });
+
+      const unitsCount = await Ticket.count({
+        where: {
+          responsible_unit_name: { [Op.like]: "%Unit%" },
+          category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+          status: { [Op.ne]: "Closed" }
+        }
+      });
+
+      const closedCount = await Ticket.count({
+        where: {
+          category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+          status: "Closed"
+        }
+      });
+
       // Return the full nested structure expected by the sidebar
       return res.status(200).json({
         success: true,
         message: "Dashboard counts for coordinator",
         ticketStats: {
           newTickets: {
-            "New Tickets": 0,
-            "Escalated Tickets": 0,
-            Total: 0
+            "New Tickets": newTicketsCount,
+            "Escalated Tickets": escalatedTicketsCount,
+            Total: newTicketsCount + escalatedTicketsCount
           },
           convertedTickets: {
-            Complaints: 0,
-            Suggestions: 0,
-            Compliments: 0
+            Complaints: complaintsCount,
+            Suggestions: suggestionsCount,
+            Compliments: complementsCount
           },
           channeledTickets: {
-            Directorate: 0,
-            Units: 0
+            Directorate: directorateCount,
+            Units: unitsCount
           },
           ticketStatus: {
-            Closed: 0
-            // "On Progress": 0 // add if needed
+            Closed: closedCount
           }
         }
       });

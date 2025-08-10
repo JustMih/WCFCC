@@ -282,12 +282,24 @@ const convertOrForwardTicket = async (req, res) => {
         where: { unit_section: responsible_unit_name, role: 'head-of-unit' },
         transaction
       });
+      let anyUnitUser = null; // Declare outside the if-else block
       if (unitUser) {
         ticket.assigned_to_role = unitUser.role;
-        ticket.assigned_to_id = unitUser.id; // Add this line to assign to the head of unit
+        ticket.assigned_to_id = unitUser.id; // Assign to the head of unit
       } else {
-        ticket.assigned_to_role = null;
-        // If no head of unit found, keep assigned to coordinator
+        // If no head of unit found, find any user in that unit or assign to system
+        anyUnitUser = await User.findOne({
+          where: { unit_section: responsible_unit_name },
+          transaction
+        });
+        if (anyUnitUser) {
+          ticket.assigned_to_role = anyUnitUser.role;
+          ticket.assigned_to_id = anyUnitUser.id; // Assign to any user in the unit
+        } else {
+          // If no user found in the unit, assign to system user or keep with coordinator but mark as forwarded
+          ticket.assigned_to_role = 'system';
+          ticket.assigned_to_id = null; // Remove assignment to coordinator
+        }
       }
       ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
@@ -298,8 +310,8 @@ const convertOrForwardTicket = async (req, res) => {
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
-        assigned_to_id: unitUser.id,
-        assigned_to_role: unitUser.role,
+        assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : null),
+        assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'system'),
         action: "Forwarded",
         reason: `Ticket forwarded to ${responsible_unit_name} by coordinator`,
         created_at: new Date()
@@ -361,7 +373,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: "Complaint",
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
+          { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
     });
@@ -370,7 +383,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: "Suggestion",
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
     });
@@ -379,7 +393,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: "Compliment",
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
     });
@@ -388,12 +403,10 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     const newTicketsCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: { [Op.ne]: "Closed" },
+        assigned_to_id: req.user.userId,
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
-          // { converted_to: { [Op.is]: null } },
-          // { responsible_unit_name: { [Op.is]: null } },
-          // { complaint_type: { [Op.is]: null } },
-          // { created_at: { [Op.gte]: threeDaysAgo } }
+          { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
     });
@@ -404,18 +417,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
         [Op.and]: [
           { [Op.or]: [{ status: '' }, { status: "Escalated" }] },
-        
+          { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
-      }
-    });
-
-    // All New Tickets (no date filter)
-    const allNewTicketsTotal = await Ticket.count({
-      where: {
-        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        // [Op.and]: [
-        //   { [Op.or]: [{ status: null }, { status: "Open" }] }
-        // ]
       }
     });
 
@@ -424,7 +427,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         responsible_unit_name: { [Op.like]: "%Directorate%" },
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: { [Op.ne]: "Closed" }
+        status: { [Op.notIn]: ['Closed', 'Open'] }
       }
     });
 
@@ -432,25 +435,15 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         responsible_unit_name: { [Op.like]: "%Unit%" },
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: { [Op.ne]: "Closed" }
+        status: { [Op.notIn]: ['Closed', 'Open'] }
       }
     });
 
-    // Ticket Status Breakdown
-    // const openCount = await Ticket.count({
-    //   where: {
-    //     category: { [Op.in]: ['Complaint', 'Suggestion', 'Compliment'] },
-    //     [Op.or]: [
-    //       { status: null },
-    //       { status: 'Open' }
-    //     ]
-    //   }
-    // });
-
+    // Ticket Status Breakdown - Filtered by coordinator and excluding forwarded tickets
     const onProgressCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: { [Op.ne]: ["Closed"] },
+        status: { [Op.notIn]: ['Closed', 'Open'] },
         responsible_unit_name: { [Op.ne]: null },
         complaint_type: { [Op.ne]: null }
       }
@@ -501,7 +494,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       message: "Dashboard counts retrieved successfully",
       ticketStats: {
         newTickets: {
-          "Total": allNewTicketsTotal,
+          "Total": newTicketsCount + escalatedTicketsCount, // Fix: Use sum of sub-categories
           "New Tickets": newTicketsCount,
           "Escalated Tickets": escalatedTicketsCount
         },
@@ -553,7 +546,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
           assigned_to_id: req.user.userId,
           status: {
-            [Op.in]: ["Open", "Assigned", "Reversed", "Returned"]
+            [Op.in]: ["Open"]
           }
         };
         break;
@@ -870,9 +863,13 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause.status = {
-          [Op.in]: ["Open", "Assigned", "Reversed", "Returned"]
+          [Op.ne]: "Closed"
         };
         whereClause.assigned_to_id = req.user.userId;
+        // Explicitly exclude forwarded tickets
+        whereClause[Op.and] = [
+          { status: { [Op.ne]: "Forwarded" } }
+        ];
         break;
         case "escalated":
           whereClause = {
@@ -886,19 +883,22 @@ const getTicketsByStatus = async (req, res) => {
       case "complaints":
         whereClause.category = { [Op.in]: ["Complaint"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "suggestions":
         whereClause.category = { [Op.in]: ["Suggestion"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "complements":
         whereClause.category = { [Op.in]: ["Compliment"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] }
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "directorate":
@@ -906,9 +906,9 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "" }, { status: "Open" }, {status:"Assigned"},{ status: "Returned" }] },
-          { responsible_unit_name:  { [Op.like]: "%Directorate%" } },
-          
+          { status: { [Op.notIn]: ['Closed', 'Open'] } },
+          { responsible_unit_name:  { [Op.like]: "%Directorate%" } }
+          // { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
         case "units":
@@ -916,8 +916,9 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "" }, { status: "Open" },  {status:"Assigned"},{ status: "Returned" }] },
-          { responsible_unit_name: { [Op.like]: "%unit%" } },
+          { status: { [Op.notIn]: ['Closed', 'Open'] } },
+          { responsible_unit_name: { [Op.like]: "%Unit%" } }
+          // { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "open":
@@ -926,7 +927,8 @@ const getTicketsByStatus = async (req, res) => {
         };
         whereClause[Op.and] = [
           { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
-          { responsible_unit_name: { [Op.not]: null } }
+          { responsible_unit_name: { [Op.not]: null } },
+          { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "on-progress":
