@@ -105,6 +105,38 @@ const Ticket = sequelize.define(
     representative_address: { type: DataTypes.STRING(200), allowNull: true },
     representative_relationship: { type: DataTypes.STRING(50), allowNull: true },
     dependents: { type: DataTypes.STRING(1000), allowNull: true },
+    
+    // Workflow Tracking Fields
+    workflow_path: {
+      type: DataTypes.ENUM('MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE'),
+      allowNull: true
+    },
+    current_workflow_step: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 1
+    },
+    workflow_completed: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
+    workflow_started_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    workflow_completed_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    current_workflow_role: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    workflow_notes: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
   },
   {
     tableName: 'Tickets',

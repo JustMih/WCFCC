@@ -16,6 +16,7 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
+const workflowService = require("../../services/workflowCommunicationService");
 
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
@@ -2616,81 +2617,144 @@ const assignTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { assignedToUsername, assignedById, reason } = req.body;
+    
     if (!ticketId || !assignedToUsername || !assignedById) {
       return res.status(400).json({ message: "Missing required fields" });
     }
+
     const assignedTo = await User.findOne({
       where: { username: assignedToUsername }
     });
+    
     if (!assignedTo) {
       return res.status(404).json({ message: "Attendee not found" });
     }
-    // Update ticket assignment
-    await Ticket.update(
-      {
+
+    const assignedBy = await User.findByPk(assignedById);
+    if (!assignedBy) {
+      return res.status(404).json({ message: "Assigning user not found" });
+    }
+
+    // Get the ticket with workflow information
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Check if ticket has workflow path set
+    if (ticket.workflow_path) {
+      // Use workflow service to process the assignment
+      const result = await workflowService.processWorkflowStepTransition(
+        ticketId,
+        "Assigned",
+        assignedBy,
+        assignedTo,
+        reason || `Assigned to ${assignedTo.name || assignedTo.username}`,
+        null // No transaction needed here
+      );
+
+      if (!result.success) {
+        return res.status(500).json({ 
+          message: "Error processing workflow transition", 
+          error: result.error 
+        });
+      }
+
+      // Send email notification
+      if (assignedTo.email) {
+        const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
+        const emailHtmlBody = `
+          <p>Dear ${assignedTo.name || assignedTo.username},</p>
+          <p>You have been assigned a ticket. Details:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+            <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
+            <li><strong>Description:</strong> ${ticket.description || ""}</li>
+            <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+            <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
+            <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
+            <li><strong>Your Role:</strong> ${assignedTo.role}</li>
+          </ul>
+          <p>Please log in to the system to review and handle this ticket.</p>
+          <p>Thank you,</p>
+          <p>WCF Customer Care System</p>
+        `;
+
+        try {
+          await sendEmail({
+            to: assignedTo.email,
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          });
+        } catch (emailError) {
+          console.error("Error sending assignment email:", emailError.message);
+        }
+      }
+
+      return res.json({ 
+        message: "Ticket assigned successfully with workflow tracking",
+        workflow: result.workflow,
+        assignment: result.assignment
+      });
+    } else {
+      // Fallback to original assignment logic for tickets without workflow
+      await Ticket.update(
+        {
+          assigned_to_id: assignedTo.id,
+          assigned_to_role: assignedTo.role,
+          status: "Assigned"
+        },
+        { where: { id: ticketId } }
+      );
+
+      // Create basic assignment record
+      await TicketAssignment.create({
+        ticket_id: ticketId,
+        assigned_by_id: assignedById,
         assigned_to_id: assignedTo.id,
         assigned_to_role: assignedTo.role,
-        status: "Assigned"
-      },
-      { where: { id: ticketId } }
-    );
-    // Track assignment
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: assignedById,
-      assigned_to_id: assignedTo.id,
-      assigned_to_role: assignedTo.role,
-      action: "Assigned",
-      reason,
-      created_at: new Date()
-    });
-    // Send email to assigned attendee (if email exists)
-    if (assignedTo.email) {
-      const ticket = await Ticket.findOne({ where: { id: ticketId } });
-      const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${
-        ticket.ticket_id || ticketId
-      })`;
-      const emailHtmlBody = `
-        <p>Dear ${assignedTo.name || assignedTo.username},</p>
-        <p>You have been assigned a ticket. Details:</p>
-        <ul>
-          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
-          <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
-          <li><strong>Description:</strong> ${ticket.description || ""}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-        </ul>
-        <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
-      `;
-      try {
-        // await sendEmail({ to: assignedTo.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({
-          to: "rehema.said3@ttcl.co.tz",
-          subject: emailSubject,
-          htmlBody: emailHtmlBody
-        });
-      } catch (emailError) {
-        console.error("Error sending assignment email:", emailError.message);
-      }
-      // Send assignment email in background
-      setImmediate(() => {
-        sendEmail({
-          to: [assignedTo.email, 'rehema.said3@ttcl.co.tz'],
-          subject: emailSubject,
-          htmlBody: emailHtmlBody
-        }).catch(emailError => {
-          console.error("Error sending assignment email:", emailError.message);
-        });
+        action: "Assigned",
+        reason,
+        created_at: new Date()
       });
+
+      // Send email notification
+      if (assignedTo.email) {
+        const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
+        const emailHtmlBody = `
+          <p>Dear ${assignedTo.name || assignedTo.username},</p>
+          <p>You have been assigned a ticket. Details:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
+            <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
+            <li><strong>Description:</strong> ${ticket.description || ""}</li>
+            <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          </ul>
+          <p>Please log in to the system to review and handle this ticket.</p>
+          <p>Thank you,</p>
+          <p>WCF Customer Care System</p>
+        `;
+
+        try {
+          await sendEmail({
+            to: assignedTo.email,
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          });
+        } catch (emailError) {
+          console.error("Error sending assignment email:", emailError.message);
+        }
+      }
+
+      return res.json({ message: "Ticket assigned successfully" });
     }
-    res.json({ message: "Ticket assigned successfully" });
-    return;
+
   } catch (error) {
     console.error("Error assigning ticket:", error);
-    return res
-      .status(500)
-      .json({ message: "Internal server error", error: error.message });
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -2754,40 +2818,50 @@ const getTicketAssignments = async (req, res) => {
       attributes: ['id', 'category', 'complaint_type', 'status']
     });
     
+    // First get the assignments without associations
     const assignments = await TicketAssignment.findAll({
       where: { ticket_id: ticketId },
-      include: [
-        {
-          model: User,
-          as: "assignee",
-          attributes: ["id", "name", "role"]
-        }
-      ],
       order: [["created_at", "ASC"]]
     });
     
-    let mappedAssignments = assignments.map((a) => ({
+    // Then manually fetch the user data for each assignment
+    const assignmentsWithUsers = await Promise.all(
+      assignments.map(async (assignment) => {
+        const assignedToUser = await User.findByPk(assignment.assigned_to_id, {
+          attributes: ["id", "name", "role"]
+        });
+        
+        const assignedByUser = await User.findByPk(assignment.assigned_by_id, {
+          attributes: ["id", "name"]
+        });
+        
+        return {
+          ...assignment.toJSON(),
+          assignedTo: assignedToUser,
+          assignedBy: assignedByUser
+        };
+      })
+    );
+    
+    let mappedAssignments = assignmentsWithUsers.map((a) => ({
       assigned_to_id: a.assigned_to_id,
-      assigned_to_name: a.assignee ? a.assignee.name : null,
-      assigned_to_role: a.assignee ? a.assignee.role : null,
+      assigned_to_name: a.assignedTo ? a.assignedTo.name : null,
+      assigned_to_role: a.assignedTo ? a.assignedTo.role : null,
       reason: a.reason,
       action: a.action,
       created_at: a.created_at,
       attachment_path: a.attachment_path,
-      evidence_url: a.evidence_url
+      evidence_url: a.evidence_url,
+      action_details: a.action_details,
+      workflow_step: a.workflow_step,
+      workflow_path: a.workflow_path
     }));
     
     // Add creator_name to the first assignment if available
-    if (assignments.length > 0) {
-      const creatorUser = await User.findOne({
-        where: { id: assignments[0].assigned_by_id }
-      });
-      if (creatorUser) {
-        mappedAssignments[0].creator_name =
-          creatorUser.name ||
-          `${creatorUser.first_name || ""} ${
-            creatorUser.last_name || ""
-          }`.trim();
+    if (mappedAssignments.length > 0) {
+      const firstAssignment = assignmentsWithUsers[0];
+      if (firstAssignment.assignedBy) {
+        mappedAssignments[0].creator_name = firstAssignment.assignedBy.name || 'N/A';
       }
     }
     
@@ -2813,7 +2887,6 @@ const getTicketAssignments = async (req, res) => {
       };
     });
     
-    console.log("ticket assignment with aging", finalAssignments);
     res.json(finalAssignments);
   } catch (error) {
     console.error("Error in getTicketAssignments:", error);
@@ -3437,103 +3510,212 @@ const reverseTicket = async (req, res) => {
       console.log("Attachment uploaded:", attachmentPath);
     }
 
-    // Update the ticket to assign to the previous user
-    await ticket.update({
-      assigned_to_id: prevAssignment.assigned_to_id,
-      assigned_to_role: prevAssignment.assigned_to_role,
-      status: "Reversed",
-      attachment_path: attachmentPath, // Save attachment path to ticket
-      attended_by_id: userId
-    });
-
-    // Add a new assignment record for the reversal
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: userId,
-      assigned_to_id: prevAssignment.assigned_to_id,
-      assigned_to_role: prevAssignment.assigned_to_role,
-      action: "Reversed",
-      reason: reason || "Ticket reversed to previous user",
-      attachment_path: attachmentPath, // Use attachment_path instead of attachment
-      created_at: new Date()
-    });
-
-    // Fetch attended_by user name and role
-    let attended_by_name = null;
-    let attended_by_role = null;
-    if (userId) {
-      const attendedByUser = await User.findOne({ where: { id: userId } });
-      attended_by_name = attendedByUser ? attendedByUser.name : null;
-      attended_by_role = attendedByUser ? attendedByUser.role : null;
+    const assignedBy = await User.findByPk(userId);
+    if (!assignedBy) {
+      return res.status(404).json({ message: "Reversing user not found" });
     }
 
-    // Fetch previous user details
-    const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+    // Check if ticket has workflow path set
+    if (ticket.workflow_path) {
+      // Use workflow service to process the reversal
+      const result = await workflowService.processWorkflowStepTransition(
+        ticketId,
+        "Reversed",
+        assignedBy,
+        { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
+        reason || "Ticket reversed to previous user",
+        null // No transaction needed here
+      );
 
-    // Notify all coordinators and supervisors
-    const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-    const notifyHtml = `
-      <p><strong>Ticket Reversed</strong></p>
-      <p>The following ticket has been reversed:</p>
-      <ul>
-        <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-        <li><strong>Subject:</strong> ${ticket.subject}</li>
-        <li><strong>Category:</strong> ${ticket.category}</li>
-        <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-        <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
-        <li><strong>Reversed To:</strong> ${prevUser ? prevUser.name : 'Unknown'} (${prevAssignment.assigned_to_role || 'Unknown Role'})</li>
-        <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-        <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
-      </ul>
-    `;
-    const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.name : 'Unknown'}.`;
-    await notifyUsersByRole(
-      ["coordinator", "supervisor"],
-      notifySubject,
-      notifyHtml,
-      ticketId,
-      userId,
-      notifyMsg
-    );
-
-    // Send email to the previous user
-    if (prevUser && prevUser.email) {
-      const subject = `Ticket Reversed: ${ticket.ticket_id || ticket.id}`;
-      const htmlBody = `
-        <p>Hello ${prevUser.name || ""},</p>
-        <p>The following ticket has been <b>reversed</b> to you:</p>
-        <ul>
-          <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
-          <li><b>Subject:</b> ${ticket.subject}</li>
-          <li><b>Category:</b> ${ticket.category}</li>
-          <li><b>Requester:</b> ${getRequesterDisplayName(ticket)}</li>
-          <li><b>Status:</b> Reversed</li>
-          <li><b>Reversed By:</b> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
-          <li><b>Reversal Reason:</b> ${reason || "Ticket reversed to previous user"}</li>
-          ${attachmentPath ? `<li><b>Attachment:</b> Included</li>` : ''}
-        </ul>
-        <p>Please log into the system to review and take action.</p>
-        <p>Regards,<br/>WCF Support Desk</p>
-      `;
-      try {
-        // await sendEmail({ to: prevUser.email, subject, htmlBody });
-        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
-      } catch (emailErr) {
-        console.error("Failed to send reversal email:", emailErr.message);
-        // Do not fail the reversal if email fails
+      if (!result.success) {
+        return res.status(500).json({ 
+          message: "Error processing workflow reversal", 
+          error: result.error 
+        });
       }
+
+      // Update attachment path if file was uploaded
+      if (attachmentPath) {
+        await ticket.update({ attachment_path: attachmentPath });
+      }
+
+      // Fetch attended_by user name and role
+      let attended_by_name = assignedBy.name;
+      let attended_by_role = assignedBy.role;
+
+      // Fetch previous user details
+      const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+
+      // Notify all coordinators and supervisors
+      const notifySubject = `Ticket Reversed: ${ticket.subject}`;
+      const notifyHtml = `
+        <p><strong>Ticket Reversed</strong></p>
+        <p>The following ticket has been reversed:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
+          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
+          <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+          <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
+          <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
+          <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
+        </ul>
+      `;
+      
+      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.name : 'Unknown'}.`;
+      
+      await notifyUsersByRole(
+        ["coordinator", "supervisor"],
+        notifySubject,
+        notifyHtml,
+        ticketId,
+        userId,
+        notifyMsg
+      );
+
+      // Send email to the previous user
+      if (prevUser && prevUser.email) {
+        const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
+        const emailHtmlBody = `
+          <p>Dear ${prevUser.name || prevUser.username},</p>
+          <p>A ticket has been reversed back to you:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${ticket.subject}</li>
+            <li><strong>Category:</strong> ${ticket.category}</li>
+            <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
+            <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+            <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
+            <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
+          </ul>
+          <p>Please review and take appropriate action.</p>
+          <p>Thank you,</p>
+          <p>WCF Customer Care System</p>
+        `;
+
+        try {
+          await sendEmail({
+            to: prevUser.email,
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          });
+        } catch (emailError) {
+          console.error("Error sending reversal email:", emailError.message);
+        }
+      }
+
+      return res.json({
+        message: "Ticket reversed successfully with workflow tracking",
+        workflow: result.workflow,
+        assignment: result.assignment
+      });
+
+    } else {
+      // Fallback to original reversal logic for tickets without workflow
+      await ticket.update({
+        assigned_to_id: prevAssignment.assigned_to_id,
+        assigned_to_role: prevAssignment.assigned_to_role,
+        status: "Reversed",
+        attachment_path: attachmentPath,
+        attended_by_id: userId
+      });
+
+      // Add a new assignment record for the reversal
+      await TicketAssignment.create({
+        ticket_id: ticketId,
+        assigned_by_id: userId,
+        assigned_to_id: prevAssignment.assigned_to_id,
+        assigned_to_role: prevAssignment.assigned_to_role,
+        action: "Reversed",
+        reason: reason || "Ticket reversed to previous user",
+        attachment_path: attachmentPath,
+        created_at: new Date()
+      });
+
+      // Fetch attended_by user name and role
+      let attended_by_name = null;
+      let attended_by_role = null;
+      if (userId) {
+        const attendedByUser = await User.findOne({ where: { id: userId } });
+        attended_by_name = attendedByUser ? attendedByUser.name : null;
+        attended_by_role = attendedByUser ? attendedByUser.role : null;
+      }
+
+      // Fetch previous user details
+      const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+
+      // Notify all coordinators and supervisors
+      const notifySubject = `Ticket Reversed: ${ticket.subject}`;
+      const notifyHtml = `
+        <p><strong>Ticket Reversed</strong></p>
+        <p>The following ticket has been reversed:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
+          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
+          <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+          <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
+        </ul>
+      `;
+      
+      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.name : 'Unknown'}.`;
+      
+      await notifyUsersByRole(
+        ["coordinator", "supervisor"],
+        notifySubject,
+        notifyHtml,
+        ticketId,
+        userId,
+        notifyMsg
+      );
+
+      // Send email to the previous user
+      if (prevUser && prevUser.email) {
+        const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
+        const emailHtmlBody = `
+          <p>Dear ${prevUser.name || prevUser.username},</p>
+          <p>A ticket has been reversed back to you:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${ticket.subject}</li>
+            <li><strong>Category:</strong> ${ticket.category}</li>
+            <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
+            <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+          </ul>
+          <p>Please review and take appropriate action.</p>
+          <p>Thank you,</p>
+          <p>WCF Customer Care System</p>
+        `;
+
+        try {
+          await sendEmail({
+            to: prevUser.email,
+            subject: emailSubject,
+            htmlBody: emailHtmlBody
+          });
+        } catch (emailError) {
+          console.error("Error sending reversal email:", emailError.message);
+        }
+      }
+
+      return res.json({ message: "Ticket reversed successfully" });
     }
 
-    res
-      .status(200)
-      .json({ message: "Ticket reversed to previous user successfully." });
   } catch (error) {
     console.error("Error reversing ticket:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to reverse ticket", error: error.message });
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
   }
 };
+
 // ... existing code ...
 
 // --- Ticket Count Endpoints for Sidebar ---
@@ -4774,23 +4956,170 @@ const reverseAndAssignToCoordinator = async (req, res) => {
   }
 };
 
+/**
+ * Get workflow information for a ticket
+ */
+const getTicketWorkflowInfo = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    if (!ticketId) {
+      return res.status(400).json({ message: "Ticket ID is required" });
+    }
+
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Check if ticket has workflow path set
+    if (!ticket.workflow_path) {
+      return res.status(400).json({ 
+        message: "This ticket does not have a workflow path set",
+        ticket: {
+          id: ticket.id,
+          ticket_id: ticket.ticket_id,
+          subject: ticket.subject,
+          category: ticket.category,
+          status: ticket.status
+        }
+      });
+    }
+
+    // Get workflow information using the service
+    const workflowInfo = workflowService.getWorkflowInfo(ticket);
+    if (!workflowInfo) {
+      return res.status(400).json({ 
+        message: "Invalid workflow path for this ticket",
+        workflow_path: ticket.workflow_path
+      });
+    }
+
+    // Get SLA compliance status
+    const slaCompliance = workflowService.checkSLACompliance(ticket);
+    
+    // Calculate estimated completion
+    const estimatedCompletion = workflowService.calculateEstimatedCompletion(ticket);
+
+    // Get current assignment details
+    let currentAssignee = null;
+    if (ticket.assigned_to_id) {
+      currentAssignee = await User.findByPk(ticket.assigned_to_id, {
+        attributes: ['id', 'name', 'username', 'role', 'email']
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        ticket: {
+          id: ticket.id,
+          ticket_id: ticket.ticket_id,
+          subject: ticket.subject,
+          category: ticket.category,
+          complaint_type: ticket.complaint_type,
+          status: ticket.status,
+          unit_section: ticket.unit_section,
+          workflow_path: ticket.workflow_path,
+          current_workflow_step: ticket.current_workflow_step,
+          workflow_total_steps: ticket.workflow_total_steps,
+          workflow_current_role: ticket.workflow_current_role,
+          workflow_started_at: ticket.workflow_started_at,
+          workflow_completed: ticket.workflow_completed,
+          created_at: ticket.created_at,
+          updated_at: ticket.updated_at
+        },
+        workflow: {
+          path: workflowInfo.path,
+          current_step: workflowInfo.currentStep,
+          total_steps: workflowInfo.totalSteps,
+          current_role: workflowInfo.currentRole,
+          next_role: workflowInfo.nextRole,
+          steps: workflowInfo.steps,
+          sla: workflowInfo.sla
+        },
+        sla: {
+          compliance: slaCompliance,
+          estimated_completion: estimatedCompletion,
+          current_step_deadline: workflowService.getNextStepDeadline ? 
+            workflowService.getNextStepDeadline(ticket, workflowInfo.sla) : null
+        },
+        current_assignment: currentAssignee ? {
+          id: currentAssignee.id,
+          name: currentAssignee.name,
+          username: currentAssignee.username,
+          role: currentAssignee.role,
+          email: currentAssignee.email
+        } : null,
+        progress: {
+          percentage: Math.round((workflowInfo.currentStep / workflowInfo.totalSteps) * 100),
+          current_step: workflowInfo.currentStep,
+          total_steps: workflowInfo.totalSteps,
+          remaining_steps: workflowInfo.totalSteps - workflowInfo.currentStep
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error getting ticket workflow info:", error);
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * Get workflow audit trail for a ticket
+ */
+const getTicketWorkflowAuditTrail = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    if (!ticketId) {
+      return res.status(400).json({ message: "Ticket ID is required" });
+    }
+
+    const auditTrail = await workflowService.getWorkflowAuditTrail(ticketId);
+    
+    if (!auditTrail) {
+      return res.status(404).json({ 
+        message: "Ticket not found or no workflow path set" 
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: auditTrail
+    });
+
+  } catch (error) {
+    console.error("Error getting workflow audit trail:", error);
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
-  checkTicketSlaBreach,
-  escalateAndUpdateTicketOnSlaBreach,
+  getTicketCounts,
+  generateTicketId,
+  mapFunctionDataToFunctionId,
   createTicket,
   getTickets,
-  getTicketCounts,
   getOpenTickets,
   getAssignedTickets,
   getInprogressTickets,
   getCarriedForwardTickets,
   getClosedTickets,
   getOverdueTickets,
-  getAllTickets,
   getAllCustomersTickets,
+  getAllTickets,
   mockComplaintWorkflow,
   searchByPhoneNumber,
   getTicketById,
+  notifyUsersByRole,
   closeTicket,
   closeCoordinatorTicket,
   assignTicket,
@@ -4814,10 +5143,13 @@ module.exports = {
   getEverAssignedTicketsCount,
   getAllTicketsCount,
   getEscalatedFromTickets,
+  getRequesterDisplayName,
   forwardToDirectorGeneral,
   getUserAgingStats,
   getTicketStatusExternal,
   reverseComplaint,
   approveAndForwardToCoordinator,
-  reverseAndAssignToCoordinator
+  reverseAndAssignToCoordinator,
+  getTicketWorkflowInfo,
+  getTicketWorkflowAuditTrail
 };

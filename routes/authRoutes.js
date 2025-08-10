@@ -6,6 +6,7 @@ const {
   getTotalAgentStatus,
   getAgentLoginTime,
   loginRedirect,
+  encryptWithOpenSSL,
 } = require("../controllers/auth/authController");
 const router = express.Router();
 
