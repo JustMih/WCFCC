@@ -396,7 +396,7 @@ const loginRedirect = async (req, res) => {
     const employerRaw = req.body?.employer_id;
     
     const auth_data = {
-      username: 'mmsaki-admin',
+      username:'mmsaki-admin',
       notification_report_id: idRaw || '',
       employer_id: employerRaw || ''
     };
