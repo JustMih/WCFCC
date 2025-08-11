@@ -1275,7 +1275,7 @@ const getAssignedTickets = async (req, res) => {
         where: {
           assigned_to_id: userId,
           status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "Escalated", 
-            "In Progress", "Attended and Recommended"] }
+            "Reversed","In Progress", "Attended and Recommended"] }
         },
         include: [
           {
@@ -2823,40 +2823,53 @@ const getAllAttendee = async (req, res) => {
     
     console.log(`DEBUG: Current user - Role: ${currentUser.role}, Unit: ${currentUser.unit_section}`);
     
-    // Build the where clause to filter attendees by the same unit/section
+    // Build the where clause to filter users
     let whereClause = { 
-      role: "attendee", // Only show users with attendee role
       isActive: true // Only active users
     };
     
-    // If current user has a unit_section, filter attendees by the same unit
-    // This ensures Head of Unit users only see attendees from their own unit
-    if (currentUser.unit_section) {
-      whereClause.unit_section = currentUser.unit_section;
-      console.log(`DEBUG: Filtering attendees by unit_section: ${currentUser.unit_section}`);
-    } else {
-      console.log(`DEBUG: No unit_section found for current user, showing all attendees`);
+    // Determine which role to show based on current user's role and unit section
+    let targetRole = "attendee"; // Default role
+    
+    // If current user is Head of Unit and their unit section contains "directorate", show managers
+    if (currentUser.role === "head-of-unit" && 
+        currentUser.unit_section && 
+        currentUser.unit_section.toLowerCase().includes("directorate")) {
+      targetRole = "manager";
+      console.log(`DEBUG: Head of Unit with directorate unit, showing managers instead of attendees`);
     }
     
-    const attendee = await User.findAll({
+    whereClause.role = targetRole;
+    
+    // If current user has a unit_section, filter users by the same unit
+    if (currentUser.unit_section) {
+      whereClause.unit_section = currentUser.unit_section;
+      console.log(`DEBUG: Filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
+    } else {
+      console.log(`DEBUG: No unit_section found for current user, showing all ${targetRole}s`);
+    }
+    
+    const users = await User.findAll({
       where: whereClause,
       attributes: ['id', 'name', 'username', 'email', 'role', 'unit_section']
     });
     
-    console.log(`DEBUG: Found ${attendee.length} attendees matching criteria`);
-    console.log(`DEBUG: Attendees:`, attendee.map(a => ({ name: a.name, username: a.username, role: a.role, unit: a.unit_section })));
+    console.log(`DEBUG: Found ${users.length} ${targetRole}s matching criteria`);
+    console.log(`DEBUG: Users:`, users.map(u => ({ name: u.name, username: u.username, role: u.role, unit: u.unit_section })));
     
     res.status(200).json({ 
-      attendees: attendee,
+      attendees: users, // Keep the same response structure for compatibility
       currentUserUnit: currentUser.unit_section || 'No unit assigned',
       currentUserRole: currentUser.role,
+      targetRole: targetRole, // Add this to show what role was actually fetched
       debug: {
         filteredByUnit: !!currentUser.unit_section,
-        attendeeCount: attendee.length
+        userCount: users.length,
+        isDirectorateUnit: currentUser.unit_section && currentUser.unit_section.toLowerCase().includes("directorate")
       }
     });
   } catch (error) {
-    console.error("Error fetching attendees:", error);
+    console.error("Error fetching users:", error);
     res.status(500).json({ message: "server error", error: error.message });
   }
 };
@@ -4756,42 +4769,25 @@ const reverseComplaint = async (req, res) => {
     let targetUserRole = null;
     let targetUserName = null;
 
-    // Determine where to send the ticket based on current user role
-    if (currentUser.role === "attendee" || currentUser.role === "agent") {
-      // If attendee/agent reverses, send to coordinator
-      const coordinator = await User.findOne({
-        where: { role: "coordinator" },
-        order: [["createdAt", "ASC"]] // Get the first coordinator
-      });
-      
-      if (!coordinator) {
-        return res.status(404).json({ message: "No coordinator found to reverse to" });
-      }
-      
-      targetUserId = coordinator.id;
-      targetUserRole = coordinator.role;
-      targetUserName = coordinator.name;
-    } else {
-      // For other roles, use the previous assignment logic
-      const assignments = await TicketAssignment.findAll({
-        where: { ticket_id: ticketId },
-        order: [["created_at", "DESC"]]
-      });
+    // Always use the previous assignment logic for all roles
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [["created_at", "DESC"]]
+    });
 
-      if (assignments.length < 2) {
-        return res
-          .status(400)
-          .json({ message: "No previous user to reverse to." });
-      }
-
-      // The previous user is the second most recent assignment
-      const prevAssignment = assignments[1];
-      targetUserId = prevAssignment.assigned_to_id;
-      targetUserRole = prevAssignment.assigned_to_role;
-      
-      const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
-      targetUserName = prevUser ? prevUser.name : "Unknown";
+    if (assignments.length < 2) {
+      return res
+        .status(400)
+        .json({ message: "No previous user to reverse to." });
     }
+
+    // The previous user is the second most recent assignment
+    const prevAssignment = assignments[1];
+    targetUserId = prevAssignment.assigned_to_id;
+    targetUserRole = prevAssignment.assigned_to_role;
+    
+    const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
+    targetUserName = prevUser ? prevUser.name : "Unknown";
 
     // Update the ticket to assign to the target user
     await ticket.update({
@@ -5251,30 +5247,184 @@ const getTicketWorkflowInfo = async (req, res) => {
 const getTicketWorkflowAuditTrail = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    
-    if (!ticketId) {
-      return res.status(400).json({ message: "Ticket ID is required" });
+    const { userId } = req.body;
+
+    // Find the ticket
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
     }
 
-    const auditTrail = await workflowService.getWorkflowAuditTrail(ticketId);
-    
-    if (!auditTrail) {
+    // Get all assignments for this ticket
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [["created_at", "ASC"]],
+      include: [
+        {
+          model: User,
+          as: "assignedBy",
+          attributes: ["id", "name", "username", "role", "unit_section"]
+        },
+        {
+          model: User,
+          as: "assignedTo",
+          attributes: ["id", "name", "username", "role", "unit_section"]
+        }
+      ]
+    });
+
+    // Calculate aging for each assignment
+    const assignmentsWithAging = await Promise.all(
+      assignments.map(async (assignment) => {
+        const aging = await calculateAssignmentsAging(assignment);
+        return {
+          ...assignment.toJSON(),
+          aging_formatted: aging.formatted,
+          aging_status: aging.status
+        };
+      })
+    );
+
+    res.status(200).json({
+      message: "Workflow audit trail retrieved successfully",
+      auditTrail: assignmentsWithAging
+    });
+  } catch (error) {
+    console.error("Error getting workflow audit trail:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Manager attending major complaints - send to Head of Unit
+const managerAttendMajor = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, recommendation, evidence_url, responsible_unit_name } = req.body;
+
+    // Find the ticket
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Verify the user is a manager and the ticket is assigned to them
+    const manager = await User.findByPk(userId);
+    if (!manager || manager.role !== "manager") {
+      return res.status(403).json({ message: "Only managers can perform this action" });
+    }
+
+    if (ticket.assigned_to_id !== userId) {
+      return res.status(403).json({ message: "Ticket is not assigned to you" });
+    }
+
+    if (ticket.complaint_type !== "Major") {
+      return res.status(400).json({ message: "This action is only for Major complaints" });
+    }
+
+    // Determine the target unit section
+    const targetUnitSection = responsible_unit_name || manager.unit_section;
+    if (!targetUnitSection) {
+      return res.status(400).json({ message: "No target unit section found" });
+    }
+
+    // Find Head of Unit in the target unit section
+    const headOfUnit = await User.findOne({
+      where: {
+        unit_section: targetUnitSection,
+        role: "head-of-unit"
+      }
+    });
+
+    if (!headOfUnit) {
       return res.status(404).json({ 
-        message: "Ticket not found or no workflow path set" 
+        message: `No Head of Unit found for unit section: ${targetUnitSection}` 
       });
     }
 
-    return res.json({
-      success: true,
-      data: auditTrail
+    // Create ticket assignment record for manager's attendance
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: userId,
+      assigned_to_role: "manager",
+      action: "Reversed",
+      reason: recommendation || "Manager attended Major complaint",
+      attachment_path: evidence_url,
+      created_at: new Date()
     });
 
-  } catch (error) {
-    console.error("Error getting workflow audit trail:", error);
-    return res.status(500).json({ 
-      message: "Internal server error", 
-      error: error.message 
+    // Update ticket to assign to Head of Unit
+    ticket.assigned_to_id = headOfUnit.id;
+    ticket.assigned_to_role = "head-of-unit";
+    ticket.status = "Assigned";
+    ticket.responsible_unit_name = targetUnitSection;
+    await ticket.save();
+
+    // Create ticket assignment record for assignment to Head of Unit
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: headOfUnit.id,
+      assigned_to_role: "head-of-unit",
+      action: "Assigned",
+      reason: `Ticket attended by manager and assigned to Head of Unit of ${targetUnitSection}`,
+      created_at: new Date()
     });
+
+    // Create notification for Head of Unit
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: headOfUnit.id,
+      message: `Major complaint attended by manager and assigned to you: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+      category: "Assigned"
+    });
+
+    // Send email to Head of Unit
+    if (headOfUnit.email) {
+      const emailSubject = `Major Complaint Attended and Assigned: ${ticket.subject || ticket.ticket_id}`;
+      const emailBody = `
+        <p>Dear ${headOfUnit.name || 'Head of Unit'},</p>
+        <p>A major complaint has been attended by a manager and assigned to you for review.</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || 'N/A'}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Complaint Type:</strong> ${ticket.complaint_type}</li>
+          <li><strong>Manager's Recommendation:</strong> ${recommendation || 'No recommendation provided'}</li>
+          <li><strong>Unit Section:</strong> ${targetUnitSection}</li>
+        </ul>
+        <p>Please log into the system to review and take appropriate action.</p>
+        <p>Thank you.</p>
+      `;
+      
+      sendEmail({
+        // to: headOfUnit.email,
+        to: ['rehema.said3@ttcl.co.tz'],
+        subject: emailSubject,
+        htmlBody: emailBody
+      }).catch(emailError => {
+        console.error("Error sending email to Head of Unit:", emailError.message);
+      });
+    }
+
+    res.status(200).json({
+      message: "Major complaint attended and assigned to Head of Unit successfully",
+      data: {
+        ticket,
+        assignedTo: {
+          id: headOfUnit.id,
+          name: headOfUnit.name,
+          role: headOfUnit.role,
+          unit_section: headOfUnit.unit_section
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error in manager attend major:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -5327,5 +5477,6 @@ module.exports = {
   approveAndForwardToCoordinator,
   reverseAndAssignToCoordinator,
   getTicketWorkflowInfo,
-  getTicketWorkflowAuditTrail
+  getTicketWorkflowAuditTrail,
+  managerAttendMajor
 };

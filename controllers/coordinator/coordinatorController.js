@@ -315,16 +315,16 @@ const convertOrForwardTicket = async (req, res) => {
       // Determine the appropriate role to assign to based on complaint type and unit type
       let targetRole = null;
       if (ticket.complaint_type === 'Minor') {
-        if (responsible_unit_name && responsible_unit_name.toLowerCase().includes('directorate')) {
-          targetRole = 'director-general'; // For directorate, go to DG
+        if (responsible_unit_name && (responsible_unit_name.includes('Directorate') || responsible_unit_name.includes('directorate'))) {
+          targetRole = 'director'; // For directorate, go to Director
         } else {
-          targetRole = 'supervisor'; // For unit, go to Head of Unit
+          targetRole = 'head-of-unit'; // For unit, go to Head of Unit
         }
       } else if (ticket.complaint_type === 'Major') {
-        if (responsible_unit_name && responsible_unit_name.toLowerCase().includes('directorate')) {
-          targetRole = 'director-general'; // For directorate, go to DG
+        if (responsible_unit_name && (responsible_unit_name.includes('Directorate') || responsible_unit_name.includes('directorate'))) {
+          targetRole = 'director'; // For directorate, go to Director
         } else {
-          targetRole = 'supervisor'; // For unit, go to Head of Unit first
+          targetRole = 'head-of-unit'; // For unit, go to Head of Unit first
         }
       }
 
@@ -333,7 +333,7 @@ const convertOrForwardTicket = async (req, res) => {
       if (targetRole) {
         unitUser = await User.findOne({
           where: { 
-            unit_section: responsible_unit_name, 
+            unit_section: responsible_unit_name, // Exact match, no lowercase conversion
             role: targetRole 
           },
           transaction
@@ -344,7 +344,7 @@ const convertOrForwardTicket = async (req, res) => {
       let anyUnitUser = null;
       if (!unitUser) {
         anyUnitUser = await User.findOne({
-          where: { unit_section: responsible_unit_name },
+          where: { unit_section: responsible_unit_name }, // Exact match, no lowercase conversion
           transaction
         });
       }
