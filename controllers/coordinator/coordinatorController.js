@@ -220,16 +220,14 @@ const convertOrForwardTicket = async (req, res) => {
       ratingDone = true;
     }
 
-    // Handle category conversion
+    // Handle category conversion (can only convert to Inquiry)
     if (category) {
-      const validCategories = ["Inquiry"];
-      if (!validCategories.includes(category)) {
+      if (category !== "Inquiry") {
         await safeRollback(transaction);
         return res
           .status(400)
           .json({
-            message:
-              "Invalid category: must be one of " + validCategories.join(", ")
+            message: "Invalid category: can only convert to 'Inquiry'"
           });
       }
 
@@ -237,6 +235,41 @@ const convertOrForwardTicket = async (req, res) => {
       ticket.converted_by_id = userId;
       ticket.converted_at = new Date();
       conversionDone = true;
+
+      // When converting to inquiry and a unit is selected, assign to focal person of that unit
+      if (responsible_unit_name) {
+        // Find focal person in the selected unit
+        const focalPerson = await User.findOne({
+          where: { 
+            unit_section: responsible_unit_name, 
+            role: { [Op.in]: ['focal-person'] }
+          },
+          transaction
+        });
+
+        if (focalPerson) {
+          ticket.assigned_to_role = focalPerson.role;
+          ticket.assigned_to_id = focalPerson.id;
+          ticket.status = "Assigned";
+        } else {
+          // If no focal person found, find any user in that unit
+          const anyUnitUser = await User.findOne({
+            where: { unit_section: responsible_unit_name },
+            transaction
+          });
+          
+          if (anyUnitUser) {
+            ticket.assigned_to_role = anyUnitUser.role;
+            ticket.assigned_to_id = anyUnitUser.id;
+            ticket.status = "Assigned";
+          } else {
+            // Keep with coordinator as fallback
+            ticket.assigned_to_role = 'coordinator';
+            ticket.assigned_to_id = userId;
+            ticket.status = "Assigned";
+          }
+        }
+      }
     }
 
     // Handle forwarding to a unit
@@ -277,30 +310,57 @@ const convertOrForwardTicket = async (req, res) => {
 
       // Only update responsible_unit_name, do not require section/function/unit head
       ticket.responsible_unit_name = responsible_unit_name;
-      // Find a user in the selected unit with role 'head-of-unit'
-      const unitUser = await User.findOne({
-        where: { unit_section: responsible_unit_name, role: 'head-of-unit' },
-        transaction
-      });
-      let anyUnitUser = null; // Declare outside the if-else block
-      if (unitUser) {
-        ticket.assigned_to_role = unitUser.role;
-        ticket.assigned_to_id = unitUser.id; // Assign to the head of unit
-      } else {
-        // If no head of unit found, find any user in that unit or assign to system
+      
+      // Determine the appropriate role to assign to based on complaint type and unit type
+      let targetRole = null;
+      if (ticket.complaint_type === 'Minor') {
+        if (responsible_unit_name && responsible_unit_name.toLowerCase().includes('directorate')) {
+          targetRole = 'director-general'; // For directorate, go to DG
+        } else {
+          targetRole = 'supervisor'; // For unit, go to Head of Unit
+        }
+      } else if (ticket.complaint_type === 'Major') {
+        if (responsible_unit_name && responsible_unit_name.toLowerCase().includes('directorate')) {
+          targetRole = 'director-general'; // For directorate, go to DG
+        } else {
+          targetRole = 'supervisor'; // For unit, go to Head of Unit first
+        }
+      }
+
+      // Find a user with the target role in the selected unit
+      let unitUser = null;
+      if (targetRole) {
+        unitUser = await User.findOne({
+          where: { 
+            unit_section: responsible_unit_name, 
+            role: targetRole 
+          },
+          transaction
+        });
+      }
+
+      // If no user found with target role, find any user in that unit
+      let anyUnitUser = null;
+      if (!unitUser) {
         anyUnitUser = await User.findOne({
           where: { unit_section: responsible_unit_name },
           transaction
         });
-        if (anyUnitUser) {
-          ticket.assigned_to_role = anyUnitUser.role;
-          ticket.assigned_to_id = anyUnitUser.id; // Assign to any user in the unit
-        } else {
-          // If no user found in the unit, assign to system user or keep with coordinator but mark as forwarded
-          ticket.assigned_to_role = 'system';
-          ticket.assigned_to_id = null; // Remove assignment to coordinator
-        }
       }
+
+      // Assign the ticket
+      if (unitUser) {
+        ticket.assigned_to_role = unitUser.role;
+        ticket.assigned_to_id = unitUser.id; // Assign to the target role user
+      } else if (anyUnitUser) {
+        ticket.assigned_to_role = anyUnitUser.role;
+        ticket.assigned_to_id = anyUnitUser.id; // Assign to any user in the unit
+      } else {
+        // If no user found in the unit, keep with coordinator as fallback
+        ticket.assigned_to_role = 'coordinator';
+        ticket.assigned_to_id = userId;
+      }
+
       ticket.forwarded_by_id = userId;
       ticket.forwarded_at = new Date();
       ticket.status = "Forwarded";
@@ -310,8 +370,8 @@ const convertOrForwardTicket = async (req, res) => {
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
-        assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : null),
-        assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'system'),
+        assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId), // Use coordinator ID as fallback
+        assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'coordinator'),
         action: "Forwarded",
         reason: `Ticket forwarded to ${responsible_unit_name} by coordinator`,
         created_at: new Date()
@@ -320,6 +380,31 @@ const convertOrForwardTicket = async (req, res) => {
 
     // Save the ticket
     await ticket.save({ transaction });
+
+    // Create TicketAssignment records for rating and conversion actions
+    if (ratingDone) {
+      await TicketAssignment.create({
+        ticket_id: ticket.id,
+        assigned_by_id: userId,
+        assigned_to_id: userId, // Coordinator rates the ticket
+        assigned_to_role: 'coordinator',
+        action: "Rated",
+        reason: `Ticket rated as ${complaintType} by coordinator`,
+        created_at: new Date()
+      }, { transaction });
+    }
+
+    if (conversionDone) {
+      await TicketAssignment.create({
+        ticket_id: ticket.id,
+        assigned_by_id: userId,
+        assigned_to_id: ticket.assigned_to_id, // Use the actual assigned user ID
+        assigned_to_role: ticket.assigned_to_role, // Use the actual assigned role
+        action: "Converted",
+        reason: `Ticket converted to Inquiry by coordinator and assigned to ${ticket.assigned_to_role}`,
+        created_at: new Date()
+      }, { transaction });
+    }
 
     // Commit the transaction
     await transaction.commit();
@@ -338,7 +423,7 @@ const convertOrForwardTicket = async (req, res) => {
     // Build dynamic message
     const messageParts = [];
     if (ratingDone) messageParts.push(`rated as '${complaintType}'`);
-    if (conversionDone) messageParts.push(`converted to '${category}'`);
+    if (conversionDone) messageParts.push(`converted to Inquiry`);
     if (forwardingDone) messageParts.push(`forwarded to '${responsible_unit_name}'`);
     const message = `Ticket successfully ${messageParts.join(" and ")}`;
 
@@ -405,22 +490,35 @@ const getCoordinatorDashboardCounts = async (req, res) => {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
         status: { [Op.ne]: "Closed" },
         assigned_to_id: req.user.userId,
+        // [Op.or]: [
+        //   { responsible_unit_name: null },
+        //   { responsible_unit_name: "Public Relation Unit" }
+        // ],
         [Op.and]: [
           { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
     });
 
+    console.log('New Tickets Count Query Result:', newTicketsCount);
+    console.log('Coordinator User ID:', req.user.userId);
+
     // Escalated Tickets: 
     const escalatedTicketsCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        // [Op.or]: [
+        //   { responsible_unit_name: null },
+        //   { responsible_unit_name: "Public Relation Unit" }
+        // ],
         [Op.and]: [
           { [Op.or]: [{ status: '' }, { status: "Escalated" }] },
           { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
     });
+
+    console.log('Escalated Tickets Count Query Result:', escalatedTicketsCount);
 
     // Channeled Tickets Breakdown
     const directorateCount = await Ticket.count({
@@ -489,6 +587,8 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     };
 
     const ticketStatusTotal = Object.values(ticketStatus).reduce((a, b) => 0 + b, 0);
+
+    console.log('New Tickets Total Calculation:', newTicketsCount + escalatedTicketsCount);
 
     res.status(200).json({
       message: "Dashboard counts retrieved successfully",
@@ -866,6 +966,10 @@ const getTicketsByStatus = async (req, res) => {
           [Op.ne]: "Closed"
         };
         whereClause.assigned_to_id = req.user.userId;
+        // whereClause[Op.or] = [
+        //   { responsible_unit_name: null },
+        //   { responsible_unit_name: "Public Relation Unit" }
+        // ];
         // Explicitly exclude forwarded tickets
         whereClause[Op.and] = [
           { status: { [Op.ne]: "Forwarded" } }
