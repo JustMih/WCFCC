@@ -2700,17 +2700,10 @@ const closeCoordinatorTicket = async (req, res) => {
 
 // Assign ticket to attendee by username (for focal person)
 const assignTicket = async (req, res) => {
-  console.log('🔍 ASSIGN TICKET FUNCTION CALLED!');
-  console.log('🔍 Request body:', req.body);
-  console.log('🔍 Request params:', req.params);
-  
   try {
     const { ticketId } = req.params;
     const { assignedToUsername, reason } = req.body;
     const assigned_by_id = req.user?.userId;
-    
-    console.log('🔍 User info from auth middleware:', req.user);
-    console.log('🔍 assigned_by_id:', assigned_by_id);
     
     // Validate required fields
     if (!assignedToUsername) {
@@ -2733,8 +2726,6 @@ const assignTicket = async (req, res) => {
     const assignedTo = await User.findOne({
       where: { username: assignedToUsername }
     });
-    
-    console.log(`DEBUG: Found assignedTo user:`, assignedTo ? { id: assignedTo.id, name: assignedTo.name, username: assignedTo.username, role: assignedTo.role } : 'NOT FOUND');
     
     if (!assignedTo) {
       return res.status(404).json({
@@ -2763,6 +2754,17 @@ const assignTicket = async (req, res) => {
       },
       { where: { id: ticketId } }
     );
+
+    // Create notification for the assigned user
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: assigned_by_id,
+      recipient_id: assignedTo.id,
+      message: `New ticket assigned to you: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+      category: ticket.category || "Assignment"
+    });
 
     // Send notification to the new assignee (optional)
     try {
@@ -2823,7 +2825,7 @@ const getAllAttendee = async (req, res) => {
     
     // Build the where clause to filter attendees by the same unit/section
     let whereClause = { 
-      role: { [Op.ne]: "head-of-unit" }, // Exclude head-of-unit users
+      role: "attendee", // Only show users with attendee role
       isActive: true // Only active users
     };
     
@@ -3493,6 +3495,16 @@ const reassignTicket = async (req, res) => {
       },
       { where: { id: ticketId } }
     );
+
+    // Create notification for the reassigned user
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: assigned_by_id,
+      recipient_id: assigned_to_id,
+      message: `Ticket reassigned to you: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+    });
 
     // Send notification to the new assignee (optional)
     try {
@@ -4411,6 +4423,16 @@ const forwardToDirectorGeneral = async (req, res) => {
       created_at: new Date()
     });
 
+    // Create notification for Director General
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: directorGeneral.id,
+      message: `Ticket forwarded to you for review: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+    });
+
     // Send email to assigned Director General (if email exists)
     if (directorGeneral.email) {
       const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
@@ -4928,6 +4950,16 @@ const approveAndForwardToCoordinator = async (req, res) => {
       created_at: new Date()
     });
 
+    // Create notification for Coordinator
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: coordinator.id,
+      message: `Ticket forwarded to you by Director General: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+    });
+
     // Send email to assigned Coordinator (if email exists)
     if (coordinator.email) {
       const emailSubject = `Ticket Forwarded: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
@@ -5039,6 +5071,16 @@ const reverseAndAssignToCoordinator = async (req, res) => {
       action: "Assigned",
       reason: dg_notes || "Director General reversed and assigned to coordinator for more clarification",
       created_at: new Date()
+    });
+
+    // Create notification for Coordinator
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: coordinator.id,
+      message: `Ticket assigned to you by Director General for clarification: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
     });
 
     // Send email to assigned Coordinator (if email exists)

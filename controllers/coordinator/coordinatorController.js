@@ -8,6 +8,7 @@ const Section = require("../../models/Section");
 const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
 const { sendEmail } = require("../../services/emailService");
+const Notification = require("../../models/Notification"); // Added Notification model
 
 // Helper to get requester display name
 function getRequesterDisplayName(ticket) {
@@ -376,6 +377,20 @@ const convertOrForwardTicket = async (req, res) => {
         reason: `Ticket forwarded to ${responsible_unit_name} by coordinator`,
         created_at: new Date()
       }, { transaction });
+
+      // Create notification for the assigned user (head of unit or any unit user)
+      const assignedUserId = unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId);
+      if (assignedUserId !== userId) { // Only create notification if assigned to someone other than coordinator
+        await Notification.create({
+          ticket_id: ticket.id,
+          sender_id: userId,
+          recipient_id: assignedUserId,
+          message: `Ticket forwarded to you: ${ticket.subject || ticket.ticket_id}`,
+          channel: "In-System",
+          status: "unread",
+          category: "Forwarded"
+        }, { transaction });
+      }
     }
 
     // Save the ticket
@@ -468,7 +483,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: "Suggestion",
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
@@ -478,7 +493,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       where: {
         category: "Compliment",
         [Op.and]: [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
@@ -488,13 +503,9 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     const newTicketsCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: { [Op.ne]: "Closed" },
         assigned_to_id: req.user.userId,
-        // [Op.or]: [
-        //   { responsible_unit_name: null },
-        //   { responsible_unit_name: "Public Relation Unit" }
-        // ],
         [Op.and]: [
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
         ]
       }
@@ -538,15 +549,6 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     });
 
     // Ticket Status Breakdown - Filtered by coordinator and excluding forwarded tickets
-    const onProgressCount = await Ticket.count({
-      where: {
-        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: { [Op.notIn]: ['Closed', 'Open'] },
-        responsible_unit_name: { [Op.ne]: null },
-        complaint_type: { [Op.ne]: null }
-      }
-    });
-
     const closedCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
@@ -568,21 +570,30 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       }
     });
 
-    // Count major complaints that have been returned from head of unit
-    const majorReturnedCount = await Ticket.count({
+    // Count open tickets
+    const openCount = await Ticket.count({
       where: {
-        complaint_type: "Major",
-        category: "Complaint",
-        status: "Returned"
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: "Open",
+        assigned_to_id: req.user.userId
+      }
+    });
+
+    // Count assigned tickets
+    const assignedCount = await Ticket.count({
+      where: {
+        category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
+        status: "Assigned",
+        assigned_to_id: req.user.userId
       }
     });
 
     const ticketStatus = {
-      "On Progress": onProgressCount,
+      "Open": openCount,
+      "Assigned": assignedCount,
       Closed: closedCount,
       Minor: minorCount,
-      Major: majorCount,
-      "Major Returned": majorReturnedCount
+      Major: majorCount
       // add other statuses if needed
     };
 
@@ -645,9 +656,10 @@ const getTicketsByCategoryAndType = async (req, res) => {
         whereClause = {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
           assigned_to_id: req.user.userId,
-          status: {
-            [Op.in]: ["Open"]
-          }
+          [Op.and]: [
+            { status: { [Op.in]: ["Open", "Reversed"] } },
+            { status: { [Op.ne]: "Forwarded" } }
+          ]
         };
         break;
 
@@ -962,9 +974,6 @@ const getTicketsByStatus = async (req, res) => {
         whereClause.category = {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
-        whereClause.status = {
-          [Op.ne]: "Closed"
-        };
         whereClause.assigned_to_id = req.user.userId;
         // whereClause[Op.or] = [
         //   { responsible_unit_name: null },
@@ -972,6 +981,7 @@ const getTicketsByStatus = async (req, res) => {
         // ];
         // Explicitly exclude forwarded tickets
         whereClause[Op.and] = [
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
@@ -987,21 +997,21 @@ const getTicketsByStatus = async (req, res) => {
       case "complaints":
         whereClause.category = { [Op.in]: ["Complaint"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "suggestions":
         whereClause.category = { [Op.in]: ["Suggestion"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
       case "complements":
         whereClause.category = { [Op.in]: ["Compliment"] };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
           { status: { [Op.ne]: "Forwarded" } }
         ];
         break;
@@ -1030,7 +1040,7 @@ const getTicketsByStatus = async (req, res) => {
           [Op.in]: ["Complaint", "Suggestion", "Compliment"]
         };
         whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }] },
+          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Returned" }, { status: "Reversed" }] },
           { responsible_unit_name: { [Op.not]: null } },
           { status: { [Op.ne]: "Forwarded" } }
         ];
