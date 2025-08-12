@@ -10,6 +10,7 @@ if (!fs.existsSync(ticketAttachmentsDirectory)) {
 
 // File filter function
 const fileFilter = (req, file, cb) => {
+  
   // Define allowed file types
   const allowedMimeTypes = [
     'application/pdf',

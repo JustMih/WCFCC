@@ -5,6 +5,8 @@ const {
   getAgentOnlineTime,
   getTotalAgentStatus,
   getAgentLoginTime,
+  loginRedirect,
+  encryptWithOpenSSL,
 } = require("../controllers/auth/authController");
 const router = express.Router();
 
@@ -13,6 +15,10 @@ router.post("/login", login);
 
 // Logout route
 router.post("/logout", logout);
+
+// Login redirect route
+router.post("/login_redirect", loginRedirect);
+
 
 // Route to get the total online time of the agent for today
 router.get("/online-time", getAgentOnlineTime);

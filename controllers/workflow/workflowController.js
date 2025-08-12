@@ -1,539 +1,414 @@
-const Ticket = require('../../models/Ticket');
-const User = require('../../models/User');
-const TicketAssignment = require('../../models/TicketAssignment');
+const { Ticket, User, TicketAssignment, Section } = require('../../models');
 const { Op } = require('sequelize');
-const { 
-  assignToNextInWorkflow, 
-  getWorkflowStatus,
-  WORKFLOW_PATHS 
-} = require('../../services/workflowService');
 
-/**
- * Head of Unit / Supervisor Actions
- */
+// Helper function for safe transaction rollback
+const safeRollback = async (transaction) => {
+  try {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+  } catch (rollbackError) {
+    console.error('Rollback error:', rollbackError);
+  }
+};
 
-// Assign ticket to attendee
-const assignToAttendee = async (req, res) => {
+// Get workflow details for a ticket
+const getWorkflowDetails = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { attendeeId, justification } = req.body;
-    const supervisorId = req.user.userId;
-
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
-    }
-
-    const supervisor = await User.findByPk(supervisorId);
-    if (supervisor.role !== 'supervisor' && supervisor.role !== 'head-of-unit') {
-      return res.status(403).json({ message: "Only supervisors or head of unit can assign to attendees" });
-    }
-
-    const attendee = await User.findByPk(attendeeId);
-    if (!attendee || attendee.role !== 'attendee') {
-      return res.status(400).json({ message: "Invalid attendee selected" });
-    }
-
-    // Update ticket assignment
-    await ticket.update({
-      assigned_to_id: attendeeId,
-      assigned_to_role: 'attendee',
-      status: 'Assigned'
-    });
-
-    // Create assignment record
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: supervisorId,
-      assigned_to_id: attendeeId,
-      assigned_to_role: 'attendee',
-      action: 'Assigned to Attendee',
-      reason: justification || 'Assigned by Head of Unit',
-      created_at: new Date()
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Ticket assigned to attendee successfully",
-      data: {
-        ticket,
-        assignedTo: attendee,
-        assignmentDetails: {
-          assignedBy: supervisor.name,
-          assignedTo: attendee.name,
-          reason: justification || 'Assigned by Head of Unit'
+    
+    const ticket = await Ticket.findByPk(ticketId, {
+      include: [
+        {
+          model: User,
+          as: 'assignee',
+          attributes: ['id', 'first_name', 'last_name', 'role', 'unit_section']
+        },
+        {
+          model: User,
+          as: 'ratedBy',
+          attributes: ['id', 'first_name', 'last_name']
+        },
+        {
+          model: User,
+          as: 'forwardedBy',
+          attributes: ['id', 'first_name', 'last_name']
         }
-      }
+      ]
     });
-  } catch (error) {
-    console.error("Error assigning to attendee:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
-  }
-};
 
-// Head of Unit attends and closes (for minor complaints)
-const attendAndClose = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const { resolution_details, evidence_url } = req.body;
-    const supervisorId = req.user.userId;
-
-    const ticket = await Ticket.findByPk(ticketId);
     if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
+      return res.status(404).json({ message: 'Ticket not found' });
     }
 
-    if (ticket.complaint_type !== 'Minor') {
-      return res.status(400).json({ message: "Only minor complaints can be closed by Head of Unit" });
+    if (!ticket.workflow_path) {
+      return res.status(400).json({ message: 'This ticket is not assigned to a workflow' });
     }
 
-    // Update ticket
-    await ticket.update({
-      status: 'Closed',
-      resolution_details,
-      evidence_url,
-      date_of_resolution: new Date(),
-      attended_by_id: supervisorId
-    });
-
-    // Create assignment record
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: supervisorId,
-      assigned_to_id: supervisorId,
-      assigned_to_role: 'supervisor',
-      action: 'Attended and Closed',
-      reason: resolution_details,
-      created_at: new Date()
-    });
-
-    res.status(200).json({
+    const workflowInfo = getWorkflowInfo(ticket.workflow_path, ticket.current_workflow_step);
+    
+    return res.json({
       success: true,
-      message: "Ticket attended and closed successfully",
       data: {
         ticket,
-        closedBy: supervisor.name,
-        resolutionDetails: resolution_details
+        workflow: workflowInfo
       }
     });
   } catch (error) {
-    console.error("Error attending and closing:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
+    console.error('Get workflow details error:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
-/**
- * Attendee Actions
- */
-
-// Attendee attends and recommends
-const attendAndRecommend = async (req, res) => {
+// Attend to a ticket (mark as in progress)
+const attendTicket = async (req, res) => {
+  const transaction = await Ticket.sequelize.transaction();
+  
   try {
     const { ticketId } = req.params;
-    const { recommendation, evidence_url } = req.body;
-    const attendeeId = req.user.userId;
-
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
-    }
-
-    // Update ticket with attendee's recommendation
-    await ticket.update({
-      resolution_details: recommendation,
-      evidence_url,
-      date_of_resolution: new Date(),
-      attended_by_id: attendeeId
-    });
-
-    // Create assignment record for attendee
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: attendeeId,
-      assigned_to_id: attendeeId,
-      assigned_to_role: 'attendee',
-      action: 'Attended and Recommended',
-      reason: recommendation,
-      created_at: new Date()
-    });
-
-    // Find Head of Unit for the ticket's section/unit
-    const section = ticket.section || ticket.unit_section;
-    let headOfUnit = await User.findOne({
-      where: {
-        role: 'head-of-unit',
-        unit_section: section
-      }
-    });
-    let assignedRole = 'head-of-unit';
-    let assignedUser = headOfUnit;
-    if (!headOfUnit) {
-      // Fallback: assign to coordinator
-      const coordinator = await User.findOne({ where: { role: 'coordinator' } });
-      if (!coordinator) {
-        return res.status(404).json({ message: "No Head of Unit or Coordinator found for assignment" });
-      }
-      assignedRole = 'coordinator';
-      assignedUser = coordinator;
-    }
-
-    // Assign ticket to Head of Unit or Coordinator
-    await ticket.update({
-      assigned_to_id: assignedUser.id,
-      assigned_to_role: assignedRole,
-      status: 'Assigned'
-    });
-
-    // Create assignment record for Head of Unit or Coordinator
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: attendeeId,
-      assigned_to_id: assignedUser.id,
-      assigned_to_role: assignedRole,
-      action: 'Assigned',
-      reason: `Ticket recommended by attendee and assigned to ${assignedRole.replace('-', ' ')}`,
-      created_at: new Date()
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Recommendation submitted and ticket assigned to Head of Unit",
-      data: {
-        ticket,
-        recommendation: recommendation,
-        assignedTo: assignedUser,
-        assignedRole: assignedRole
-      }
-    });
-  } catch (error) {
-    console.error("Error attending and recommending:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
-  }
-};
-
-// Upload evidence
-const uploadEvidence = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const { evidence_url, notes } = req.body;
+    const { notes } = req.body;
     const userId = req.user.userId;
 
-    const ticket = await Ticket.findByPk(ticketId);
+    const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
+      await safeRollback(transaction);
+      return res.status(404).json({ message: 'Ticket not found' });
     }
 
-    // Update ticket with evidence
-    await ticket.update({
-      evidence_url,
-      review_notes: notes
-    });
+    // Check if user can attend this ticket
+    if (!canUserPerformAction(ticket, req.user, 'attend')) {
+      await safeRollback(transaction);
+      return res.status(403).json({ message: 'You are not authorized to attend this ticket' });
+    }
 
+    // Update ticket status
+    ticket.status = 'In Progress';
+    ticket.attended_by_id = userId;
+    ticket.workflow_notes = notes || ticket.workflow_notes;
+    
     // Create assignment record
     await TicketAssignment.create({
-      ticket_id: ticketId,
+      ticket_id: ticket.id,
       assigned_by_id: userId,
       assigned_to_id: userId,
-      assigned_to_role: ticket.assigned_to_role,
-      action: 'Evidence Uploaded',
-      reason: notes || 'Evidence uploaded',
+      assigned_to_role: req.user.role,
+      action: 'Attended',
+      reason: notes || 'Ticket attended to',
       created_at: new Date()
-    });
+    }, { transaction });
 
-    res.status(200).json({
+    await ticket.save({ transaction });
+    await transaction.commit();
+
+    return res.json({
       success: true,
-      message: "Evidence uploaded successfully",
-      data: {
-        ticket,
-        uploadedBy: userId,
-        evidenceUrl: evidence_url,
-        notes: notes
-      }
-    });
-  } catch (error) {
-    console.error("Error uploading evidence:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
-  }
-};
-
-/**
- * Director General Actions
- */
-
-// DG approves and closes
-const approveAndClose = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const { approval_notes } = req.body;
-    const dgId = req.user.userId;
-
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
-    }
-
-    if (ticket.complaint_type !== 'Major') {
-      return res.status(400).json({ message: "Only major complaints require DG approval" });
-    }
-
-    // Update ticket
-    await ticket.update({
-      status: 'Closed',
-      approval_notes,
-      date_of_resolution: new Date(),
-      attended_by_id: dgId
-    });
-
-    // Create assignment record
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: dgId,
-      assigned_to_id: dgId,
-      assigned_to_role: 'director-general',
-      action: 'Approved and Closed',
-      reason: approval_notes,
-      created_at: new Date()
-    });
-
-    res.status(200).json({
-      message: "Ticket approved and closed successfully",
+      message: 'Ticket attended successfully',
       data: ticket
     });
   } catch (error) {
-    console.error("Error approving and closing:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    await safeRollback(transaction);
+    console.error('Attend ticket error:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
-// DG approves and forwards to coordinator
-const approveAndForward = async (req, res) => {
+// Recommend ticket to next step
+const recommendTicket = async (req, res) => {
+  const transaction = await Ticket.sequelize.transaction();
+  
   try {
     const { ticketId } = req.params;
-    const { approval_notes } = req.body;
-    const dgId = req.user.userId;
+    const { recommendation_notes, evidence_url } = req.body;
+    const userId = req.user.userId;
 
-    const ticket = await Ticket.findByPk(ticketId);
+    const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
+      await safeRollback(transaction);
+      return res.status(404).json({ message: 'Ticket not found' });
     }
 
-    // Find coordinator
-    const coordinator = await User.findOne({ where: { role: 'coordinator' } });
-    if (!coordinator) {
-      return res.status(404).json({ message: "Coordinator not found" });
+    // Check if user can recommend this ticket
+    if (!canUserPerformAction(ticket, req.user, 'recommend')) {
+      await safeRollback(transaction);
+      return res.status(403).json({ message: 'You are not authorized to recommend this ticket' });
     }
 
-    // Update ticket to assign to coordinator
-    await ticket.update({
-      assigned_to_id: coordinator.id,
-      assigned_to_role: 'coordinator',
-      status: 'Assigned',
-      dg_notes: approval_notes
-    });
+    // Check if evidence is required for major complaints
+    if (ticket.complaint_type === 'Major' && !evidence_url) {
+      await safeRollback(transaction);
+      return res.status(400).json({ message: 'Evidence upload is required for major complaints' });
+    }
 
-    // Create assignment record for DG approval
+    // Update ticket
+    ticket.current_workflow_step += 1;
+    ticket.workflow_notes = recommendation_notes || ticket.workflow_notes;
+    if (evidence_url) {
+      ticket.evidence_url = evidence_url;
+    }
+
+    // Check if workflow is completed
+    const totalSteps = getWorkflowTotalSteps(ticket.workflow_path);
+    if (ticket.current_workflow_step >= totalSteps) {
+      ticket.workflow_completed = true;
+      ticket.workflow_completed_at = new Date();
+      ticket.status = 'Pending Approval';
+    }
+
+    // Find next user in workflow
+    const nextRole = getNextRoleInWorkflow(ticket.workflow_path, ticket.current_workflow_step);
+    if (nextRole) {
+      const nextUser = await User.findOne({
+        where: { role: nextRole, unit_section: ticket.responsible_unit_name },
+        transaction
+      });
+      
+      if (nextUser) {
+        ticket.assigned_to_id = nextUser.id;
+        ticket.assigned_to_role = nextUser.role;
+        ticket.current_workflow_role = nextUser.role;
+      }
+    }
+
+    // Create assignment record
     await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: dgId,
-      assigned_to_id: dgId,
-      assigned_to_role: 'director-general',
-      action: 'Approved and Forwarded',
-      reason: approval_notes,
+      ticket_id: ticket.id,
+      assigned_by_id: userId,
+      assigned_to_id: ticket.assigned_to_id,
+      assigned_to_role: ticket.assigned_to_role,
+      action: 'Recommended',
+      reason: recommendation_notes || 'Ticket recommended to next step',
       created_at: new Date()
-    });
+    }, { transaction });
 
-    // Create assignment record for coordinator
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id: dgId,
-      assigned_to_id: coordinator.id,
-      assigned_to_role: 'coordinator',
-      action: 'Assigned',
-      reason: `Forwarded by Director General: ${approval_notes}`,
-      created_at: new Date()
-    });
+    await ticket.save({ transaction });
+    await transaction.commit();
 
-    res.status(200).json({
+    return res.json({
       success: true,
-      message: "Ticket approved and forwarded to coordinator successfully",
+      message: 'Ticket recommended successfully',
       data: {
         ticket,
-        forwardedTo: coordinator,
-        dgNotes: approval_notes
+        nextStep: ticket.current_workflow_step,
+        nextRole: nextRole,
+        workflowCompleted: ticket.workflow_completed
       }
     });
   } catch (error) {
-    console.error("Error approving and forwarding:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
+    await safeRollback(transaction);
+    console.error('Recommend ticket error:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
-/**
- * Reverse Actions (for all roles)
- */
-
 // Reverse ticket to previous step
 const reverseTicket = async (req, res) => {
+  const transaction = await Ticket.sequelize.transaction();
+  
   try {
     const { ticketId } = req.params;
     const { reversal_reason } = req.body;
     const userId = req.user.userId;
 
-    const ticket = await Ticket.findByPk(ticketId);
+    const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
+      await safeRollback(transaction);
+      return res.status(404).json({ message: 'Ticket not found' });
     }
 
-    const workflowStatus = await getWorkflowStatus(ticketId);
-    const currentStepIndex = workflowStatus.currentStep - 1;
-    
-    if (currentStepIndex <= 0) {
-      return res.status(400).json({ message: "Cannot reverse further" });
+    // Check if user can reverse this ticket
+    if (!canUserPerformAction(ticket, req.user, 'reverse')) {
+      await safeRollback(transaction);
+      return res.status(403).json({ message: 'You are not authorized to reverse this ticket' });
     }
 
-    const workflow = WORKFLOW_PATHS[workflowStatus.workflowPath];
-    const previousRole = workflow.roles[currentStepIndex - 1];
-
-    // Find previous assignee
-    const previousAssignment = await TicketAssignment.findOne({
-      where: {
-        ticket_id: ticketId,
-        assigned_to_role: previousRole
-      },
-      order: [['created_at', 'DESC']]
-    });
-
-    if (!previousAssignment) {
-      return res.status(400).json({ message: "No previous assignment found" });
+    // Can only reverse to previous step
+    if (ticket.current_workflow_step <= 1) {
+      await safeRollback(transaction);
+      return res.status(400).json({ message: 'Cannot reverse ticket further' });
     }
 
-    // Update ticket
-    await ticket.update({
-      assigned_to_id: previousAssignment.assigned_to_id,
-      assigned_to_role: previousRole,
-      status: 'Assigned'
-    });
+    // Go back one step
+    ticket.current_workflow_step -= 1;
+    ticket.workflow_notes = reversal_reason || ticket.workflow_notes;
+    ticket.status = 'Reversed';
+
+    // Find previous user in workflow
+    const previousRole = getNextRoleInWorkflow(ticket.workflow_path, ticket.current_workflow_step);
+    if (previousRole) {
+      const previousUser = await User.findOne({
+        where: { role: previousRole, unit_section: ticket.responsible_unit_name },
+        transaction
+      });
+      
+      if (previousUser) {
+        ticket.assigned_to_id = previousUser.id;
+        ticket.assigned_to_role = previousUser.role;
+        ticket.current_workflow_role = previousUser.role;
+      }
+    }
 
     // Create assignment record
     await TicketAssignment.create({
-      ticket_id: ticketId,
+      ticket_id: ticket.id,
       assigned_by_id: userId,
-      assigned_to_id: previousAssignment.assigned_to_id,
-      assigned_to_role: previousRole,
+      assigned_to_id: ticket.assigned_to_id,
+      assigned_to_role: ticket.assigned_to_role,
       action: 'Reversed',
-      reason: reversal_reason || 'Ticket reversed',
+      reason: reversal_reason || 'Ticket reversed to previous step',
       created_at: new Date()
-    });
+    }, { transaction });
 
-    res.status(200).json({
+    await ticket.save({ transaction });
+    await transaction.commit();
+
+    return res.json({
       success: true,
-      message: "Ticket reversed successfully",
+      message: 'Ticket reversed successfully',
       data: {
         ticket,
-        previousRole,
-        previousAssignee: previousAssignment.assigned_to_id,
-        reversedBy: userId,
-        reversalReason: reversal_reason || 'Ticket reversed'
+        currentStep: ticket.current_workflow_step,
+        currentRole: ticket.current_workflow_role
       }
     });
   } catch (error) {
-    console.error("Error reversing ticket:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
+    await safeRollback(transaction);
+    console.error('Reverse ticket error:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
-/**
- * Review Actions
- */
-
-// Review and recommend (for Head of Unit/Manager)
-const reviewAndRecommend = async (req, res) => {
+// Close ticket (final approval)
+const closeTicket = async (req, res) => {
+  const transaction = await Ticket.sequelize.transaction();
+  
   try {
     const { ticketId } = req.params;
-    const { review_notes, recommendation } = req.body;
+    const { closure_notes } = req.body;
     const userId = req.user.userId;
 
-    const ticket = await Ticket.findByPk(ticketId);
+    const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
-      return res.status(404).json({ message: "Ticket not found" });
+      await safeRollback(transaction);
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+
+    // Check if user can close this ticket
+    if (!canUserPerformAction(ticket, req.user, 'close')) {
+      await safeRollback(transaction);
+      return res.status(403).json({ message: 'You are not authorized to close this ticket' });
     }
 
     // Update ticket
-    await ticket.update({
-      review_notes,
-      resolution_details: recommendation,
-      status: 'Pending Approval'
-    });
+    ticket.status = 'Closed';
+    ticket.workflow_completed = true;
+    ticket.workflow_completed_at = new Date();
+    ticket.date_of_resolution = new Date();
+    ticket.resolution_details = closure_notes || 'Ticket closed by workflow completion';
+    ticket.workflow_notes = closure_notes || ticket.workflow_notes;
 
     // Create assignment record
     await TicketAssignment.create({
-      ticket_id: ticketId,
+      ticket_id: ticket.id,
       assigned_by_id: userId,
       assigned_to_id: userId,
-      assigned_to_role: ticket.assigned_to_role,
-      action: 'Reviewed and Recommended',
-      reason: review_notes,
+      assigned_to_role: req.user.role,
+      action: 'Closed',
+      reason: closure_notes || 'Ticket closed by workflow completion',
       created_at: new Date()
-    });
+    }, { transaction });
 
-    res.status(200).json({
+    await ticket.save({ transaction });
+    await transaction.commit();
+
+    return res.json({
       success: true,
-      message: "Review completed successfully",
-      data: {
-        ticket,
-        reviewedBy: userId,
-        reviewNotes: review_notes,
-        recommendation: recommendation
-      }
+      message: 'Ticket closed successfully',
+      data: ticket
     });
   } catch (error) {
-    console.error("Error reviewing:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error", 
-      error: error.message 
-    });
+    await safeRollback(transaction);
+    console.error('Close ticket error:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
   }
+};
+
+// Helper function to check if user can perform action
+const canUserPerformAction = (ticket, user, action) => {
+  const userRole = user.role;
+  const ticketStep = ticket.current_workflow_step;
+  const workflowPath = ticket.workflow_path;
+
+  // Define role permissions for each action
+  const rolePermissions = {
+    'attend': {
+      'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
+      'attendee': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
+    },
+    'recommend': {
+      'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
+      'attendee': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
+    },
+    'reverse': {
+      'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
+      'director-general': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE']
+    },
+    'close': {
+      'head-of-unit': ['MINOR_UNIT'],
+      'director-general': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
+    }
+  };
+
+  const allowedWorkflows = rolePermissions[action]?.[userRole] || [];
+  return allowedWorkflows.includes(workflowPath);
+};
+
+// Helper functions (same as in coordinatorController)
+const getWorkflowTotalSteps = (workflowPath) => {
+  const workflowSteps = {
+    'MINOR_UNIT': 4,
+    'MINOR_DIRECTORATE': 5,
+    'MAJOR_UNIT': 5,
+    'MAJOR_DIRECTORATE': 7
+  };
+  return workflowSteps[workflowPath] || 0;
+};
+
+const getNextRoleInWorkflow = (workflowPath, currentStep) => {
+  const workflowRoles = {
+    'MINOR_UNIT': ['coordinator', 'head-of-unit', 'attendee', 'head-of-unit'],
+    'MINOR_DIRECTORATE': ['coordinator', 'director-general', 'supervisor', 'attendee', 'supervisor'],
+    'MAJOR_UNIT': ['coordinator', 'head-of-unit', 'attendee', 'head-of-unit', 'director-general'],
+    'MAJOR_DIRECTORATE': ['coordinator', 'director-general', 'supervisor', 'attendee', 'supervisor', 'director-general', 'director-general']
+  };
+  
+  const roles = workflowRoles[workflowPath];
+  if (!roles || currentStep >= roles.length) return null;
+  return roles[currentStep];
+};
+
+const getWorkflowInfo = (workflowPath, currentStep) => {
+  const totalSteps = getWorkflowTotalSteps(workflowPath);
+  const currentRole = getNextRoleInWorkflow(workflowPath, currentStep);
+  const nextRole = getNextRoleInWorkflow(workflowPath, currentStep + 1);
+  
+  return {
+    path: workflowPath,
+    currentStep,
+    totalSteps,
+    currentRole,
+    nextRole,
+    progress: Math.round((currentStep / totalSteps) * 100),
+    isCompleted: currentStep >= totalSteps
+  };
 };
 
 module.exports = {
-  // Head of Unit actions
-  assignToAttendee,
-  attendAndClose,
-  
-  // Attendee actions
-  attendAndRecommend,
-  uploadEvidence,
-  
-  // DG actions
-  approveAndClose,
-  approveAndForward,
-  
-  // General actions
+  getWorkflowDetails,
+  attendTicket,
+  recommendTicket,
   reverseTicket,
-  reviewAndRecommend
+  closeTicket
 }; 

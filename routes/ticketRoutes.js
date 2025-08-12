@@ -10,7 +10,7 @@ const {
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToCoordinator, reverseAndAssignToCoordinator
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToCoordinator, reverseAndAssignToCoordinator, managerAttendMajor
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -26,11 +26,6 @@ const {
   handleMulterError,
   ticketAttachmentsDirectory 
 } = require("../config/multerConfig");
-
-// Set up multer storage for ticket attachments
-if (!fs.existsSync(ticketAttachmentsDirectory)) {
-  fs.mkdirSync(ticketAttachmentsDirectory);
-}
 
 // Create User route
 router.post(
@@ -183,11 +178,12 @@ router.get(
   getAllAttendee
 );
 
+
 // Add after other ticket routes
 router.post(
   '/:ticketId/close',
   authMiddleware,
-  roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person", "manager"]),
   uploadSingle,
   handleMulterError,
   closeTicket
@@ -279,6 +275,14 @@ router.get(
   '/aging-stats/:userId',
   authMiddleware,
   getUserAgingStats
+);
+
+// Route for manager to attend major complaints and send to Head of Unit
+router.post(
+  '/:ticketId/manager-attend-major',
+  authMiddleware,
+  roleMiddleware(['manager']),
+  managerAttendMajor
 );
 
 // router.get('/ticket/escalated/:userId', getEscalatedTicketsForUser);

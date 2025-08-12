@@ -42,7 +42,7 @@ const getTicketStatusExternal = async (req, res) => {
           include: [
             {
               model: User,
-              as: "assignee",
+              as: "assignedTo",
               attributes: ["id", "name", "role"]
             }
           ],
@@ -89,10 +89,10 @@ const getTicketStatusExternal = async (req, res) => {
         } : null,
         last_assignment: ticket.assignments && ticket.assignments.length > 0 ? {
           assigned_at: ticket.assignments[0].created_at,
-          assigned_to: ticket.assignments[0].assignee ? {
-            id: ticket.assignments[0].assignee.id,
-            name: ticket.assignments[0].assignee.name,
-            role: ticket.assignments[0].assignee.role
+          assigned_to: ticket.assignments[0].assignedTo ? {
+            id: ticket.assignments[0].assignedTo.id,
+            name: ticket.assignments[0].assignedTo.name,
+            role: ticket.assignments[0].assignedTo.role
           } : null
         } : null
       },

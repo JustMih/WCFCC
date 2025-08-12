@@ -1,100 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/authMiddleware');
-const { roleMiddleware } = require('../middleware/roleMiddleware');
 const {
-  assignToAttendee,
-  attendAndClose,
-  attendAndRecommend,
-  uploadEvidence,
-  
-  // DG actions
-  approveAndClose,
-  approveAndForward,
-  
-  // General actions
+  getWorkflowDetails,
+  attendTicket,
+  recommendTicket,
   reverseTicket,
-  reviewAndRecommend
+  closeTicket
 } = require('../controllers/workflow/workflowController');
 
-/**
- * Head of Unit / Supervisor Routes
- */
+// Apply authentication middleware to all workflow routes
+router.use(authMiddleware);
 
-// Assign ticket to attendee
-router.post(
-  '/:ticketId/assign-attendee',
-  authMiddleware,
-  roleMiddleware(['supervisor', 'head-of-unit']),
-  assignToAttendee
-);
+// Get workflow details for a ticket
+router.get('/ticket/:ticketId', getWorkflowDetails);
 
-// Head of Unit attends and closes (for minor complaints)
-router.post(
-  '/:ticketId/attend-and-close',
-  authMiddleware,
-  roleMiddleware(['supervisor', 'head-of-unit']),
-  attendAndClose
-);
+// Attend to a ticket (mark as in progress)
+router.post('/ticket/:ticketId/attend', attendTicket);
 
-/**
- * Attendee Routes
- */
-
-// Attendee attends and recommends
-router.post(
-  '/:ticketId/attend-and-recommend',
-  authMiddleware,
-  roleMiddleware(['attendee']),
-  attendAndRecommend
-);
-
-// Upload evidence
-router.post(
-  '/:ticketId/upload-evidence',
-  authMiddleware,
-  roleMiddleware(['attendee', 'supervisor', 'head-of-unit', 'director-general']),
-  uploadEvidence
-);
-
-/**
- * Director General Routes
- */
-
-// DG approves and closes
-router.post(
-  '/:ticketId/approve-and-close',
-  authMiddleware,
-  roleMiddleware(['director-general']),
-  approveAndClose
-);
-
-// DG approves and forwards to coordinator
-router.post(
-  '/:ticketId/approve-and-forward',
-  authMiddleware,
-  roleMiddleware(['director-general']),
-  approveAndForward
-);
-
-/**
- * General Routes
- */
+// Recommend ticket to next step
+router.post('/ticket/:ticketId/recommend', recommendTicket);
 
 // Reverse ticket to previous step
-router.post(
-  '/:ticketId/reverse',
-  authMiddleware,
-  roleMiddleware(['supervisor', 'head-of-unit', 'attendee', 'director-general']),
-  reverseTicket
-);
+router.post('/ticket/:ticketId/reverse', reverseTicket);
 
-// Review and recommend (for Head of Unit/Manager)
-router.post(
-  '/:ticketId/review-and-recommend',
-  authMiddleware,
-  roleMiddleware(['supervisor', 'head-of-unit', 'director-general']),
-  reviewAndRecommend
-);
+// Close ticket (final approval)
+router.post('/ticket/:ticketId/close', closeTicket);
 
 module.exports = router; 

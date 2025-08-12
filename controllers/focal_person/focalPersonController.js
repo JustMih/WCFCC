@@ -59,7 +59,7 @@ const getFocalPersonTickets = async (req, res) => {
           include: [
             {
               model: User,
-              as: 'assignee',
+              as: 'assignedTo',
               attributes: ['id', 'name', 'role']
             }
           ]
@@ -80,8 +80,8 @@ const getFocalPersonTickets = async (req, res) => {
       const t = ticket.toJSON();
       t.assignments = (t.assignments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(a => ({
         assigned_to_id: a.assigned_to_id,
-        assigned_to_name: a.assignee?.name || null,
-        assigned_to_role: a.assignee?.role || null,
+        assigned_to_name: a.assignedTo?.name || null,
+        assigned_to_role: a.assignedTo?.role || null,
         reason: a.reason,
         action: a.action,
         created_at: a.created_at

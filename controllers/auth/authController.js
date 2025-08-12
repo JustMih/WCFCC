@@ -4,6 +4,7 @@ const AgentLoginLog = require("../../models/agent_activity_logs");
 const AgentStatus = require("../../models/agents_status");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const { Op } = require("sequelize");
 require("dotenv").config();
 
@@ -316,6 +317,121 @@ const getTotalAgentStatus = async (req, res) => {
   }
 };
 
+
+
+// function encryptWithOpenSSL(payload) {
+//   const keyString = 'yN!VkiK9#-GoUwB@eUD8l~zoY@3ccVmx'; // 32-char plain-text key
+//   const key = Buffer.from(keyString, 'utf8'); // UTF-8 encoding, not base64
+
+//   if (key.length !== 32) {
+//     throw new Error(`ENCRYPTION_KEY must be exactly 32 bytes. Got ${key.length} bytes.`);
+//   }
+
+//   const plainText = typeof payload === 'string' ? payload : JSON.stringify(payload);
+//   const iv = crypto.randomBytes(16); // 16-byte IV for AES-256-CBC
+
+//   const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+//   let encrypted = cipher.update(plainText, 'utf8', 'base64');
+//   encrypted += cipher.final('base64');
+
+//   const ivBase64 = iv.toString('base64');
+//   const combined = `${encrypted}::${ivBase64}`;
+//   const finalToken = Buffer.from(combined, 'utf8').toString('base64');
+
+//   return finalToken;
+// }
+
+
+function encryptWithOpenSSL(payload) {
+  const keyString = process.env.ENCRYPTION_KEY || 'yN!VkiK9#-GoUwB@eUD8l~zoY@3ccVmx'; // Use env var or fallback
+  const key = Buffer.from(keyString, 'utf8');
+
+  if (key.length !== 32) {
+    throw new Error(`ENCRYPTION_KEY must be exactly 32 bytes. Got ${key.length} bytes.`);
+  }
+
+  // Ensure payload is a plain, JSON-safe object
+  const safePayload = {}
+  for (const [k, v] of Object.entries(payload || {})) {
+    if (v === null || v === undefined) {
+      safePayload[k] = '';
+    } else if (typeof v === 'object') {
+      // Avoid circular/non-serializable values by stringifying primitives only
+      safePayload[k] = String(v);
+    } else {
+      safePayload[k] = v;
+    }
+  }
+
+  const plainText = JSON.stringify(safePayload);
+  const iv = crypto.randomBytes(16);
+
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  let encrypted = cipher.update(plainText, 'utf8', 'base64');
+  encrypted += cipher.final('base64');
+
+  const ivBase64 = iv.toString('base64');
+  const combined = `${encrypted}::${ivBase64}`;
+  return Buffer.from(combined, 'utf8').toString('base64');
+}
+
+// Re-enable the loginRedirect endpoint
+const loginRedirect = async (req, res) => {
+  try {
+    // 1. Authenticate via JWT
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findByPk(decoded.userId);
+
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    // 2. Prepare data payload for encryption (sanitize inputs)
+    const idRaw = req.body?.notification_report_id;
+    const employerRaw = req.body?.employer_id;
+    
+    const auth_data = {
+      username:'mmsaki-admin',
+      notification_report_id: idRaw || '',
+      employer_id: employerRaw || ''
+    };
+
+    // 3. Encrypt token
+    const encryptedToken = encryptWithOpenSSL(auth_data);
+
+    // 4. Build MAC App URL
+    const macAppUrl = process.env.MAC_APP_URL || 'https://demomac.wcf.go.tz/';
+    const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(encryptedToken)}`;
+
+    // 5. Respond appropriately
+    const acceptsJson = req.headers.accept?.includes('application/json') ||
+                        req.headers['content-type']?.includes('application/json');
+
+    if (acceptsJson) {
+      return res.json({
+        success: {
+          message: 'Continue on MAC!',
+          url: url,
+        },
+      });
+    }
+
+    return res.redirect(url);
+
+  } catch (error) {
+    console.error('Login redirect error:', error);
+    return res.status(500).json({ 
+      message: 'Internal server error',
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   registerSuperAdmin,
   login,
@@ -323,4 +439,6 @@ module.exports = {
   getAgentOnlineTime,
   getTotalAgentStatus,
   getAgentLoginTime,
+  loginRedirect,
+  encryptWithOpenSSL
 };

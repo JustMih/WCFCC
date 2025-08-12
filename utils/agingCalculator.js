@@ -2,6 +2,7 @@
  * Utility functions for calculating assignment aging
  */
 
+
 /**
  * Calculate the number of calendar days between two dates
  * @param {Date|string} startDate - The start date

@@ -36,19 +36,13 @@ const User = sequelize.define(
         "focal-person",
         "claim-focal-person",
         "compliance-focal-person",
-        "director-general",
-        "directorate of operations",
-        "directorate of assessment services",
-        "directorate of finance, planning and investment",
-        "legal unit",
-        "ict unit",
-        "actuarial statistics and risk management",
-        "public relation unit",
-        "procurement management unit",
-        "human resource management and attachment unit"
+        "head-of-unit",
+        "director",
+        "manager",
+        "director-general"
       ),
       allowNull: false,
-      defaultValue: "super-admin",
+      defaultValue: "agent",
     },
     isActive: {
       type: DataTypes.BOOLEAN,
@@ -71,7 +65,8 @@ const User = sequelize.define(
     unit_section: {
       type: DataTypes.STRING(100),
       allowNull: true,
-    },
+      comment: "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')"
+    }
   },
   {
     timestamps: true,
