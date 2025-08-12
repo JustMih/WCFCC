@@ -10,7 +10,16 @@ const sequelize = require("../../config/mysql_connection");
 
 const createUser = async (req, res) => {
   try {
-    const { name, email, password, extension, role, isActive } = req.body;
+    const {
+      full_name,
+      report_to,
+      designation,
+      email,
+      password,
+      extension,
+      role,
+      isActive,
+    } = req.body;
 
     if (
       ![
@@ -29,19 +38,36 @@ const createUser = async (req, res) => {
       return res.status(400).json({ message: "Invalid role" });
     }
 
+    // Generate username from full_name
+    const username = full_name.toLowerCase().replace(/\s+/g, ".");
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = await User.create({
-      name,
+      full_name,
+      report_to,
+      designation,
       email,
       password: hashedPassword,
       extension,
       role,
       isActive,
+      username,
     });
 
-    res
-      .status(201)
-      .json({ message: "User created successfully", user: newUser });
+    res.status(201).json({
+      message: "User created successfully",
+      user: {
+        id: newUser.id,
+        full_name: newUser.full_name,
+        report_to: newUser.report_to,
+        designation: newUser.designation,
+        email: newUser.email,
+        extension: newUser.extension,
+        role: newUser.role,
+        isActive: newUser.isActive,
+        username: newUser.username,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -274,7 +300,6 @@ const getOnlineUser = async (req, res) => {
   }
 };
 
-
 const getAgentOnline = async (req, res) => {
   try {
     const agents = await User.findAll({
@@ -335,14 +360,14 @@ const getAgentActive = async (req, res) => {
 const getInActiveUser = async (req, res) => {
   try {
     const inActiveUser = await User.findAll({
-      where: { isActive: 0 }
+      where: { isActive: 0 },
     });
 
     res.status(200).json({ inActiveUser });
   } catch (error) {
-    res.status(500).json({message: "Server Error", error: error.message})
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
-}
+};
 
 const getAgentPause = async (req, res) => {
   try {
@@ -529,7 +554,16 @@ const deactivateUser = async (req, res) => {
 
 const updateUser = async (req, res) => {
   const userId = req.params.id;
-  const { name, email, password, role, isActive, extension } = req.body;
+  const {
+    full_name,
+    report_to,
+    designation,
+    email,
+    password,
+    role,
+    isActive,
+    extension,
+  } = req.body;
 
   try {
     // Find the user by ID
@@ -554,7 +588,13 @@ const updateUser = async (req, res) => {
     }
 
     // Update other fields if provided
-    if (name) user.name = name;
+    if (full_name) {
+      user.full_name = full_name;
+      // Generate username from full_name
+      user.username = full_name.toLowerCase().replace(/\s+/g, ".");
+    }
+    if (report_to) user.report_to = report_to;
+    if (designation) user.designation = designation;
     if (password) {
       // Hash new password if provided
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -608,11 +648,14 @@ const updateUser = async (req, res) => {
       message: "User updated successfully",
       user: {
         id: user.id,
-        name: user.name,
+        full_name: user.full_name,
+        report_to: user.report_to,
+        designation: user.designation,
         email: user.email,
         extension: user.extension,
         role: user.role,
         isActive: user.isActive,
+        username: user.username,
       },
     });
   } catch (error) {
