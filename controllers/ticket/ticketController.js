@@ -4682,7 +4682,7 @@ const getTicketStatusExternal = async (req, res) => {
       success: true,
       ticket: {
         id: ticket.id,
-        ticket_id: ticket.ticket_id,
+        ticket_number: ticket.ticket_id,
         status: ticket.status,
         category: ticket.category,
         complaint_type: ticket.complaint_type,
