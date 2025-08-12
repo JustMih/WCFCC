@@ -47,7 +47,7 @@ require('./amiServer'); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
 app.use(express.json());
 app.use(cors({
-  origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+  origin: ["http://localhost:3000", "http://192.168.21.70:3000"],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
