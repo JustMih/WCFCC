@@ -9,11 +9,10 @@ const externalCorsOptions = {
     // List of allowed origins
     const allowedOrigins = process.env.ALLOWED_ORIGINS ? 
       process.env.ALLOWED_ORIGINS.split(',') : 
-      ['http://localhost:5070', 'http://127.0.0.1:8005', 
+      ['http://localhost:3000', 'http://127.0.0.1:3000', 
+        'http://localhost:5070', 'http://127.0.0.1:8005', 
         'http://192.168.21.70:5070',
         'https://192.168.21.70',
-        'http://192.168.21.70:5070/api',
-        'https://192.168.21.70/api',
         'http://192.168.21.70:5075',
       ];
     
