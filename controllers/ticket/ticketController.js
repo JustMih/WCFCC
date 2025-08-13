@@ -227,11 +227,11 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
         to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
         subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
         htmlBody: `
-          <p>Dear ${previousAssignee.name},</p>
+          <p>Dear ${previousAssignee.full_name},</p>
           <p>The ticket <b>${
             ticket.ticket_id || ticket.id
           }</b> has been escalated from your queue to <b>${
-          nextUser.name
+          nextUser.full_name
         }</b> (${nextRole}) due to SLA breach.</p>
           <p><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</p>
           <p>Please log in to the system for more details.</p>
@@ -249,7 +249,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
           ticket.ticket_id || ticket.id
         }`,
         htmlBody: `
-          <p>Dear ${nextUser.name},</p>
+          <p>Dear ${nextUser.full_name},</p>
           <p>A ticket <b>${
             ticket.ticket_id || ticket.id
           }</b> has been escalated to you for action. Please review and resolve as soon as possible.</p>
@@ -284,7 +284,7 @@ const getTicketCounts = async (req, res) => {
 
     const user = await User.findOne({
       where: { id },
-      attributes: ["id", "name", "role"],
+      attributes: ["id", "full_name", "role"],
     });
 
     if (!user) {
@@ -924,7 +924,7 @@ const createTicket = async (req, res) => {
     if (assignedUser.email && !shouldClose) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
-        <p>Dear ${assignedUser.name},</p>
+        <p>Dear ${assignedUser.full_name},</p>
         <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
@@ -970,29 +970,27 @@ const createTicket = async (req, res) => {
           role: "head-of-unit",
           unit_section: newTicket.section,
         },
-        attributes: ["id", "name", "email"],
+        attributes: ["id", "full_name", "email"],
       });
 
       // Get the agent's name who closed the ticket
       const closingAgent = await User.findOne({
         where: { id: userId },
-        attributes: ["id", "name"],
+        attributes: ["id", "full_name"],
       });
 
       if (headOfUnit && headOfUnit.email) {
         const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
         const emailBody = `
-          <p>Dear ${headOfUnit.name},</p>
-          <p>The following ticket has been closed by agent <strong>${
-            closingAgent ? closingAgent.name : "Unknown Agent"
-          }</strong>:</p>
+          <p>Dear ${closingAgent.full_name},</p>
+          <p>You have closed the ticket. Here are the details:</p>
           <ul>
             <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
             <li><strong>Subject:</strong> ${newTicket.subject}</li>
             <li><strong>Category:</strong> ${newTicket.category}</li>
             <li><strong>Requester:</strong> ${requesterFullName}</li>
             <li><strong>Closed by:</strong> ${
-              closingAgent ? closingAgent.name : "Unknown Agent"
+              closingAgent ? closingAgent.full_name : "Unknown Agent"
             }</li>
             <li><strong>Resolution:</strong> ${
               resolution_details ||
@@ -1025,7 +1023,7 @@ const createTicket = async (req, res) => {
     if (assignedUser.email && !shouldClose) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const emailHtmlBody = `
-        <p>Dear ${assignedUser.name},</p>
+        <p>Dear ${assignedUser.full_name},</p>
         <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
@@ -1055,19 +1053,19 @@ const createTicket = async (req, res) => {
           role: "head-of-unit",
           unit_section: newTicket.section,
         },
-        attributes: ["id", "name", "email"],
+        attributes: ["id", "full_name", "email"],
       });
 
       // Get the agent's name who closed the ticket
       const closingAgent = await User.findOne({
         where: { id: userId },
-        attributes: ["id", "name"],
+        attributes: ["id", "full_name"],
       });
 
       if (headOfUnit && headOfUnit.email) {
         const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
         const emailBody = `
-          <p>Dear ${closingAgent.name},</p>
+          <p>Dear ${closingAgent.full_name},</p>
           <p>You have closed the ticket. Here are the details:</p>
           <ul>
             <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
@@ -1115,7 +1113,7 @@ const getTickets = async (req, res) => {
     // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"], // Fetch ID, Name & Role
+      attributes: ["id", "full_name", "role"], // Fetch ID, Name & Role
     });
 
     if (!user) {
@@ -1156,7 +1154,7 @@ const getTickets = async (req, res) => {
     // Modify response to include `created_by` (user.name instead of userId)
     const response = tickets.map((ticket) => ({
       ...ticket.toJSON(),
-      created_by: user.name, // Replace userId with user name
+      created_by: user.full_name, // Replace userId with user name
     }));
 
     res
@@ -1181,7 +1179,7 @@ const getOpenTickets = async (req, res) => {
     // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"], // Fetch ID, Name & Role
+      attributes: ["id", "full_name", "role"], // Fetch ID, Name & Role
     });
 
     if (!user) {
@@ -1199,7 +1197,7 @@ const getOpenTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1208,7 +1206,7 @@ const getOpenTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1230,7 +1228,7 @@ const getOpenTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1239,7 +1237,7 @@ const getOpenTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1263,7 +1261,7 @@ const getOpenTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignedTo?.name || null,
+          assigned_to_name: a.assignedTo?.full_name || null,
           assigned_to_role: a.assignedTo?.role || null,
           reason: a.reason,
           action: a.action,
@@ -1278,7 +1276,7 @@ const getOpenTickets = async (req, res) => {
       );
       return {
         ...t,
-        created_by: user.name,
+        created_by: user.full_name,
       };
     });
     console.log("all ticketd open", response);
@@ -1302,7 +1300,7 @@ const getAssignedTickets = async (req, res) => {
     console.log("Fetching Assigned tickets for user ID:", userId);
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"],
+      attributes: ["id", "full_name", "role"],
     });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -1316,7 +1314,7 @@ const getAssignedTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1325,7 +1323,7 @@ const getAssignedTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1348,7 +1346,7 @@ const getAssignedTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1357,7 +1355,7 @@ const getAssignedTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1378,7 +1376,7 @@ const getAssignedTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignedTo?.name || null,
+          assigned_to_name: a.assignedTo?.full_name || null,
           assigned_to_role: a.assignedTo?.role || null,
           reason: a.reason,
           action: a.action,
@@ -1393,7 +1391,7 @@ const getAssignedTickets = async (req, res) => {
       );
       return {
         ...t,
-        created_by: user.name,
+        created_by: user.full_name,
       };
     });
 
@@ -1421,7 +1419,7 @@ const getInprogressTickets = async (req, res) => {
     // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"], // Fetch ID, Name & Role
+      attributes: ["id", "full_name", "role"], // Fetch ID, Name & Role
     });
 
     if (!user) {
@@ -1449,7 +1447,7 @@ const getInprogressTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1458,7 +1456,7 @@ const getInprogressTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1488,7 +1486,7 @@ const getInprogressTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1497,7 +1495,7 @@ const getInprogressTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1521,7 +1519,7 @@ const getInprogressTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignedTo?.name || null,
+          assigned_to_name: a.assignedTo?.full_name || null,
           assigned_to_role: a.assignedTo?.role || null,
           reason: a.reason,
           action: a.action,
@@ -1536,7 +1534,7 @@ const getInprogressTickets = async (req, res) => {
       );
       return {
         ...t,
-        created_by: user.name,
+        created_by: user.full_name,
       };
     });
 
@@ -1564,7 +1562,7 @@ const getCarriedForwardTickets = async (req, res) => {
     // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"], // Fetch ID, Name & Role
+      attributes: ["id", "full_name", "role"], // Fetch ID, Name & Role
     });
 
     if (!user) {
@@ -1582,7 +1580,7 @@ const getCarriedForwardTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1591,7 +1589,7 @@ const getCarriedForwardTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1610,7 +1608,7 @@ const getCarriedForwardTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1619,7 +1617,7 @@ const getCarriedForwardTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1643,7 +1641,7 @@ const getCarriedForwardTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignedTo?.name || null,
+          assigned_to_name: a.assignedTo?.full_name || null,
           assigned_to_role: a.assignedTo?.role || null,
           reason: a.reason,
           action: a.action,
@@ -1658,7 +1656,7 @@ const getCarriedForwardTickets = async (req, res) => {
       );
       return {
         ...t,
-        created_by: user.name,
+        created_by: user.full_name,
       };
     });
 
@@ -1686,7 +1684,7 @@ const getClosedTickets = async (req, res) => {
     // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"], // Fetch ID, Name & Role
+      attributes: ["id", "full_name", "role"], // Fetch ID, Name & Role
     });
 
     if (!user) {
@@ -1704,7 +1702,7 @@ const getClosedTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1713,7 +1711,7 @@ const getClosedTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1735,7 +1733,7 @@ const getClosedTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -1744,7 +1742,7 @@ const getClosedTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1768,7 +1766,7 @@ const getClosedTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignedTo?.name || null,
+          assigned_to_name: a.assignedTo?.full_name || null,
           assigned_to_role: a.assignedTo?.role || null,
           reason: a.reason,
           action: a.action,
@@ -1783,7 +1781,7 @@ const getClosedTickets = async (req, res) => {
       );
       return {
         ...t,
-        created_by: user.name,
+        created_by: user.full_name,
       };
     });
 
@@ -1811,7 +1809,7 @@ const getOverdueTickets = async (req, res) => {
     // Fetch User details including role
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"] // Fetch ID, Name & Role
+      attributes: ["id", "full_name", "role"] // Fetch ID, Name & Role
     });
 
     if (!user) {
@@ -1830,7 +1828,7 @@ const getOverdueTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"]
+            attributes: ["id", "full_name", "email"]
           },
           {
             model: TicketAssignment,
@@ -1839,7 +1837,7 @@ const getOverdueTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1876,7 +1874,7 @@ const getOverdueTickets = async (req, res) => {
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"]
+            attributes: ["id", "full_name", "email"]
           },
           {
             model: TicketAssignment,
@@ -1885,7 +1883,7 @@ const getOverdueTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -1909,7 +1907,7 @@ const getOverdueTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignedTo?.name || null,
+          assigned_to_name: a.assignedTo?.full_name || null,
           assigned_to_role: a.assignedTo?.role || null,
           reason: a.reason,
           action: a.action,
@@ -1921,7 +1919,7 @@ const getOverdueTickets = async (req, res) => {
         id: t.id, // Assignment ID (using ticket ID as assignment ID)
         ticket: {
           ...t,
-          created_by: user.name
+          created_by: user.full_name
         }
       };
     });
@@ -1963,33 +1961,33 @@ const getAllCustomersTickets = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: User,
           as: "assignee",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: User,
           as: "attendedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: User,
           as: "ratedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         // Commented out for simplicity (can be re-added if needed)
         // {
         //   model: User,
         //   as: 'convertedBy',
-        //   attributes: ['id', 'name', 'email']
+        //   attributes: ['id', 'full_name', 'email']
         // },
         // {
         //   model: User,
         //   as: 'forwardedBy',
-        //   attributes: ['id', 'name', 'email']
+        //   attributes: ['id', 'full_name', 'email']
         // }
       ],
     });
@@ -2018,7 +2016,7 @@ const getAllTickets = async (req, res) => {
     console.log("Fetching All tickets for user ID:", userId);
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"],
+      attributes: ["id", "full_name", "role"],
     });
 
     if (!user) {
@@ -2043,8 +2041,8 @@ const getAllTickets = async (req, res) => {
                 include: [
                   {
                     model: FunctionData,
-                    as: "functionData",
-                    attributes: ["id", "name"],
+                  as: "functionData",
+                  attributes: ["id", "name"],
                   },
                 ],
               },
@@ -2053,12 +2051,12 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: "creator",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -2067,7 +2065,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -2095,8 +2093,8 @@ const getAllTickets = async (req, res) => {
                 include: [
                   {
                     model: FunctionData,
-                    as: "functionData",
-                    attributes: ["id", "name"],
+                  as: "functionData",
+                  attributes: ["id", "name"],
                   },
                 ],
               },
@@ -2105,12 +2103,12 @@ const getAllTickets = async (req, res) => {
           {
             model: User,
             as: "creator",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: User,
             as: "assignee",
-            attributes: ["id", "name", "email"],
+            attributes: ["id", "full_name", "email"],
           },
           {
             model: TicketAssignment,
@@ -2119,7 +2117,7 @@ const getAllTickets = async (req, res) => {
               {
                 model: User,
                 as: "assignedTo",
-                attributes: ["id", "name", "email"]
+                attributes: ["id", "full_name", "email"]
               }
             ]
           },
@@ -2144,7 +2142,7 @@ const getAllTickets = async (req, res) => {
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
           assigned_to_id: a.assigned_to_id,
-          assigned_to_name: a.assignee?.name || "N/A",
+          assigned_to_name: a.assignee?.full_name || "N/A",
           assigned_to_role: a.assignee?.role || "N/A",
           action: a.action,
           reason: a.reason || t.description,
@@ -2152,7 +2150,7 @@ const getAllTickets = async (req, res) => {
         }));
       return {
         ...t,
-        created_by: user.name,
+        created_by: user.full_name,
       };
     });
     console.log("all ticket", response);
@@ -2283,7 +2281,7 @@ const searchByPhoneNumber = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name", "role"],
+          attributes: ["id", "full_name", "role"],
         },
       ],
     });
@@ -2327,13 +2325,13 @@ const getTicketById = async (req, res) => {
       include: [
         {
           model: Section,
-          as: "responsibleSection",
-          attributes: ["id", "name"],
+            as: "responsibleSection",
+            attributes: ["id", "name"],
           include: [
             {
               model: Function,
-              as: "functions",
-              attributes: ["id", "name"],
+                as: "functions",
+                attributes: ["id", "name"],
               include: [
                 {
                   model: FunctionData,
@@ -2347,32 +2345,32 @@ const getTicketById = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name", "username"],
+          attributes: ["id", "full_name", "username"],
         },
         {
           model: User,
           as: "assignee",
-          attributes: ["id", "name", "role"],
+          attributes: ["id", "full_name", "role"],
         },
         {
           model: User,
           as: "attendedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: User,
           as: "ratedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: User,
           as: "convertedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: User,
           as: "forwardedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: TicketAssignment,
@@ -2381,7 +2379,7 @@ const getTicketById = async (req, res) => {
             {
               model: User,
               as: "assignedTo",
-              attributes: ["id", "name", "email"]
+              attributes: ["id", "full_name", "email"]
             }
           ],
           order: [["created_at", "ASC"]],
@@ -2469,7 +2467,7 @@ const closeTicket = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
       ],
     });
@@ -2500,7 +2498,7 @@ const closeTicket = async (req, res) => {
     let attended_by_role = null;
     if (userId) {
       const attendedByUser = await User.findOne({ where: { id: userId } });
-      attended_by_name = attendedByUser ? attendedByUser.name : null;
+      attended_by_name = attendedByUser ? attendedByUser.full_name : null;
       attended_by_role = attendedByUser ? attendedByUser.role : null;
     }
 
@@ -2542,7 +2540,7 @@ const closeTicket = async (req, res) => {
     if (ticket.creator && ticket.creator.email) {
       const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
       const emailBody = `
-        <p>Dear ${ticket.creator.name},</p>
+        <p>Dear ${ticket.creator.full_name},</p>
         <p>Your ticket has been closed. Here are the details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
@@ -2675,12 +2673,12 @@ const closeCoordinatorTicket = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
         {
           model: User,
           as: "assignee",
-          attributes: ["id", "name", "role"],
+          attributes: ["id", "full_name", "role"],
         },
       ],
     });
@@ -2739,7 +2737,7 @@ const closeCoordinatorTicket = async (req, res) => {
     if (ticket.creator && ticket.creator.email) {
       const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
       const emailBody = `
-        <p>Dear ${ticket.creator.name},</p>
+        <p>Dear ${ticket.creator.full_name},</p>
         <p>Your ticket has been closed by a coordinator. Here are the details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
@@ -2777,7 +2775,7 @@ const closeCoordinatorTicket = async (req, res) => {
         <li><strong>Subject:</strong> ${ticket.subject}</li>
         <li><strong>Category:</strong> ${ticket.category}</li>
         <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-        <li><strong>Closed By:</strong> ${coordinator.name} (Coordinator)</li>
+        <li><strong>Closed By:</strong> ${coordinator.full_name} (Coordinator)</li>
         <li><strong>Resolution Type:</strong> ${
           resolution_type || "Resolved"
         }</li>
@@ -2785,7 +2783,7 @@ const closeCoordinatorTicket = async (req, res) => {
         <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
       </ul>
     `;
-    const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed by ${coordinator.name} (Coordinator).`;
+    const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed by ${coordinator.full_name} (Coordinator).`;
     await notifyUsersByRole(
       ["coordinator", "supervisor"],
       notifySubject2,
@@ -2801,7 +2799,7 @@ const closeCoordinatorTicket = async (req, res) => {
         ticket_id: ticketId,
         sender_id: userId,
         recipient_id: ticket.assigned_to,
-        message: `${ticket.category} ticket ${ticket.ticket_id} has been resolved and closed by ${coordinator.name} (Coordinator)`,
+        message: `${ticket.category} ticket ${ticket.ticket_id} has been resolved and closed by ${coordinator.full_name} (Coordinator)`,
         status: "unread",
       });
     }
@@ -2813,21 +2811,21 @@ const closeCoordinatorTicket = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `${ticket.category} ticket ${ticket.ticket_id} closed successfully by ${coordinator.name} (Coordinator)`,
+      message: `${ticket.category} ticket ${ticket.ticket_id} closed successfully by ${coordinator.full_name} (Coordinator)`,
       details: {
         ticket_id: ticket.ticket_id,
         subject: ticket.subject,
         category: ticket.category,
         resolution_type: resolution_type || "Resolved",
         resolution_details: resolution_details,
-        closed_by: coordinator.name,
+        closed_by: coordinator.full_name,
         closed_by_role: "Coordinator",
         closed_date: new Date().toLocaleString(),
       },
       ticket: {
         ...ticket.toJSON(),
         resolution_date: new Date(),
-        resolved_by: coordinator.name,
+        resolved_by: coordinator.full_name,
       },
     });
     return;
@@ -2884,7 +2882,7 @@ const assignTicket = async (req, res) => {
       assigned_to_id: assignedTo.id,
       assigned_to_role: assignedTo.role,
       action: "Assigned",
-      reason: reason || `Assigned to ${assignedTo.name || assignedTo.username}`,
+      reason: reason || `Assigned to ${assignedTo.full_name || assignedTo.username}`,
       created_at: new Date()
     });
 
@@ -2914,7 +2912,7 @@ const assignTicket = async (req, res) => {
       if (assignedTo.email) {
         const subject = `Ticket Assigned: ${ticket.ticket_id || ticket.id}`;
         const htmlBody = `
-          <p>Hello ${assignedTo.name || ""},</p>
+          <p>Hello ${assignedTo.full_name || ""},</p>
           <p>The following ticket has been <b>assigned</b> to you:</p>
           <ul>
             <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
@@ -2994,11 +2992,11 @@ const getAllAttendee = async (req, res) => {
     
     const users = await User.findAll({
       where: whereClause,
-      attributes: ['id', 'name', 'username', 'email', 'role', 'unit_section']
+      attributes: ['id', 'full_name', 'username', 'email', 'role', 'unit_section']
     });
     
     console.log(`DEBUG: Found ${users.length} ${targetRole}s matching criteria`);
-    console.log(`DEBUG: Users:`, users.map(u => ({ name: u.name, username: u.username, role: u.role, unit: u.unit_section })));
+    console.log(`DEBUG: Users:`, users.map(u => ({ name: u.full_name, username: u.username, role: u.role, unit: u.unit_section })));
     
     res.status(200).json({ 
       attendees: users, // Keep the same response structure for compatibility
@@ -3038,11 +3036,11 @@ const getTicketAssignments = async (req, res) => {
     const assignmentsWithUsers = await Promise.all(
       assignments.map(async (assignment) => {
         const assignedToUser = await User.findByPk(assignment.assigned_to_id, {
-          attributes: ["id", "name", "role"]
+          attributes: ["id", "full_name", "role"]
         });
         
         const assignedByUser = await User.findByPk(assignment.assigned_by_id, {
-          attributes: ["id", "name"]
+          attributes: ["id", "full_name"]
         });
         
         return {
@@ -3055,7 +3053,7 @@ const getTicketAssignments = async (req, res) => {
     
     let mappedAssignments = assignmentsWithUsers.map((a) => ({
       assigned_to_id: a.assigned_to_id,
-      assigned_to_name: a.assignedTo ? a.assignedTo.name : null,
+      assigned_to_name: a.assignedTo ? a.assignedTo.full_name : null,
       assigned_to_role: a.assignedTo ? a.assignedTo.role : null,
       reason: a.reason,
       action: a.action,
@@ -3071,7 +3069,7 @@ const getTicketAssignments = async (req, res) => {
     if (mappedAssignments.length > 0) {
       const firstAssignment = assignmentsWithUsers[0];
       if (firstAssignment.assignedBy) {
-        mappedAssignments[0].creator_name = firstAssignment.assignedBy.name || 'N/A';
+        mappedAssignments[0].creator_name = firstAssignment.assignedBy.full_name || 'N/A';
       }
     }
 
@@ -3156,14 +3154,14 @@ const getAssignedNotifiedTickets = async (req, res) => {
             {
               model: User,
               as: "assignee",
-              attributes: ["id", "name", "email"],
+              attributes: ["id", "full_name", "email"],
             },
           ],
         },
         {
           model: User,
           as: "sender",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
       ],
       order: [["created_at", "DESC"]],
@@ -3189,7 +3187,7 @@ const getDashboardCounts = async (req, res) => {
     }
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "name", "role"],
+      attributes: ["id", "full_name", "role"],
     });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -3669,7 +3667,7 @@ const reassignTicket = async (req, res) => {
       if (newAssignee && newAssignee.email) {
         const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
         const htmlBody = `
-          <p>Hello ${newAssignee.name || ""},</p>
+          <p>Hello ${newAssignee.full_name || ""},</p>
           <p>The following ticket has been <b>reassigned</b> to you:</p>
           <ul>
             <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
@@ -3789,7 +3787,7 @@ const reverseTicket = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"]
+          attributes: ["id", "full_name"]
         }
       ]
     });
@@ -3835,7 +3833,7 @@ const reverseTicket = async (req, res) => {
       }
 
       // Fetch attended_by user name and role
-      let attended_by_name = assignedBy.name;
+      let attended_by_name = assignedBy.full_name;
       let attended_by_role = assignedBy.role;
 
       // Fetch previous user details
@@ -3852,7 +3850,7 @@ const reverseTicket = async (req, res) => {
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
           <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
-          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
+          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.full_name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
           <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
           <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
           <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
@@ -3860,7 +3858,7 @@ const reverseTicket = async (req, res) => {
         </ul>
       `;
       
-      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.name : 'Unknown'}.`;
+      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
       
       await notifyUsersByRole(
         ["coordinator", "supervisor"],
@@ -3875,7 +3873,7 @@ const reverseTicket = async (req, res) => {
       if (prevUser && prevUser.email) {
         const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
         const emailHtmlBody = `
-          <p>Dear ${prevUser.name || prevUser.username},</p>
+          <p>Dear ${prevUser.full_name || prevUser.username},</p>
           <p>A ticket has been reversed back to you:</p>
           <ul>
             <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
@@ -3935,7 +3933,7 @@ const reverseTicket = async (req, res) => {
       let attended_by_role = null;
       if (userId) {
         const attendedByUser = await User.findOne({ where: { id: userId } });
-        attended_by_name = attendedByUser ? attendedByUser.name : null;
+        attended_by_name = attendedByUser ? attendedByUser.full_name : null;
         attended_by_role = attendedByUser ? attendedByUser.role : null;
       }
 
@@ -3953,13 +3951,13 @@ const reverseTicket = async (req, res) => {
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
           <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
-          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
+          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.full_name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
           <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
           <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
         </ul>
       `;
       
-      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.name : 'Unknown'}.`;
+      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
       
       await notifyUsersByRole(
         ["coordinator", "supervisor"],
@@ -3974,7 +3972,7 @@ const reverseTicket = async (req, res) => {
       if (prevUser && prevUser.email) {
         const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
         const emailHtmlBody = `
-          <p>Dear ${prevUser.name || prevUser.username},</p>
+          <p>Dear ${prevUser.full_name || prevUser.username},</p>
           <p>A ticket has been reversed back to you:</p>
           <ul>
             <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
@@ -4308,7 +4306,7 @@ const getEscalatedTicketsForUser = async (req, res) => {
         {
           model: User,
           as: "assignee",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: TicketAssignment,
@@ -4317,7 +4315,7 @@ const getEscalatedTicketsForUser = async (req, res) => {
             {
               model: User,
               as: "assignedTo",
-              attributes: ["id", "name", "email"]
+              attributes: ["id", "full_name", "email"]
             }
           ]
         },
@@ -4360,7 +4358,7 @@ const getEverAssignedTickets = async (req, res) => {
         {
           model: User,
           as: "assignee",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
         {
           model: TicketAssignment,
@@ -4369,7 +4367,7 @@ const getEverAssignedTickets = async (req, res) => {
             {
               model: User,
               as: "assignedTo",
-              attributes: ["id", "name", "email"]
+              attributes: ["id", "full_name", "email"]
             }
           ]
         },
@@ -4453,14 +4451,14 @@ const getEscalatedFromTickets = async (req, res) => {
             {
               model: User,
               as: "assignee",
-              attributes: ["id", "name", "role"],
+              attributes: ["id", "full_name", "role"],
             },
           ],
         },
         {
           model: User,
           as: "assignee",
-          attributes: ["id", "name", "role"],
+          attributes: ["id", "full_name", "role"],
         },
       ],
       order: [["created_at", "DESC"]],
@@ -4503,12 +4501,12 @@ const forwardToDirectorGeneral = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
         {
           model: User,
           as: "ratedBy",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "full_name", "email"],
         },
       ],
     });
@@ -4597,7 +4595,7 @@ const forwardToDirectorGeneral = async (req, res) => {
     if (directorGeneral.email) {
       const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
       const emailHtmlBody = `
-        <p>Dear ${directorGeneral.name || directorGeneral.username},</p>
+        <p>Dear ${directorGeneral.full_name || directorGeneral.username},</p>
         <p>A ticket has been assigned to you for review. Details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
@@ -4631,7 +4629,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       message: `${isMajorComplaint ? "Major complaint" : "Reversed ticket"} assigned to Director General for review`,
       ticket: {
         ...ticket.toJSON(),
-        assigned_to_name: directorGeneral.name,
+        assigned_to_name: directorGeneral.full_name,
       },
     });
   } catch (error) {
@@ -4807,7 +4805,7 @@ const getTicketStatusExternal = async (req, res) => {
             {
               model: User,
               as: "assignedTo",
-              attributes: ["id", "name", "email"]
+              attributes: ["id", "full_name", "email"]
             }
           ],
           order: [["created_at", "DESC"]],
@@ -4908,7 +4906,7 @@ const reverseComplaint = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"]
+          attributes: ["id", "full_name"]
         }
       ]
     });
@@ -4946,7 +4944,7 @@ const reverseComplaint = async (req, res) => {
     targetUserRole = prevAssignment.assigned_to_role;
     
     const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
-    targetUserName = prevUser ? prevUser.name : "Unknown";
+    targetUserName = prevUser ? prevUser.full_name : "Unknown";
 
     // Update the ticket to assign to the target user
     await ticket.update({
@@ -4970,7 +4968,7 @@ const reverseComplaint = async (req, res) => {
     });
 
     // Fetch attended_by user name and role
-    let attended_by_name = currentUser.name;
+    let attended_by_name = currentUser.full_name;
     let attended_by_role = currentUser.role;
 
     // Notify all coordinators and supervisors
@@ -5004,7 +5002,7 @@ const reverseComplaint = async (req, res) => {
     if (targetUser && targetUser.email) {
       const subject = `Complaint Reversed: ${ticket.ticket_id || ticket.id}`;
       const htmlBody = `
-        <p>Hello ${targetUser.name || ""},</p>
+        <p>Hello ${targetUser.full_name || ""},</p>
         <p>The following complaint has been <b>reversed</b> to you:</p>
         <ul>
           <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
@@ -5057,12 +5055,12 @@ const approveAndForwardToCoordinator = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"]
+          attributes: ["id", "full_name"]
         },
         {
           model: User,
           as: "ratedBy",
-          attributes: ["id", "name", "email"]
+          attributes: ["id", "full_name", "email"]
         }
       ]
     });
@@ -5119,7 +5117,7 @@ const approveAndForwardToCoordinator = async (req, res) => {
     if (coordinator.email) {
       const emailSubject = `Ticket Forwarded: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
       const emailHtmlBody = `
-        <p>Dear ${coordinator.name || coordinator.username},</p>
+        <p>Dear ${coordinator.full_name || coordinator.username},</p>
         <p>A ticket has been forwarded to you by the Director General. Details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
@@ -5152,7 +5150,7 @@ const approveAndForwardToCoordinator = async (req, res) => {
       message: "Ticket approved and forwarded to coordinator successfully",
       ticket: {
         ...ticket.toJSON(),
-        assigned_to_name: coordinator.name
+        assigned_to_name: coordinator.full_name
       }
     });
   } catch (error) {
@@ -5180,12 +5178,12 @@ const reverseAndAssignToCoordinator = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name"]
+          attributes: ["id", "full_name"]
         },
         {
           model: User,
           as: "ratedBy",
-          attributes: ["id", "name", "email"]
+          attributes: ["id", "full_name", "email"]
         }
       ]
     });
@@ -5242,7 +5240,7 @@ const reverseAndAssignToCoordinator = async (req, res) => {
     if (coordinator.email) {
       const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
       const emailHtmlBody = `
-        <p>Dear ${coordinator.name || coordinator.username},</p>
+        <p>Dear ${coordinator.full_name || coordinator.username},</p>
         <p>A ticket has been assigned to you by the Director General for more clarification. Details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
@@ -5275,7 +5273,7 @@ const reverseAndAssignToCoordinator = async (req, res) => {
       message: "Ticket reversed and assigned to coordinator successfully",
       ticket: {
         ...ticket.toJSON(),
-        assigned_to_name: coordinator.name
+        assigned_to_name: coordinator.full_name
       }
     });
   } catch (error) {
@@ -5336,7 +5334,7 @@ const getTicketWorkflowInfo = async (req, res) => {
     let currentAssignee = null;
     if (ticket.assigned_to_id) {
       currentAssignee = await User.findByPk(ticket.assigned_to_id, {
-        attributes: ['id', 'name', 'username', 'role', 'email']
+        attributes: ['id', 'full_name', 'username', 'role', 'email']
       });
     }
 
@@ -5377,7 +5375,7 @@ const getTicketWorkflowInfo = async (req, res) => {
         },
         current_assignment: currentAssignee ? {
           id: currentAssignee.id,
-          name: currentAssignee.name,
+          name: currentAssignee.full_name,
           username: currentAssignee.username,
           role: currentAssignee.role,
           email: currentAssignee.email
@@ -5422,12 +5420,12 @@ const getTicketWorkflowAuditTrail = async (req, res) => {
         {
           model: User,
           as: "assignedBy",
-          attributes: ["id", "name", "username", "role", "unit_section"]
+          attributes: ["id", "full_name", "username", "role", "unit_section"]
         },
         {
           model: User,
           as: "assignedTo",
-          attributes: ["id", "name", "username", "role", "unit_section"]
+          attributes: ["id", "full_name", "username", "role", "unit_section"]
         }
       ]
     });
@@ -5545,7 +5543,7 @@ const managerAttendMajor = async (req, res) => {
     if (headOfUnit.email) {
       const emailSubject = `Major Complaint Attended and Assigned: ${ticket.subject || ticket.ticket_id}`;
       const emailBody = `
-        <p>Dear ${headOfUnit.name || 'Head of Unit'},</p>
+        <p>Dear ${headOfUnit.full_name || 'Head of Unit'},</p>
         <p>A major complaint has been attended by a manager and assigned to you for review.</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
@@ -5575,7 +5573,7 @@ const managerAttendMajor = async (req, res) => {
         ticket,
         assignedTo: {
           id: headOfUnit.id,
-          name: headOfUnit.name,
+          name: headOfUnit.full_name,
           role: headOfUnit.role,
           unit_section: headOfUnit.unit_section
         }
