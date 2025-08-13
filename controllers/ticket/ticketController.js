@@ -903,6 +903,8 @@ const createTicket = async (req, res) => {
     const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
 
     // Only send SMS if ticket is NOT closed at creation
+    // SMS functionality temporarily disabled
+    /*
     if (
       !shouldClose &&
       (requester === "Employee" || requester === "Representative") &&
@@ -921,6 +923,7 @@ const createTicket = async (req, res) => {
     } else if (!shouldClose) {
       console.log("Not sending SMS, invalid phone:", smsRecipient);
     }
+    */
 
     // --- Email Notification to Assignee ---
     let emailWarning = "";
