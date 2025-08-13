@@ -927,36 +927,36 @@ const createTicket = async (req, res) => {
 
     // --- Email Notification to Assignee ---
     let emailWarning = "";
-    if (assignedUser.email && !shouldClose) {
-      const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
-      const emailHtmlBody = `
-        <p>Dear ${assignedUser.full_name},</p>
-        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
-        <ul>
-          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${newTicket.subject}</li>
-          <li><strong>Category:</strong> ${newTicket.category}</li>
-          <li><strong>Description:</strong> ${newTicket.description}</li>
-          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
-          <li><strong>Channel:</strong> ${newTicket.channel}</li>
-        </ul>
-        <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
-      `;
-      try {
-        // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({
-          to: "rehema.said3@ttcl.co.tz",
-          subject: emailSubject,
-          htmlBody: emailHtmlBody,
-        });
-      } catch (emailError) {
-        console.error("Error sending email:", emailError.message);
-        // console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
-        emailWarning += " (Warning: Failed to send email to assignee.)";
-      }
-    }
+    // if (assignedUser.email && !shouldClose) {
+    //   const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+    //   const emailHtmlBody = `
+    //     <p>Dear ${assignedUser.full_name},</p>
+    //     <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+    //     <ul>
+    //       <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+    //       <li><strong>Subject:</strong> ${newTicket.subject}</li>
+    //       <li><strong>Category:</strong> ${newTicket.category}</li>
+    //       <li><strong>Description:</strong> ${newTicket.description}</li>
+    //       <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+    //       <li><strong>Channel:</strong> ${newTicket.channel}</li>
+    //     </ul>
+    //     <p>Please log in to the system to review and handle this ticket.</p>
+    //     <p>Thank you,</p>
+    //     <p>WCF Customer Care System</p>
+    //   `;
+    //   try {
+    //     // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+    //     await sendEmail({
+    //       to: "rehema.said3@ttcl.co.tz",
+    //       subject: emailSubject,
+    //       htmlBody: emailHtmlBody,
+    //     });
+    //   } catch (emailError) {
+    //     console.error("Error sending email:", emailError.message);
+    //     // console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+    //     emailWarning += " (Warning: Failed to send email to assignee.)";
+    //   }
+    // }
     // --- Notification for Assignee ---
     await Notification.create({
       ticket_id: newTicket.id,
@@ -987,35 +987,35 @@ const createTicket = async (req, res) => {
 
       if (headOfUnit && headOfUnit.email) {
         const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-        const emailBody = `
-          <p>Dear ${closingAgent.full_name},</p>
-          <p>You have closed the ticket. Here are the details:</p>
-          <ul>
-            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-            <li><strong>Subject:</strong> ${newTicket.subject}</li>
-            <li><strong>Category:</strong> ${newTicket.category}</li>
-            <li><strong>Requester:</strong> ${requesterFullName}</li>
-            <li><strong>Closed by:</strong> ${
-              closingAgent ? closingAgent.full_name : "Unknown Agent"
-            }</li>
-            <li><strong>Resolution:</strong> ${
-              resolution_details ||
-              description ||
-              "Ticket resolved during creation"
-            }</li>
-          </ul>
-          <p>Please review the resolution details above.</p>
-        `;
-        sendEmail({
-          to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
-          subject: emailSubject,
-          htmlBody: emailBody,
-        }).catch((emailError) => {
-          console.error(
-            "Error sending email to head-of-unit:",
-            emailError.message
-          );
-        });
+        // const emailBody = `
+        //   <p>Dear ${closingAgent.full_name},</p>
+        //   <p>You have closed the ticket. Here are the details:</p>
+        //   <ul>
+        //     <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+        //     <li><strong>Subject:</strong> ${newTicket.subject}</li>
+        //     <li><strong>Category:</strong> ${newTicket.category}</li>
+        //     <li><strong>Requester:</strong> ${requesterFullName}</li>
+        //     <li><strong>Closed by:</strong> ${
+        //       closingAgent ? closingAgent.full_name : "Unknown Agent"
+        //     }</li>
+        //     <li><strong>Resolution:</strong> ${
+        //       resolution_details ||
+        //       description ||
+        //       "Ticket resolved during creation"
+        //     }</li>
+        //   </ul>
+        //   <p>Please review the resolution details above.</p>
+        // `;
+        // sendEmail({
+        //   to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+        //   subject: emailSubject,
+        //   htmlBody: emailBody,
+        // }).catch((emailError) => {
+        //   console.error(
+        //     "Error sending email to head-of-unit:",
+        //     emailError.message
+        //   );
+        // });
       }
     }
     // --- Respond to client immediately ---
@@ -1026,31 +1026,31 @@ const createTicket = async (req, res) => {
       ticket: newTicket,
     });
     // --- Send email to assignee in background ---
-    if (assignedUser.email && !shouldClose) {
-      const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
-      const emailHtmlBody = `
-        <p>Dear ${assignedUser.full_name},</p>
-        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
-        <ul>
-          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${newTicket.subject}</li>
-          <li><strong>Category:</strong> ${newTicket.category}</li>
-          <li><strong>Description:</strong> ${newTicket.description}</li>
-          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
-          <li><strong>Channel:</strong> ${newTicket.channel}</li>
-        </ul>
-        <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
-      `;
-      sendEmail({
-        to: "rehema.said3@ttcl.co.tz",
-        subject: emailSubject,
-        htmlBody: emailHtmlBody,
-      }).catch((emailError) => {
-        console.error("Error sending email:", emailError.message);
-      });
-    }
+    // if (assignedUser.email && !shouldClose) {
+    //   const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+    //   const emailHtmlBody = `
+    //     <p>Dear ${assignedUser.full_name},</p>
+    //     <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+    //     <ul>
+    //       <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+    //       <li><strong>Subject:</strong> ${newTicket.subject}</li>
+    //       <li><strong>Category:</strong> ${newTicket.category}</li>
+    //       <li><strong>Description:</strong> ${newTicket.description}</li>
+    //       <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+    //       <li><strong>Channel:</strong> ${newTicket.channel}</li>
+    //     </ul>
+    //     <p>Please log in to the system to review and handle this ticket.</p>
+    //     <p>Thank you,</p>
+    //     <p>WCF Customer Care System</p>
+    //   `;
+    //   sendEmail({
+    //     to: "rehema.said3@ttcl.co.tz",
+    //     subject: emailSubject,
+    //     htmlBody: emailHtmlBody,
+    //   }).catch((emailError) => {
+    //     console.error("Error sending email:", emailError.message);
+    //   });
+    // }
     // --- Email to Supervisor if Closed on Creation (background) ---
     if (shouldClose) {
       // Find head-of-unit for the ticket's section/unit
@@ -1068,33 +1068,33 @@ const createTicket = async (req, res) => {
         attributes: ["id", "full_name"],
       });
 
-      if (headOfUnit && headOfUnit.email) {
-        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-        const emailBody = `
-          <p>Dear ${closingAgent.full_name},</p>
-          <p>You have closed the ticket. Here are the details:</p>
-          <ul>
-            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-            <li><strong>Subject:</strong> ${newTicket.subject}</li>
-            <li><strong>Category:</strong> ${newTicket.category}</li>
-            <li><strong>Description:</strong> ${newTicket.description}</li>
-            <li><strong>Resolution:</strong> ${
-              resolution_details || "Ticket closed by agent"
-            }</li>
-          </ul>
-          <p>Thank you for using the WCF Customer Care System.</p>
-        `;
-        sendEmail({
-          to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
-          subject: emailSubject,
-          htmlBody: emailBody,
-        }).catch((emailError) => {
-          console.error(
-            "Error sending closure email to agent:",
-            emailError.message
-          );
-        });
-      }
+      // if (headOfUnit && headOfUnit.email) {
+      //   const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+      //   const emailBody = `
+      //     <p>Dear ${closingAgent.full_name},</p>
+      //     <p>You have closed the ticket. Here are the details:</p>
+      //     <ul>
+      //       <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+      //       <li><strong>Subject:</strong> ${newTicket.subject}</li>
+      //       <li><strong>Category:</strong> ${newTicket.category}</li>
+      //       <li><strong>Description:</strong> ${newTicket.description}</li>
+      //       <li><strong>Resolution:</strong> ${
+      //         resolution_details || "Ticket closed by agent"
+      //       }</li>
+      //     </ul>
+      //     <p>Thank you for using the WCF Customer Care System.</p>
+      //   `;
+      //   sendEmail({
+      //     to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
+      //     subject: emailSubject,
+      //     htmlBody: emailBody,
+      //   }).catch((emailError) => {
+      //     console.error(
+      //       "Error sending closure email to agent:",
+      //       emailError.message
+      //     );
+      //   });
+      // }
     }
     return;
   } catch (error) {
