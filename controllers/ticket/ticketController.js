@@ -909,12 +909,15 @@ const createTicket = async (req, res) => {
       isValidTzPhone(smsRecipient)
     ) {
       const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
-      try {
-        await sendQuickSms({ message: smsMessage, recipient: smsRecipient });
-        console.log("SMS sent successfully to", smsRecipient);
-      } catch (smsError) {
-        console.error("Error sending SMS:", smsError.message);
-      }
+      
+      // Send SMS asynchronously to avoid blocking the response
+      sendQuickSms({ message: smsMessage, recipient: smsRecipient })
+        .then(() => {
+          console.log("SMS sent successfully to", smsRecipient);
+        })
+        .catch((smsError) => {
+          console.error("Error sending SMS:", smsError.message);
+        });
     } else if (!shouldClose) {
       console.log("Not sending SMS, invalid phone:", smsRecipient);
     }
