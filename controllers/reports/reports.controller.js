@@ -1,7 +1,7 @@
 // const VoiceNote = require('../../models/voice_notes.model');
 // const CDR = require('../../models/cdr.model');
 // const IVRDTMFMapping = require('../../models/ivr_dtmf_mappings.model');
-// const {IVRAction, IVRVoice } = require('../../models'); 
+// const {IVRAction, IVRVoice } = require('../../models');
 
 // exports.getVoiceNotes = async (req, res) => {
 //   try {
@@ -24,7 +24,6 @@
 //   }
 // };
 
- 
 // exports.getIVRInteractions = async (req, res) => {
 //   try {
 //     const ivrInteractions = await IVRDTMFMapping.findAll({
@@ -48,12 +47,13 @@
 //   }
 // };
 
-const VoiceNote = require('../../models/voice_notes.model');
-const CDR = require('../../models/cdr.model');
-const IVRDTMFMapping = require('../../models/ivr_dtmf_mappings.model');
-const { IVRAction, IVRVoice } = require('../../models');
-const path = require('path');
-const fs = require('fs');
+const VoiceNote = require("../../models/voice_notes.model");
+const CDR = require("../../models/cdr.model");
+const IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
+const { IVRAction, IVRVoice } = require("../../models");
+const path = require("path");
+const fs = require("fs");
+const sequelize = require("../../config/mysql_connection"); // Adjust the path as necessary
 
 exports.getVoiceNotes = async (req, res) => {
   try {
@@ -79,18 +79,17 @@ exports.streamVoiceNote = async (req, res) => {
       return res.status(404).send("Voice file not found on disk");
     }
 
-    res.sendFile(filePath, { headers: { 'Content-Type': 'audio/wav' } });
+    res.sendFile(filePath, { headers: { "Content-Type": "audio/wav" } });
   } catch (error) {
     console.error("Error streaming voice note:", error);
     res.status(500).send("Internal server error");
   }
 };
 
- 
 exports.getCDRReports = async (req, res) => {
   try {
     const cdrReports = await CDR.findAll({
-      order: [['cdrstarttime', 'DESC']] // Replace 'calldate' with your actual datetime column name
+      order: [["cdrstarttime", "DESC"]], // Replace 'calldate' with your actual datetime column name
     });
     res.json(cdrReports);
   } catch (error) {
@@ -102,9 +101,9 @@ exports.getIVRInteractions = async (req, res) => {
   try {
     const ivrInteractions = await IVRDTMFMapping.findAll({
       include: [
-        { model: IVRAction, attributes: ['name'], as: 'action' },
-        { model: IVRVoice, attributes: ['file_name'], as: 'voice' }
-      ]
+        { model: IVRAction, attributes: ["name"], as: "action" },
+        { model: IVRVoice, attributes: ["file_name"], as: "voice" },
+      ],
     });
     res.json(ivrInteractions);
   } catch (error) {
@@ -115,12 +114,78 @@ exports.getIVRInteractions = async (req, res) => {
 // Serve the audio files
 exports.serveVoiceNote = (req, res) => {
   const filename = decodeURIComponent(req.params.filename);
-  const filePath = path.join('/var/lib/asterisk/sounds/custom', filename);
+  const filePath = path.join("/var/lib/asterisk/sounds/custom", filename);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).send('File not found');
+    return res.status(404).send("File not found");
   }
 
-  res.sendFile(filePath, { headers: { 'Content-Type': 'audio/wav' } });
+  res.sendFile(filePath, { headers: { "Content-Type": "audio/wav" } });
 };
 
+exports.getVoiceReport = (req, res) => {
+  const { startDate, endDate } = req.params; // <-- use req.params
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  const query = sequelize.query(
+    `SELECT * FROM Voice_Notes WHERE created_at BETWEEN :startDate AND :endDate`,
+    {
+      replacements: { startDate, endDate },
+      type: sequelize.QueryTypes.SELECT,
+    }
+  );
+  query
+    .then((voices) => {
+      if (voices.length === 0) {
+        return res.status(404).json({ message: "No voice notes found" });
+      }
+      res.json(voices);
+    })
+    .catch((error) => {
+      console.error("Error fetching voice notes:", error);
+      res.status(500).json({ error: error.message });
+    });
+};
+
+exports.getCDRReport = (req, res) => {
+  const { startDate, endDate, disposition } = req.params;
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN :startDate AND :endDate`;
+  let replacements = { startDate, endDate };
+
+  // Add disposition filter if provided
+  if (disposition && disposition !== "all") {
+    query += ` AND disposition = :disposition`;
+    replacements.disposition = disposition;
+  }
+
+  query += ` ORDER BY cdrstarttime DESC`;
+
+  const cdrQuery = sequelize.query(query, {
+    replacements,
+    type: sequelize.QueryTypes.SELECT,
+  });
+
+  cdrQuery
+    .then((cdrData) => {
+      if (cdrData.length === 0) {
+        return res.status(404).json({ message: "No CDR records found" });
+      }
+      res.json(cdrData);
+    })
+    .catch((error) => {
+      console.error("Error fetching CDR data:", error);
+      res.status(500).json({ error: error.message });
+    });
+};

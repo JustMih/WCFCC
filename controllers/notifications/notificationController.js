@@ -32,16 +32,20 @@ const createNotification = async (req, res) => {
         recipientUser = await User.findByPk(ticket.assigned_to_id);
       }
       if (!recipientUser) {
-        return res.status(404).json({ message: "Recipient user not found for this ticket." });
+        return res
+          .status(404)
+          .json({ message: "Recipient user not found for this ticket." });
       }
     } else {
-      return res.status(400).json({ message: "recipient_id or ticket_id with assigned_to_id is required." });
+      return res.status(400).json({
+        message: "recipient_id or ticket_id with assigned_to_id is required.",
+      });
     }
 
     if (missingFields.length > 0) {
       return res.status(400).json({
         message: "Missing required fields.",
-        missingFields
+        missingFields,
       });
     }
 
@@ -62,7 +66,7 @@ const createNotification = async (req, res) => {
       comment: message,
       channel,
       status: "unread",
-      category: category
+      category: category,
     });
 
     // Step 5: Send email to the recipient
@@ -75,7 +79,7 @@ const createNotification = async (req, res) => {
           </div>
           <div style="background: #fff; padding: 24px; border-radius: 0 0 8px 8px;">
             <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
-              recipientUser.name
+              recipientUser.full_name
             }</strong>,</p>
             <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
               recipientUser.id
@@ -99,7 +103,7 @@ const createNotification = async (req, res) => {
         await sendEmail({
           to: "rehema.said3@ttcl.co.tz",
           subject: emailSubject,
-          htmlBody: emailHtmlBody
+          htmlBody: emailHtmlBody,
         });
       } catch (emailError) {
         console.error("Error sending notification email:", emailError.message);
@@ -108,13 +112,13 @@ const createNotification = async (req, res) => {
 
     return res.status(201).json({
       message: "Notification created.",
-      notification
+      notification,
     });
   } catch (error) {
     console.error("Error creating notification:", error);
     return res.status(500).json({
       message: "Internal server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -126,7 +130,7 @@ const listNotifications = async (req, res) => {
     const notifications = await Notification.findAll({
       where: {
         recipient_id: userId,
-        [Op.or]: [{ status: "unread" }, { status: " " }]
+        [Op.or]: [{ status: "unread" }, { status: " " }],
       },
 
       include: [
@@ -139,11 +143,11 @@ const listNotifications = async (req, res) => {
             "subject",
             "category",
             "status",
-            "description"
-          ]
-        }
+            "description",
+          ],
+        },
       ],
-      order: [["created_at", "DESC"]]
+      order: [["created_at", "DESC"]],
     });
     return res.status(200).json({ notifications });
   } catch (error) {
@@ -169,10 +173,10 @@ const getNotificationById = async (req, res) => {
             "subject",
             "category",
             "status",
-            "description"
-          ]
-        }
-      ]
+            "description",
+          ],
+        },
+      ],
     });
 
     if (!notification) {
@@ -212,8 +216,8 @@ const getUnreadCount = async (req, res) => {
     const count = await Notification.count({
       where: {
         recipient_id: userId,
-        [Op.or]: [{ status: "unread" }, { status: " " }] // Correctly checking both conditions
-      }
+        [Op.or]: [{ status: "unread" }, { status: " " }], // Correctly checking both conditions
+      },
     });
     return res.status(200).json({ unreadCount: count });
   } catch (error) {
@@ -241,21 +245,21 @@ const getNotificationsByTicketId = async (req, res) => {
             "subject",
             "category",
             "status",
-            "description"
-          ]
+            "description",
+          ],
         },
         {
           model: require("../../models/User"),
           as: "sender",
-          attributes: ["id", "name"]
+          attributes: ["id", "name"],
         },
         {
           model: require("../../models/User"),
           as: "recipient",
-          attributes: ["id", "name"]
-        }
+          attributes: ["id", "name"],
+        },
       ],
-      order: [["created_at", "DESC"]]
+      order: [["created_at", "DESC"]],
     });
 
     console.log("Found notifications:", notifications.length);
@@ -264,7 +268,7 @@ const getNotificationsByTicketId = async (req, res) => {
     console.error("Error fetching ticket notifications:", error);
     return res.status(500).json({
       message: "Error fetching ticket notifications",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -279,11 +283,13 @@ const getNotifiedTicketsCount = async (req, res) => {
     // Find all notifications for this user, group by ticket_id
     const notifiedTickets = await Notification.findAll({
       where: { recipient_id: userId },
-      attributes: [[Sequelize.fn('DISTINCT', Sequelize.col('ticket_id')), 'ticket_id']],
+      attributes: [
+        [Sequelize.fn("DISTINCT", Sequelize.col("ticket_id")), "ticket_id"],
+      ],
     });
     res.status(200).json({
       notifiedTicketCount: notifiedTickets.length,
-      ticketIds: notifiedTickets.map(n => n.ticket_id),
+      ticketIds: notifiedTickets.map((n) => n.ticket_id),
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -297,7 +303,7 @@ const getNotificationsByTicketAndRecipient = async (req, res) => {
     const notifications = await Notification.findAll({
       where: {
         ticket_id: ticketId,
-        recipient_id: userId
+        recipient_id: userId,
       },
       include: [
         {
@@ -309,25 +315,27 @@ const getNotificationsByTicketAndRecipient = async (req, res) => {
             "subject",
             "category",
             "status",
-            "description"
-          ]
+            "description",
+          ],
         },
         {
           model: require("../../models/User"),
           as: "sender",
-          attributes: ["id", "name"]
+          attributes: ["id", "name"],
         },
         {
           model: require("../../models/User"),
           as: "recipient",
-          attributes: ["id", "name"]
-        }
+          attributes: ["id", "name"],
+        },
       ],
-      order: [["created_at", "DESC"]]
+      order: [["created_at", "DESC"]],
     });
     return res.status(200).json({ notifications });
   } catch (error) {
-    return res.status(500).json({ message: "Error fetching notifications", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Error fetching notifications", error: error.message });
   }
 };
 

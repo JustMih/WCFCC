@@ -20,7 +20,7 @@ const registerSuperAdmin = async () => {
 
     const hashedPassword = await bcrypt.hash("superadmin123", 10);
     await User.create({
-      name: "Super Admin",
+      full_name: "Super Admin",
       email: "superadmin@wcf.go.tz",
       password: hashedPassword,
       role: "super-admin",
@@ -33,12 +33,12 @@ const registerSuperAdmin = async () => {
 };
 
 const authenticateActiveDirectory = async (username, password) => {
-  // const url = "ldap://10.0.7.78";
-  // const bindDN = `TTCLHQ\\${username}`;
-  // const baseDN = "dc=ttcl,dc=co,dc=tz";
-  const url = "ldap://192.168.1.15";
-  const baseDN = "dc=wcf,dc=go,dc=tz";
-  const bindDN = `WCF\\${username}`;
+  const url = "ldap://10.0.7.78";
+  const bindDN = `TTCLHQ\\${username}`;
+  const baseDN = "dc=ttcl,dc=co,dc=tz";
+  // const url = "ldap://192.168.1.15";
+  // const baseDN = "dc=wcf,dc=go,dc=tz";
+  // const bindDN = `WCF\\${username}`;
   const client = new Client({ url });
 
   try {
@@ -122,7 +122,7 @@ const login = async (req, res) => {
         if (!user) {
           // If user doesn't exist, create a new user with inactive status
           user = await User.create({
-            name: username,
+            full_name: username,
             email: `${username}@wcf.go.tz`,
             password: "wcf12345",
             extension: null,
@@ -163,18 +163,19 @@ const login = async (req, res) => {
         logoutTime: null, // Will be updated on logout
         totalOnlineTime: 0, // Will be calculated later
       });
-      console.log(`Agent ${user.name} logged in.`);
+      console.log(`Agent ${user.full_name} logged in.`);
     }
 
     res.json({
       message: "Login successful",
       token,
       user: {
-        name: user.name,
+        full_name: user.full_name,
         isActive: user.isActive,
         role: user.role,
         id: user.id,
-        unit_section: user.unit_section,
+        report_to: user.report_to,
+        designation: user.designation,
         extension: user.extension,
       },
       credentials: {

@@ -9,7 +9,7 @@ const externalCorsOptions = {
     // List of allowed origins
     const allowedOrigins = process.env.ALLOWED_ORIGINS ? 
       process.env.ALLOWED_ORIGINS.split(',') : 
-      ['http://localhost:5070', 'https://yourdomain.com'];
+      ['http://localhost:5070', 'http://127.0.0.1:8005',];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);

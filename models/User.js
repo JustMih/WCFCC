@@ -9,7 +9,7 @@ const User = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    name: {
+    full_name: {
       type: DataTypes.STRING,
       allowNull: false,
     },
@@ -62,6 +62,14 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: true,
     },
+    report_to: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    designation: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
     unit_section: {
       type: DataTypes.STRING(100),
       allowNull: true,
@@ -81,9 +89,15 @@ User.associate = (models) => {
     as: "ticketsCreated",
   });
 
-  User.hasMany(models.TicketAssignment, { as: 'assignments', foreignKey: 'assigned_to_id' });
+  User.hasMany(models.TicketAssignment, {
+    as: "assignments",
+    foreignKey: "assigned_to_id",
+  });
   // User can be the assignee of many Tickets
-  User.hasMany(models.Ticket, { as: 'assignedTickets', foreignKey: 'assigned_to_id' });
+  User.hasMany(models.Ticket, {
+    as: "assignedTickets",
+    foreignKey: "assigned_to_id",
+  });
 };
 
 module.exports = User;
