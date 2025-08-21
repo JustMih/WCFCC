@@ -39,12 +39,12 @@ const getAllCoordinatorTickets = async (req, res) => {
         {
           model: User,
           as: 'creator',
-          attributes: ['id', 'name', 'username', 'email']
+          attributes: ['id', 'full_name', 'username', 'email']
         },
         {
           model: User,
           as: 'ratedBy',
-          attributes: ['id', 'name', 'email']
+          attributes: ['id', 'full_name', 'email']
         }
       ]
     });
@@ -759,7 +759,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
 // const getTicketsByStatus = async (userId, status, isOverdue = false) => {
 //   const user = await User.findOne({
 //     where: { id: userId },
-//     attributes: ['id', 'name', 'role']
+//     attributes: ['id', 'full_name', 'role']
 //   });
 
 //   if (!user) {
@@ -789,7 +789,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
 //       {
 //         model: User,
 //         as: 'creator',
-//         attributes: ['id', 'name', 'phone']
+//         attributes: ['id', 'full_name', 'phone']
 //       }
 //     ],
 //     order: [['created_at', 'DESC']]
@@ -1097,7 +1097,7 @@ const getTicketsByStatus = async (req, res) => {
         {
           model: User,
           as: 'creator',
-          attributes: ['id', 'name', 'username', 'email']
+          attributes: ['id', 'full_name', 'username', 'email']
         }
       ],
       order: [["created_at", "DESC"]]

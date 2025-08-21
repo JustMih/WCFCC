@@ -396,11 +396,23 @@ const loginRedirect = async (req, res) => {
     const idRaw = req.body?.notification_report_id;
     const employerRaw = req.body?.employer_id;
     
+    // Debug logging to see what values are coming from frontend
+    console.log('🔍 Backend received values:', {
+      idRaw: idRaw,
+      idRawType: typeof idRaw,
+      employerRaw: employerRaw,
+      employerRawType: typeof employerRaw,
+      fullBody: req.body
+    });
+    
     const auth_data = {
       username:'mmsaki-admin',
       notification_report_id: idRaw || '',
-      employer_id: employerRaw || ''
+      employer_id: employerRaw !== undefined && employerRaw !== null ? employerRaw : ''
     };
+    
+    // Debug logging to see what's being sent to encryption
+    console.log('🔍 Backend auth_data:', auth_data);
 
     // 3. Encrypt token
     const encryptedToken = encryptWithOpenSSL(auth_data);

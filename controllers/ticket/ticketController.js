@@ -1412,6 +1412,154 @@ const getAssignedTickets = async (req, res) => {
   }
 };
 
+// const getInprogressTickets = async (req, res) => {
+//   try {
+//     const { userId } = req.params; // Get userId from URL
+
+//     if (!userId) {
+//       return res.status(400).json({ message: "User ID is required" });
+//     }
+
+//     console.log("Fetching OPEN tickets for user ID:", userId);
+
+//     // Fetch User details including role
+//     const user = await User.findOne({
+//       where: { id: userId },
+//       attributes: ["id", "full_name", "role"], // Fetch ID, Name & Role
+//     });
+
+//     if (!user) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     let tickets;
+
+//     if (user.role === "super-admin" || user.role === "supervisor") {
+//       // Super admin: Fetch all OPEN tickets
+//       tickets = await Ticket.findAll({
+//         where: {
+//           assigned_to_id: userId,
+//           status: {
+//             [Op.in]: [
+//               "Assigned",
+//               "Open",
+//               "Returned",
+//               "Forwarded",
+//               "In Progress",
+//             ],
+//           },
+//         },
+//         include: [
+//           {
+//             model: User,
+//             as: "assignee",
+//             attributes: ["id", "full_name", "email"],
+//           },
+//           {
+//             model: TicketAssignment,
+//             as: "assignments",
+//             include: [
+//               {
+//                 model: User,
+//                 as: "assignedTo",
+//                 attributes: ["id", "full_name", "email"]
+//               }
+//             ]
+//           },
+//           {
+//             model: RequesterDetails,
+//             as: "RequesterDetail",
+//           },
+//         ],
+//         order: [["created_at", "DESC"]],
+//       });
+//     } else {
+//       // Agent: Fetch only OPEN tickets assigned to this agent
+//       tickets = await Ticket.findAll({
+//         where: {
+//           assigned_to_id: userId,
+//           status: {
+//             [Op.in]: [
+//               "Assigned",
+//               "Open",
+//               "Returned",
+//               "Forwarded",
+//               "In Progress",
+//             ],
+//           },
+//         },
+//         include: [
+//           {
+//             model: User,
+//             as: "assignee",
+//             attributes: ["id", "full_name", "email"],
+//           },
+//           {
+//             model: TicketAssignment,
+//             as: "assignments",
+//             include: [
+//               {
+//                 model: User,
+//                 as: "assignedTo",
+//                 attributes: ["id", "full_name", "email"]
+//               }
+//             ]
+//           },
+//           {
+//             model: RequesterDetails,
+//             as: "RequesterDetail",
+//           },
+//         ],
+//         order: [["created_at", "DESC"]],
+//       });
+//     }
+
+//     if (tickets.length === 0) {
+//       return res.status(404).json({ message: "No In progress tickets found." });
+//     }
+
+//     // Modify response to include created_by (user.name) and assignment history
+//     const response = tickets.map((ticket) => {
+//       const t = ticket.toJSON();
+//       t.assignments = (t.assignments || [])
+//         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+//         .map((a) => ({
+//           assigned_to_id: a.assigned_to_id,
+//           assigned_to_name: a.assignedTo?.full_name || null,
+//           assigned_to_role: a.assignedTo?.role || null,
+//           reason: a.reason,
+//           action: a.action,
+//           created_at: a.created_at,
+//         }));
+//       // Debug: Log the RequesterDetail for each ticket
+//       console.log(
+//         "INPROGRESS DEBUG - Ticket ID:",
+//         t.id,
+//         "RequesterDetail:",
+//         t.RequesterDetail
+//       );
+//       return {
+//         ...t,
+//         created_by: user.full_name,
+//       };
+//     });
+
+//     res.status(200).json({
+//       message: "Open tickets fetched successfully",
+//       totalTickets: tickets.length,
+//       tickets: response,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching open tickets:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
+
+
+
+
+
 const getInprogressTickets = async (req, res) => {
   try {
     const { userId } = req.params; // Get userId from URL
@@ -1510,7 +1658,7 @@ const getInprogressTickets = async (req, res) => {
             as: "RequesterDetail",
           },
         ],
-        order: [["created_at", "DESC"]],
+        order: [["created_at", "ASC"]],
       });
     }
 
@@ -1554,6 +1702,8 @@ const getInprogressTickets = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+
 
 const getCarriedForwardTickets = async (req, res) => {
   try {
@@ -5641,5 +5791,6 @@ module.exports = {
   reverseAndAssignToCoordinator,
   getTicketWorkflowInfo,
   getTicketWorkflowAuditTrail,
-  managerAttendMajor
+  managerAttendMajor,
+  escalateAndUpdateTicketOnSlaBreach
 };
