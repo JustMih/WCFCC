@@ -291,7 +291,7 @@ const getTicketCounts = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const isSuperAdmin = user.role === "super-admin";
+    const isSuperAdmin = user.role === "super-admin" || user.role === "supervisor";
     const whereUserCondition = isSuperAdmin ? {} : { created_by: id };
 
     // Count tickets by status
@@ -903,8 +903,6 @@ const createTicket = async (req, res) => {
     const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
 
     // Only send SMS if ticket is NOT closed at creation
-    // SMS functionality temporarily disabled
-    /*
     if (
       !shouldClose &&
       (requester === "Employee" || requester === "Representative") &&
@@ -923,40 +921,39 @@ const createTicket = async (req, res) => {
     } else if (!shouldClose) {
       console.log("Not sending SMS, invalid phone:", smsRecipient);
     }
-    */
 
     // --- Email Notification to Assignee ---
     let emailWarning = "";
-    // if (assignedUser.email && !shouldClose) {
-    //   const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
-    //   const emailHtmlBody = `
-    //     <p>Dear ${assignedUser.full_name},</p>
-    //     <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
-    //     <ul>
-    //       <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-    //       <li><strong>Subject:</strong> ${newTicket.subject}</li>
-    //       <li><strong>Category:</strong> ${newTicket.category}</li>
-    //       <li><strong>Description:</strong> ${newTicket.description}</li>
-    //       <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
-    //       <li><strong>Channel:</strong> ${newTicket.channel}</li>
-    //     </ul>
-    //     <p>Please log in to the system to review and handle this ticket.</p>
-    //     <p>Thank you,</p>
-    //     <p>WCF Customer Care System</p>
-    //   `;
-    //   try {
-    //     // await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-    //     await sendEmail({
-    //       to: "rehema.said3@ttcl.co.tz",
-    //       subject: emailSubject,
-    //       htmlBody: emailHtmlBody,
-    //     });
-    //   } catch (emailError) {
-    //     console.error("Error sending email:", emailError.message);
-    //     // console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
-    //     emailWarning += " (Warning: Failed to send email to assignee.)";
-    //   }
-    // }
+    if (assignedUser.email && !shouldClose) {
+      const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedUser.full_name},</p>
+        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${newTicket.subject}</li>
+          <li><strong>Category:</strong> ${newTicket.category}</li>
+          <li><strong>Description:</strong> ${newTicket.description}</li>
+          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+          <li><strong>Channel:</strong> ${newTicket.channel}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      try {
+        await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+        await sendEmail({
+          to: "rehema.said3@ttcl.co.tz",
+          subject: emailSubject,
+          htmlBody: emailHtmlBody,
+        });
+      } catch (emailError) {
+        console.error("Error sending email:", emailError.message);
+        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+        emailWarning += " (Warning: Failed to send email to assignee.)";
+      }
+    }
     // --- Notification for Assignee ---
     await Notification.create({
       ticket_id: newTicket.id,
@@ -987,35 +984,35 @@ const createTicket = async (req, res) => {
 
       if (headOfUnit && headOfUnit.email) {
         const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-        // const emailBody = `
-        //   <p>Dear ${closingAgent.full_name},</p>
-        //   <p>You have closed the ticket. Here are the details:</p>
-        //   <ul>
-        //     <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-        //     <li><strong>Subject:</strong> ${newTicket.subject}</li>
-        //     <li><strong>Category:</strong> ${newTicket.category}</li>
-        //     <li><strong>Requester:</strong> ${requesterFullName}</li>
-        //     <li><strong>Closed by:</strong> ${
-        //       closingAgent ? closingAgent.full_name : "Unknown Agent"
-        //     }</li>
-        //     <li><strong>Resolution:</strong> ${
-        //       resolution_details ||
-        //       description ||
-        //       "Ticket resolved during creation"
-        //     }</li>
-        //   </ul>
-        //   <p>Please review the resolution details above.</p>
-        // `;
-        // sendEmail({
-        //   to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
-        //   subject: emailSubject,
-        //   htmlBody: emailBody,
-        // }).catch((emailError) => {
-        //   console.error(
-        //     "Error sending email to head-of-unit:",
-        //     emailError.message
-        //   );
-        // });
+        const emailBody = `
+          <p>Dear ${closingAgent.full_name},</p>
+          <p>You have closed the ticket. Here are the details:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${newTicket.subject}</li>
+            <li><strong>Category:</strong> ${newTicket.category}</li>
+            <li><strong>Requester:</strong> ${requesterFullName}</li>
+            <li><strong>Closed by:</strong> ${
+              closingAgent ? closingAgent.full_name : "Unknown Agent"
+            }</li>
+            <li><strong>Resolution:</strong> ${
+              resolution_details ||
+              description ||
+              "Ticket resolved during creation"
+            }</li>
+          </ul>
+          <p>Please review the resolution details above.</p>
+        `;
+        sendEmail({
+          to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+          subject: emailSubject,
+          htmlBody: emailBody,
+        }).catch((emailError) => {
+          console.error(
+            "Error sending email to head-of-unit:",
+            emailError.message
+          );
+        });
       }
     }
     // --- Respond to client immediately ---
@@ -1026,31 +1023,31 @@ const createTicket = async (req, res) => {
       ticket: newTicket,
     });
     // --- Send email to assignee in background ---
-    // if (assignedUser.email && !shouldClose) {
-    //   const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
-    //   const emailHtmlBody = `
-    //     <p>Dear ${assignedUser.full_name},</p>
-    //     <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
-    //     <ul>
-    //       <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-    //       <li><strong>Subject:</strong> ${newTicket.subject}</li>
-    //       <li><strong>Category:</strong> ${newTicket.category}</li>
-    //       <li><strong>Description:</strong> ${newTicket.description}</li>
-    //       <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
-    //       <li><strong>Channel:</strong> ${newTicket.channel}</li>
-    //     </ul>
-    //     <p>Please log in to the system to review and handle this ticket.</p>
-    //     <p>Thank you,</p>
-    //     <p>WCF Customer Care System</p>
-    //   `;
-    //   sendEmail({
-    //     to: "rehema.said3@ttcl.co.tz",
-    //     subject: emailSubject,
-    //     htmlBody: emailHtmlBody,
-    //   }).catch((emailError) => {
-    //     console.error("Error sending email:", emailError.message);
-    //   });
-    // }
+    if (assignedUser.email && !shouldClose) {
+      const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+      const emailHtmlBody = `
+        <p>Dear ${assignedUser.full_name},</p>
+        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${newTicket.subject}</li>
+          <li><strong>Category:</strong> ${newTicket.category}</li>
+          <li><strong>Description:</strong> ${newTicket.description}</li>
+          <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+          <li><strong>Channel:</strong> ${newTicket.channel}</li>
+        </ul>
+        <p>Please log in to the system to review and handle this ticket.</p>
+        <p>Thank you,</p>
+        <p>WCF Customer Care System</p>
+      `;
+      sendEmail({
+        to: "rehema.said3@ttcl.co.tz",
+        subject: emailSubject,
+        htmlBody: emailHtmlBody,
+      }).catch((emailError) => {
+        console.error("Error sending email:", emailError.message);
+      });
+    }
     // --- Email to Supervisor if Closed on Creation (background) ---
     if (shouldClose) {
       // Find head-of-unit for the ticket's section/unit
@@ -1068,33 +1065,33 @@ const createTicket = async (req, res) => {
         attributes: ["id", "full_name"],
       });
 
-      // if (headOfUnit && headOfUnit.email) {
-      //   const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
-      //   const emailBody = `
-      //     <p>Dear ${closingAgent.full_name},</p>
-      //     <p>You have closed the ticket. Here are the details:</p>
-      //     <ul>
-      //       <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
-      //       <li><strong>Subject:</strong> ${newTicket.subject}</li>
-      //       <li><strong>Category:</strong> ${newTicket.category}</li>
-      //       <li><strong>Description:</strong> ${newTicket.description}</li>
-      //       <li><strong>Resolution:</strong> ${
-      //         resolution_details || "Ticket closed by agent"
-      //       }</li>
-      //     </ul>
-      //     <p>Thank you for using the WCF Customer Care System.</p>
-      //   `;
-      //   sendEmail({
-      //     to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
-      //     subject: emailSubject,
-      //     htmlBody: emailBody,
-      //   }).catch((emailError) => {
-      //     console.error(
-      //       "Error sending closure email to agent:",
-      //       emailError.message
-      //     );
-      //   });
-      // }
+      if (headOfUnit && headOfUnit.email) {
+        const emailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+        const emailBody = `
+          <p>Dear ${closingAgent.full_name},</p>
+          <p>You have closed the ticket. Here are the details:</p>
+          <ul>
+            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${newTicket.subject}</li>
+            <li><strong>Category:</strong> ${newTicket.category}</li>
+            <li><strong>Description:</strong> ${newTicket.description}</li>
+            <li><strong>Resolution:</strong> ${
+              resolution_details || "Ticket closed by agent"
+            }</li>
+          </ul>
+          <p>Thank you for using the WCF Customer Care System.</p>
+        `;
+        sendEmail({
+          to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
+          subject: emailSubject,
+          htmlBody: emailBody,
+        }).catch((emailError) => {
+          console.error(
+            "Error sending closure email to agent:",
+            emailError.message
+          );
+        });
+      }
     }
     return;
   } catch (error) {
@@ -1194,8 +1191,8 @@ const getOpenTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin") {
-      // Super admin: Fetch all OPEN tickets
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      // Super admin and supervisor: Fetch all OPEN tickets
       tickets = await Ticket.findAll({
         where: { status: ["Open", "Assigned"] }, // Filter by status
         attributes: { exclude: ["userId"] },
@@ -1313,9 +1310,12 @@ const getAssignedTickets = async (req, res) => {
     }
     let tickets;
     if (user.role === "super-admin" || user.role === "supervisor") {
-      // Super admin: Fetch all tickets with status Assigned or Open
+      // All roles: Fetch only tickets assigned to this user
       tickets = await Ticket.findAll({
-        where: { status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended","Reversed","Returned"] } },
+        where: { 
+          assigned_to_id: userId,
+          status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended","Reversed","Returned"] } 
+        },
         include: [
           {
             model: User,
@@ -1586,7 +1586,7 @@ const getInprogressTickets = async (req, res) => {
       // Super admin: Fetch all OPEN tickets
       tickets = await Ticket.findAll({
         where: {
-          assigned_to_id: userId,
+          // assigned_to_id: userId,
           status: {
             [Op.in]: [
               "Assigned",
@@ -1727,8 +1727,8 @@ const getCarriedForwardTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin") {
-      // Super admin: Fetch all OPEN tickets
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      // Super admin and supervisor: Fetch all carried forward tickets
       tickets = await Ticket.findAll({
         where: { status: "Carried Forward" }, // Filter by status
         attributes: { exclude: ["userId"] },
@@ -1849,8 +1849,8 @@ const getClosedTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin") {
-      // Super admin: Fetch all Closed tickets
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      // Super admin and supervisor: Fetch all Closed tickets
       tickets = await Ticket.findAll({
         where: { status: "Closed" }, // Filter by status
         attributes: { exclude: ["userId"] },
@@ -3350,7 +3350,9 @@ const getDashboardCounts = async (req, res) => {
     }
     // ALL ROLES (except coordinator) LOGIC: use assigned_to_id for all counts
     if (user.role !== "coordinator") {
-      const ticketWhere = { assigned_to_id: userId };
+      // For super admin and supervisor, show all tickets
+      // For other roles, show only assigned tickets
+      const ticketWhere = (user.role === "super-admin" || user.role === "supervisor") ? {} : { assigned_to_id: userId };
       const statuses = [
         "Open",
         "Assigned",
@@ -3408,16 +3410,14 @@ const getDashboardCounts = async (req, res) => {
         },
       });
       const pendingCount = counts.open + counts.inprogress;
-      // Assigned tickets: assigned_to_id = userId and status in ["Assigned", "Open"]
-      // This includes escalated tickets since they have status 'Assigned'
+      // Assigned tickets: all roles show only tickets assigned to them
       let assignedCount = await Ticket.count({
         where: {
           assigned_to_id: userId,
           status: { [Op.in]: ["Assigned", "Open"] },
         },
       });
-      // Escalated tickets: tickets that were escalated FROM this user (not TO this user)
-      // Find tickets where this user was the previous assignee before escalation
+      // Escalated tickets: all roles show only escalated tickets from them
       const escalatedAssignments = await TicketAssignment.findAll({
         where: {
           assigned_to_id: userId,
@@ -3468,32 +3468,43 @@ const getDashboardCounts = async (req, res) => {
           slaBreaches = waitTimes.filter((t) => t > 1440).length; // > 24 hours
         }
       }
-      // In Progress: tickets ever assigned to this user or created by this user and not closed
-      const assignedTicketAssignments = await TicketAssignment.findAll({
-        where: { assigned_to_id: userId },
-        attributes: ["ticket_id"],
-        group: ["ticket_id"],
-      });
-      const assignedTicketIds = assignedTicketAssignments.map(
-        (a) => a.ticket_id
-      );
-      // Find all ticket IDs created by this user
-      const createdTickets = await Ticket.findAll({
-        where: { userId },
-        attributes: ["id"],
-      });
-      const createdTicketIds = createdTickets.map((t) => t.id);
-      // Combine IDs (remove duplicates)
-      const allRelevantTicketIds = Array.from(
-        new Set([...assignedTicketIds, ...createdTicketIds])
-      );
-      // Count tickets where id in allRelevantTicketIds and status != 'Closed'
-      const inProgressCount = await Ticket.count({
-        where: {
-          id: { [Op.in]: allRelevantTicketIds },
-          status: { [Op.ne]: "Closed" },
-        },
-      });
+      // In Progress: for super admin/supervisor show all in-progress tickets, for others show only their relevant tickets
+      let inProgressCount;
+      if (user.role === "super-admin" || user.role === "supervisor") {
+        // For super admin and supervisor, count all tickets that are not closed
+        inProgressCount = await Ticket.count({
+          where: {
+            status: { [Op.ne]: "Closed" },
+          },
+        });
+      } else {
+        // For other roles, count tickets assigned to or created by this user and not closed
+        const assignedTicketAssignments = await TicketAssignment.findAll({
+          where: { assigned_to_id: userId },
+          attributes: ["ticket_id"],
+          group: ["ticket_id"],
+        });
+        const assignedTicketIds = assignedTicketAssignments.map(
+          (a) => a.ticket_id
+        );
+        // Find all ticket IDs created by this user
+        const createdTickets = await Ticket.findAll({
+          where: { userId },
+          attributes: ["id"],
+        });
+        const createdTicketIds = createdTickets.map((t) => t.id);
+        // Combine IDs (remove duplicates)
+        const allRelevantTicketIds = Array.from(
+          new Set([...assignedTicketIds, ...createdTicketIds])
+        );
+        // Count tickets where id in allRelevantTicketIds and status != 'Closed'
+        inProgressCount = await Ticket.count({
+          where: {
+            id: { [Op.in]: allRelevantTicketIds },
+            status: { [Op.ne]: "Closed" },
+          },
+        });
+      }
       // Add closedByAgent: tickets closed by this agent
       const closedByAgent = await Ticket.count({
         where: {
@@ -3870,14 +3881,32 @@ const getInProgressAssignments = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
+
+    // Fetch User details including role
+    const user = await User.findOne({
+      where: { id: userId },
+      attributes: ["id", "full_name", "role"],
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    let whereClause = {
+      action: { [Op.in]: ["Assigned", "Reassigned", "Open", "Forwaeded", "In progress",
+        "Attended and Recommended"
+      ] }
+    };
+
+    // For super admin and supervisor, show all assignments
+    // For other roles, show only assignments made by this user
+    if (user.role !== "super-admin" && user.role !== "supervisor") {
+      whereClause.assigned_by_id = userId;
+    }
+
     // Get only the most recent assignment per ticket_id, including ticket details
     const assignments = await TicketAssignment.findAll({
-      where: {
-        assigned_by_id: userId,
-        action: { [Op.in]: ["Assigned", "Reassigned", "Open", "Forwaeded", "In progress",
-          "Attended and Recommended"
-        ] }
-      },
+      where: whereClause,
       order: [
         ["ticket_id", "ASC"],
         ["created_at", "DESC"],
@@ -4179,7 +4208,7 @@ const getOpenTicketsCount = async (req, res) => {
     });
     if (!user) return res.status(404).json({ message: "User not found" });
     let count;
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor") {
       count = await Ticket.count({ where: { status: ["Open", "Assigned"] } });
     } else {
       count = await Ticket.count({
@@ -4285,7 +4314,7 @@ const getCarriedForwardTicketsCount = async (req, res) => {
     });
     if (!user) return res.status(404).json({ message: "User not found" });
     let count;
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor") {
       count = await Ticket.count({ where: { status: "Carried Forward" } });
     } else {
       count = await Ticket.count({
@@ -4309,7 +4338,7 @@ const getClosedTicketsCount = async (req, res) => {
     });
     if (!user) return res.status(404).json({ message: "User not found" });
     let count;
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor") {
       count = await Ticket.count({ where: { status: "Closed" } });
     } else {
       // Find all ticket IDs ever assigned to this user
@@ -4356,8 +4385,8 @@ const getOverdueTicketsCount = async (req, res) => {
     });
     if (!user) return res.status(404).json({ message: "User not found" });
     let count;
-    if (user.role === "super-admin") {
-      // Keep current logic for super-admin
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      // Keep current logic for super-admin and supervisor
       const tenDaysAgo = new Date();
       tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
       count = await Ticket.count({
