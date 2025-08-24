@@ -1,5 +1,6 @@
 const { Ticket, User, TicketAssignment, Section } = require('../../models');
 const { Op } = require('sequelize');
+const { deactivateUserUpdates } = require('../ticket/ticketUpdateController');
 
 // Helper function for safe transaction rollback
 const safeRollback = async (transaction) => {
@@ -98,6 +99,10 @@ const attendTicket = async (req, res) => {
     }, { transaction });
 
     await ticket.save({ transaction });
+    
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+    
     await transaction.commit();
 
     return res.json({
@@ -181,6 +186,10 @@ const recommendTicket = async (req, res) => {
     }, { transaction });
 
     await ticket.save({ transaction });
+    
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+    
     await transaction.commit();
 
     return res.json({
@@ -318,6 +327,10 @@ const closeTicket = async (req, res) => {
     }, { transaction });
 
     await ticket.save({ transaction });
+    
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+    
     await transaction.commit();
 
     return res.json({

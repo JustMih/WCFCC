@@ -179,6 +179,7 @@ Ticket.associate = (models) => {
 
   Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
   Ticket.hasMany(models.Notification, { foreignKey: 'ticket_id', as: 'notifications' });
+  Ticket.hasMany(models.TicketUpdate, { foreignKey: 'ticket_id', as: 'updates' });
   Ticket.hasOne(models.RequesterDetails, { foreignKey: 'ticketId', as: 'RequesterDetail' });
 };
 

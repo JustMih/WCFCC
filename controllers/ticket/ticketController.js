@@ -2612,6 +2612,7 @@ const closeTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { resolution_details, userId, resolution_type } = req.body;
+    const { deactivateUserUpdates } = require('./ticketUpdateController');
 
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
@@ -2736,6 +2737,9 @@ const closeTicket = async (req, res) => {
       attachment_path: attachmentPath, // Save attachment path to assignment record
       created_at: new Date(),
     });
+
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticketId, userId);
 
     // Update AssignedOfficer status (with error handling)
     try {

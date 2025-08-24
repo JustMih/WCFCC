@@ -22,10 +22,12 @@ const instagramComments = require("./instagramWebhookRoutes");
 const performanceRoutes = require("./performanceRoutes");
 const workflowRoutes = require("./workflowRoutes");
 const externalRoutes = require("./externalRoutes");
+const ticketUpdateRoutes = require("./ticketUpdateRoutes");
 const router = express.Router();
 // const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
 const queueStatusRoutes = require("./queueStatusRoutes");
+
 
 
 router.use("/users", userRoutes);
@@ -51,6 +53,8 @@ router.use("/performance", performanceRoutes);
 router.use("/queue-status", queueStatusRoutes);
 router.use("/workflow", workflowRoutes);
 router.use("/external", externalRoutes);
+router.use("/ticket-updates", ticketUpdateRoutes);
+
 
 
 

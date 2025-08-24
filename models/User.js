@@ -98,6 +98,11 @@ User.associate = (models) => {
     as: "assignedTickets",
     foreignKey: "assigned_to_id",
   });
+
+  User.hasMany(models.TicketUpdate, {
+    as: "ticketUpdates",
+    foreignKey: "user_id",
+  });
 };
 
 module.exports = User;
