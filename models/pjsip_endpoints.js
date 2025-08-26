@@ -46,6 +46,10 @@ const Pjsip_Endpoints = sequelize.define(
       },
       unique: true,
     },
+    dtls_verify: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+    },
   },
   { timestamps: true }
 );

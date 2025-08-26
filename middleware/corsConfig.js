@@ -14,7 +14,7 @@ const externalCorsOptions = {
         'http://127.0.0.1:8005', 
         // 'http://192.168.21.70:5070/api/external/ticket-status',
         // 'https://192.168.21.70/api/external/ticket-status',
-        'http://192.168.21.70:5075', 'https://demoportal.wcf.go.tz',
+        'http://192.168.21.70:5070', 'https://demoportal.wcf.go.tz',
         'https://portal.wcf.go.tz', 'Na https://essp.wcf.go.tz',
       ];
     

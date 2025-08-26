@@ -10,6 +10,9 @@ const sequelize = require("../../config/mysql_connection");
 
 const createUser = async (req, res) => {
   try {
+    console.log("🚀 CREATE USER ENDPOINT CALLED!");
+    console.log("📥 Request body:", JSON.stringify(req.body, null, 2));
+    
     const {
       full_name,
       report_to,
@@ -21,6 +24,24 @@ const createUser = async (req, res) => {
       isActive,
       unit_section,
     } = req.body;
+
+    console.log("🔍 Extracted data:");
+    console.log("- full_name:", full_name);
+    console.log("- email:", email);
+    console.log("- role:", role);
+    console.log("- extension (original):", extension);
+    console.log("- extension (converted):", extension ? parseInt(extension) : null);
+    console.log("- isActive:", isActive);
+
+    // Validate required fields
+    if (!full_name || !email || !password || !role) {
+      console.log("❌ Missing required fields");
+      return res.status(400).json({ 
+        message: "Missing required fields", 
+        required: ["full_name", "email", "password", "role"],
+        received: { full_name, email, password: password ? "***" : null, role }
+      });
+    }
 
     if (
       ![
@@ -36,25 +57,64 @@ const createUser = async (req, res) => {
         "director-general",
       ].includes(role)
     ) {
-      return res.status(400).json({ message: "Invalid role" });
+      console.log("❌ Invalid role:", role);
+      return res.status(400).json({ message: "Invalid role", receivedRole: role });
     }
 
     // Generate username from full_name
     const username = full_name.toLowerCase().replace(/\s+/g, ".");
+    console.log("👤 Generated username:", username);
 
+    console.log("🔐 Hashing password...");
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = await User.create({
+    console.log("✅ Password hashed successfully");
+
+    console.log("💾 Creating user in database...");
+    const userData = {
       full_name,
       report_to,
       designation,
       email,
       password: hashedPassword,
-      extension,
+      extension: extension ? parseInt(extension) : null, // Convert to integer
       role,
       isActive,
       username,
       unit_section,
-    });
+    };
+    console.log("📊 User data to create:", JSON.stringify(userData, null, 2));
+
+    // Check if user with same email already exists
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+      console.log("❌ User with email already exists:", email);
+      return res.status(400).json({ 
+        message: `Email ${email} is already registered. Please use a different email address.`, 
+        error: "Email already exists",
+        field: "email",
+        value: email,
+        existingUser: existingUser.full_name
+      });
+    }
+
+    // Check if user with same extension already exists (if extension provided)
+    if (userData.extension) {
+      const existingExtension = await User.findOne({ where: { extension: userData.extension } });
+      if (existingExtension) {
+        console.log("❌ User with extension already exists:", userData.extension);
+        return res.status(400).json({ 
+          message: `Extension ${userData.extension} is already assigned to another user. Please choose a different extension.`, 
+          error: "Extension already exists",
+          field: "extension",
+          value: userData.extension,
+          existingUser: existingExtension.full_name
+        });
+      }
+    }
+
+    console.log("✅ No conflicts found, creating user...");
+    const newUser = await User.create(userData);
+    console.log("✅ User created successfully with ID:", newUser.id);
 
     res.status(201).json({
       message: "User created successfully",
@@ -71,8 +131,94 @@ const createUser = async (req, res) => {
         unit_section: newUser.unit_section,
       },
     });
+    console.log("📤 Response sent successfully");
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("❌ ERROR IN CREATE USER:");
+    console.error("Error message:", error.message);
+    console.error("Error code:", error.code);
+    console.error("Error sql:", error.sql);
+    console.error("Error sqlMessage:", error.sqlMessage);
+    console.error("Error name:", error.name);
+    console.error("Error errors:", error.errors);
+    console.error("Full error stack:", error.stack);
+    
+    // Check for specific validation errors
+    if (error.name === 'SequelizeValidationError') {
+      console.error("🔍 Validation errors found:");
+      error.errors.forEach((err, index) => {
+        console.error(`  ${index + 1}. Field: ${err.path}, Message: ${err.message}, Value: ${err.value}`);
+      });
+      
+      // Create user-friendly validation messages
+      const validationMessages = error.errors.map(err => {
+        let userMessage = err.message;
+        
+        // Customize messages for better UX
+        if (err.path === 'email' && err.message.includes('isEmail')) {
+          userMessage = 'Please enter a valid email address.';
+        } else if (err.path === 'role' && err.message.includes('ENUM')) {
+          userMessage = 'Please select a valid role from the dropdown.';
+        } else if (err.path === 'extension' && err.message.includes('INTEGER')) {
+          userMessage = 'Extension must be a number.';
+        }
+        
+        return {
+          field: err.path,
+          message: userMessage,
+          value: err.value
+        };
+      });
+      
+      return res.status(400).json({ 
+        message: "Please fix the following errors:", 
+        error: "Validation error",
+        validationErrors: validationMessages
+      });
+    }
+    
+    // Check for unique constraint violations
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      console.error("🔍 Unique constraint violation:");
+      error.errors.forEach((err, index) => {
+        console.error(`  ${index + 1}. Field: ${err.path}, Message: ${err.message}, Value: ${err.value}`);
+      });
+      
+      // Create user-friendly constraint messages
+      const constraintMessages = error.errors.map(err => {
+        let userMessage = err.message;
+        
+        // Customize messages for better UX
+        if (err.path === 'email') {
+          userMessage = `Email ${err.value} is already registered. Please use a different email address.`;
+        } else if (err.path === 'extension') {
+          userMessage = `Extension ${err.value} is already assigned to another user. Please choose a different extension.`;
+        } else if (err.path === 'username') {
+          userMessage = `Username ${err.value} is already taken. Please choose a different username.`;
+        }
+        
+        return {
+          field: err.path,
+          message: userMessage,
+          value: err.value
+        };
+      });
+      
+      return res.status(400).json({ 
+        message: "Duplicate entry found", 
+        error: "Unique constraint violation",
+        constraintErrors: constraintMessages
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Server error", 
+      error: error.message,
+      details: {
+        code: error.code,
+        sql: error.sql,
+        sqlMessage: error.sqlMessage
+      }
+    });
   }
 };
 
@@ -489,15 +635,116 @@ const deleteUser = async (req, res) => {
   const userId = req.params.id;
 
   try {
+    console.log("🗑️ DELETE USER ENDPOINT CALLED!");
+    console.log("📥 User ID to delete:", userId);
+
     const user = await User.findByPk(userId);
     if (!user) {
+      console.log("❌ User not found with ID:", userId);
       return res.status(404).json({ message: "User not found" });
     }
 
-    await user.destroy(); // Delete the user from the database
+    console.log("✅ User found:", user.full_name, "with email:", user.email);
+    console.log("🗑️ Deleting user...");
+
+    // Check if user has any related data that might prevent deletion
+    try {
+      // First, check if user has related pjsip_endpoints record using direct SQL
+      console.log("🔍 Checking for pjsip_endpoints records...");
+      const pjsipEndpoints = await sequelize.query(
+        "SELECT id FROM pjsip_endpoints WHERE user_id = :userId",
+        {
+          replacements: { userId },
+          type: Sequelize.QueryTypes.SELECT,
+        }
+      );
+      
+      console.log("📊 Found pjsip_endpoints records:", pjsipEndpoints);
+      
+      if (pjsipEndpoints && pjsipEndpoints.length > 0) {
+        console.log("🔗 Found related pjsip_endpoints record, deleting it first...");
+        const deleteResult = await sequelize.query(
+          "DELETE FROM pjsip_endpoints WHERE user_id = :userId",
+          {
+            replacements: { userId },
+            type: Sequelize.QueryTypes.DELETE,
+          }
+        );
+        console.log("✅ pjsip_endpoints record deleted successfully. Result:", deleteResult);
+      } else {
+        console.log("ℹ️ No pjsip_endpoints records found for this user");
+      }
+
+      // Check for other potential foreign key relationships
+      console.log("🔍 Checking for other foreign key relationships...");
+      
+      // Check if there are any other tables that might reference this user
+      const tablesToCheck = [
+        'tickets',
+        'agent_activity_logs', 
+        'chart_message',
+        'agent_assignments'
+      ];
+      
+      for (const tableName of tablesToCheck) {
+        try {
+          const result = await sequelize.query(
+            `SELECT COUNT(*) as count FROM ${tableName} WHERE user_id = :userId OR userId = :userId OR assigned_to = :userId`,
+            {
+              replacements: { userId },
+              type: Sequelize.QueryTypes.SELECT,
+            }
+          );
+          console.log(`📊 ${tableName} records:`, result[0].count);
+        } catch (tableError) {
+          console.log(`ℹ️ Table ${tableName} not found or no relevant columns`);
+        }
+      }
+
+      // Now delete the user using direct SQL to bypass any ORM issues
+      console.log("🗑️ Deleting user using direct SQL...");
+      const deleteUserResult = await sequelize.query(
+        "DELETE FROM Users WHERE id = :userId",
+        {
+          replacements: { userId },
+          type: Sequelize.QueryTypes.DELETE,
+        }
+      );
+      console.log("✅ User deleted successfully using direct SQL. Result:", deleteUserResult);
+    } catch (destroyError) {
+      console.error("❌ Error during user.destroy():", destroyError);
+      
+      // Check if it's a foreign key constraint error
+      if (destroyError.name === 'SequelizeForeignKeyConstraintError') {
+        return res.status(400).json({ 
+          message: "Cannot delete user. This user has related data (tickets, assignments, etc.) that must be removed first.",
+          error: "Foreign key constraint violation",
+          details: destroyError.message
+        });
+      }
+      
+      throw destroyError; // Re-throw other errors
+    }
+    
+    console.log("✅ User deleted successfully");
     res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("❌ ERROR IN DELETE USER:");
+    console.error("Error message:", error.message);
+    console.error("Error code:", error.code);
+    console.error("Error sql:", error.sql);
+    console.error("Error sqlMessage:", error.sqlMessage);
+    console.error("Full error stack:", error.stack);
+    
+    res.status(500).json({ 
+      message: "Server error", 
+      error: error.message,
+      details: {
+        code: error.code,
+        sql: error.sql,
+        sqlMessage: error.sqlMessage
+      }
+    });
   }
 };
 
