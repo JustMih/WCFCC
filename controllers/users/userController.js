@@ -99,6 +99,9 @@ const createUser = async (req, res) => {
 
     // Check if user with same extension already exists (if extension provided)
     if (userData.extension) {
+      console.log("🔍 Checking for existing extension:", userData.extension);
+      
+      // Check in Users table
       const existingExtension = await User.findOne({ where: { extension: userData.extension } });
       if (existingExtension) {
         console.log("❌ User with extension already exists:", userData.extension);
@@ -110,6 +113,77 @@ const createUser = async (req, res) => {
           existingUser: existingExtension.full_name
         });
       }
+      
+             // Check in pjsip_endpoints table
+       try {
+         const pjsipEndpoint = await sequelize.query(
+           "SELECT id FROM pjsip_endpoints WHERE id = :extension",
+           {
+             replacements: { extension: userData.extension },
+             type: Sequelize.QueryTypes.SELECT,
+           }
+         );
+         
+         if (pjsipEndpoint && pjsipEndpoint.length > 0) {
+           console.log("❌ Extension already exists in pjsip_endpoints:", userData.extension);
+           return res.status(400).json({ 
+             message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`, 
+             error: "Extension already exists in pjsip_endpoints",
+             field: "extension",
+             value: userData.extension
+           });
+         }
+       } catch (pjsipError) {
+         console.log("ℹ️ Could not check pjsip_endpoints table:", pjsipError.message);
+       }
+       
+       // Check in pjsip_aors table
+       try {
+         const pjsipAors = await sequelize.query(
+           "SELECT id FROM pjsip_aors WHERE id = :extension",
+           {
+             replacements: { extension: userData.extension },
+             type: Sequelize.QueryTypes.SELECT,
+           }
+         );
+         
+         if (pjsipAors && pjsipAors.length > 0) {
+           console.log("❌ Extension already exists in pjsip_aors:", userData.extension);
+           return res.status(400).json({ 
+             message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`, 
+             error: "Extension already exists in pjsip_aors",
+             field: "extension",
+             value: userData.extension
+           });
+         }
+       } catch (pjsipAorsError) {
+         console.log("ℹ️ Could not check pjsip_aors table:", pjsipAorsError.message);
+       }
+
+       // Check in pjsip_auths table
+       try {
+         const pjsipAuths = await sequelize.query(
+           "SELECT id FROM pjsip_auths WHERE id = :extension",
+           {
+             replacements: { extension: userData.extension },
+             type: Sequelize.QueryTypes.SELECT,
+           }
+         );
+         
+         if (pjsipAuths && pjsipAuths.length > 0) {
+           console.log("❌ Extension already exists in pjsip_auths:", userData.extension);
+           return res.status(400).json({ 
+             message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`, 
+             error: "Extension already exists in pjsip_auths",
+             field: "extension",
+             value: userData.extension
+           });
+         }
+       } catch (pjsipAuthsError) {
+         console.log("ℹ️ Could not check pjsip_auths table:", pjsipAuthsError.message);
+       }
+      
+      console.log("✅ Extension is available:", userData.extension);
     }
 
     console.log("✅ No conflicts found, creating user...");
@@ -661,19 +735,88 @@ const deleteUser = async (req, res) => {
       
       console.log("📊 Found pjsip_endpoints records:", pjsipEndpoints);
       
-      if (pjsipEndpoints && pjsipEndpoints.length > 0) {
-        console.log("🔗 Found related pjsip_endpoints record, deleting it first...");
-        const deleteResult = await sequelize.query(
-          "DELETE FROM pjsip_endpoints WHERE user_id = :userId",
-          {
-            replacements: { userId },
-            type: Sequelize.QueryTypes.DELETE,
-          }
-        );
-        console.log("✅ pjsip_endpoints record deleted successfully. Result:", deleteResult);
-      } else {
-        console.log("ℹ️ No pjsip_endpoints records found for this user");
-      }
+             if (pjsipEndpoints && pjsipEndpoints.length > 0) {
+         console.log("🔗 Found related pjsip_endpoints record, deleting it first...");
+         
+         // Get the extension number before deleting
+         const extensionToClean = pjsipEndpoints[0].id;
+         console.log("🔍 Extension to clean up:", extensionToClean);
+         
+         // STEP 1: Delete from pjsip_endpoints by user_id
+         const deleteResult = await sequelize.query(
+           "DELETE FROM pjsip_endpoints WHERE user_id = :userId",
+           {
+             replacements: { userId },
+             type: Sequelize.QueryTypes.DELETE,
+           }
+         );
+         console.log("✅ pjsip_endpoints record deleted by user_id. Result:", deleteResult);
+         
+         // STEP 2: Delete from pjsip_endpoints by extension ID (primary key)
+         const deleteByExtensionResult = await sequelize.query(
+           "DELETE FROM pjsip_endpoints WHERE id = :extension",
+           {
+             replacements: { extension: extensionToClean },
+             type: Sequelize.QueryTypes.DELETE,
+           }
+         );
+         console.log("✅ pjsip_endpoints records with extension ID deleted. Result:", deleteByExtensionResult);
+         
+         // STEP 3: Clean up pjsip_aors table (extension acts as primary key)
+         try {
+           console.log("🗑️ Cleaning up pjsip_aors table for extension:", extensionToClean);
+           const deleteAorsResult = await sequelize.query(
+             "DELETE FROM pjsip_aors WHERE id = :extension",
+             {
+               replacements: { extension: extensionToClean },
+               type: Sequelize.QueryTypes.DELETE,
+             }
+           );
+           console.log("✅ pjsip_aors records deleted. Result:", deleteAorsResult);
+         } catch (aorsError) {
+           console.log("❌ Error deleting from pjsip_aors:", aorsError.message);
+         }
+         
+         // STEP 4: Clean up pjsip_auths table (extension acts as primary key)
+         try {
+           console.log("🗑️ Cleaning up pjsip_auths table for extension:", extensionToClean);
+           const deleteAuthsResult = await sequelize.query(
+             "DELETE FROM pjsip_auths WHERE id = :extension",
+             {
+               replacements: { extension: extensionToClean },
+               type: Sequelize.QueryTypes.DELETE,
+             }
+           );
+           console.log("✅ pjsip_auths records deleted. Result:", deleteAuthsResult);
+         } catch (authsError) {
+           console.log("❌ Error deleting from pjsip_auths:", authsError.message);
+         }
+         
+         // Double-check that the extension is completely removed from pjsip_endpoints
+         console.log("🔍 Double-checking extension cleanup...");
+         const remainingEndpoints = await sequelize.query(
+           "SELECT id FROM pjsip_endpoints WHERE id = :extension",
+           {
+             replacements: { extension: extensionToClean },
+             type: Sequelize.QueryTypes.SELECT,
+           }
+         );
+         console.log("📊 Remaining pjsip_endpoints with extension:", remainingEndpoints);
+         
+         if (remainingEndpoints && remainingEndpoints.length > 0) {
+           console.log("⚠️ Extension still exists in pjsip_endpoints, forcing deletion...");
+           const forceDeleteResult = await sequelize.query(
+             "DELETE FROM pjsip_endpoints WHERE id = :extension",
+             {
+               replacements: { extension: extensionToClean },
+               type: Sequelize.QueryTypes.DELETE,
+             }
+           );
+           console.log("✅ Force deletion result:", forceDeleteResult);
+         }
+       } else {
+         console.log("ℹ️ No pjsip_endpoints records found for this user");
+       }
 
       // Check for other potential foreign key relationships
       console.log("🔍 Checking for other foreign key relationships...");
@@ -701,16 +844,41 @@ const deleteUser = async (req, res) => {
         }
       }
 
-      // Now delete the user using direct SQL to bypass any ORM issues
-      console.log("🗑️ Deleting user using direct SQL...");
-      const deleteUserResult = await sequelize.query(
-        "DELETE FROM Users WHERE id = :userId",
-        {
-          replacements: { userId },
-          type: Sequelize.QueryTypes.DELETE,
-        }
-      );
-      console.log("✅ User deleted successfully using direct SQL. Result:", deleteUserResult);
+             // Now delete the user using direct SQL to bypass any ORM issues
+       console.log("🗑️ Deleting user using direct SQL...");
+       const deleteUserResult = await sequelize.query(
+         "DELETE FROM Users WHERE id = :userId",
+         {
+           replacements: { userId },
+           type: Sequelize.QueryTypes.DELETE,
+         }
+       );
+       console.log("✅ User deleted successfully using direct SQL. Result:", deleteUserResult);
+       
+       // Final verification - check if any traces of the extension remain
+       console.log("🔍 Final verification - checking for remaining extension traces...");
+       
+       // Check if extension still exists in Users table
+       const remainingUserExtension = await sequelize.query(
+         "SELECT id, full_name, extension FROM Users WHERE extension = :extension",
+         {
+           replacements: { extension: user.extension },
+           type: Sequelize.QueryTypes.SELECT,
+         }
+       );
+       console.log("📊 Remaining Users with extension:", remainingUserExtension);
+       
+       // Check if extension still exists in pjsip_endpoints table
+       if (user.extension) {
+         const remainingPjsipExtension = await sequelize.query(
+           "SELECT id FROM pjsip_endpoints WHERE id = :extension",
+           {
+             replacements: { extension: user.extension },
+             type: Sequelize.QueryTypes.SELECT,
+           }
+         );
+         console.log("📊 Remaining pjsip_endpoints with extension:", remainingPjsipExtension);
+       }
     } catch (destroyError) {
       console.error("❌ Error during user.destroy():", destroyError);
       
