@@ -32,7 +32,7 @@ const User = sequelize.define(
         "supervisor",
         "agent",
         "attendee",
-        "coordinator",
+        "reviewer",
         "focal-person",
         "claim-focal-person",
         "compliance-focal-person",

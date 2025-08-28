@@ -126,7 +126,7 @@ app.use("/api", require("./routes/dtmfRoutes"));
 const io = new Server(server, {
   cors: {
     origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     credentials: true
   }
 });

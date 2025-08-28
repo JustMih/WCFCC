@@ -44,12 +44,12 @@ const ROLE_PERMISSIONS = {
       ACTIONS.VIEW_DASHBOARD
     ],
     workflow_stages: ['initial'],
-    can_assign_to: ['coordinator'],
-    description: 'Can create tickets and assign to coordinator'
+    can_assign_to: ['reviewer'],
+    description: 'Can create tickets and assign to reviewer'
   },
 
-  // Coordinator - Rates complaints and determines workflow path
-  'coordinator': {
+      // Reviewer - Rates complaints and determines workflow path
+    'reviewer': {
     actions: [
       ACTIONS.VIEW_TICKET,
       ACTIONS.RATE_COMPLAINT,
@@ -58,7 +58,7 @@ const ROLE_PERMISSIONS = {
       ACTIONS.VIEW_DASHBOARD,
       ACTIONS.VIEW_REPORTS
     ],
-    workflow_stages: ['coordinator_review'],
+          workflow_stages: ['reviewer_review'],
     can_assign_to: ['head-of-unit', 'director'],
     can_rate: ['minor', 'major'],
     description: 'Can rate complaints and assign to appropriate workflow path'
@@ -77,7 +77,7 @@ const ROLE_PERMISSIONS = {
     ],
     workflow_stages: ['head_of_unit_review', 'head_of_unit_final'],
     can_assign_to: ['attendee'],
-    can_reverse_to: ['coordinator'],
+          can_reverse_to: ['reviewer'],
     can_close: ['MINOR_UNIT'],
     description: 'Can handle Minor Unit workflow - assign, reverse, attend, close'
   },
@@ -96,7 +96,7 @@ const ROLE_PERMISSIONS = {
     ],
     workflow_stages: ['director_review', 'director_final'],
     can_assign_to: ['manager'],
-    can_reverse_to: ['coordinator', 'manager'],
+          can_reverse_to: ['reviewer', 'manager'],
     can_recommend_to: ['director-general'],
     description: 'Can handle Minor Directorate workflow - assign, reverse, review, recommend to DG'
   },

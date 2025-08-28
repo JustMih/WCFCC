@@ -50,7 +50,7 @@ const getAllAttendee = async (req, res) => {
 const getAllCoordinator = async (req, res) => {
   try {
     const coordinator = await User.findAll({
-      where: { role: "coordinator" },
+      where: { role: "reviewer" },
     });
     const coordinatorCount = coordinator.length;
     res.status(200).json({ coordinatorCount });

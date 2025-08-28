@@ -378,7 +378,7 @@ const canUserPerformAction = (ticket, user, action) => {
   return allowedWorkflows.includes(workflowPath);
 };
 
-// Helper functions (same as in coordinatorController)
+    // Helper functions (same as in reviewerController)
 const getWorkflowTotalSteps = (workflowPath) => {
   const workflowSteps = {
     'MINOR_UNIT': 4,
@@ -391,10 +391,10 @@ const getWorkflowTotalSteps = (workflowPath) => {
 
 const getNextRoleInWorkflow = (workflowPath, currentStep) => {
   const workflowRoles = {
-    'MINOR_UNIT': ['coordinator', 'head-of-unit', 'attendee', 'head-of-unit'],
-    'MINOR_DIRECTORATE': ['coordinator', 'director-general', 'supervisor', 'attendee', 'supervisor'],
-    'MAJOR_UNIT': ['coordinator', 'head-of-unit', 'attendee', 'head-of-unit', 'director-general'],
-    'MAJOR_DIRECTORATE': ['coordinator', 'director-general', 'supervisor', 'attendee', 'supervisor', 'director-general', 'director-general']
+          'MINOR_UNIT': ['reviewer', 'head-of-unit', 'attendee', 'head-of-unit'],
+      'MINOR_DIRECTORATE': ['reviewer', 'director-general', 'supervisor', 'attendee', 'supervisor'],
+      'MAJOR_UNIT': ['reviewer', 'head-of-unit', 'attendee', 'head-of-unit', 'director-general'],
+      'MAJOR_DIRECTORATE': ['reviewer', 'director-general', 'supervisor', 'attendee', 'supervisor', 'director-general', 'director-general']
   };
   
   const roles = workflowRoles[workflowPath];

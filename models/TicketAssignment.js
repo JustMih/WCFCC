@@ -53,7 +53,7 @@ const TicketAssignment = sequelize.define('TicketAssignment', {
   workflow_current_role: {
     type: DataTypes.STRING(100),
     allowNull: true,
-    comment: 'Current role in the workflow (e.g., coordinator, director)'
+    comment: 'Current role in the workflow (e.g., reviewer, director)'
   },
   workflow_next_role: {
     type: DataTypes.STRING(100),

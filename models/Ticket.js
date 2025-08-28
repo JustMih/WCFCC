@@ -90,7 +90,7 @@ const Ticket = sequelize.define(
     attachment_path: DataTypes.STRING,
     aging_days: { type: DataTypes.INTEGER, defaultValue: 0 },
     responsible_unit_name: DataTypes.STRING,
-    assigned_to_role: DataTypes.ENUM('Agent', 'Coordinator', 'Attendee', 'Head of Unit', 'Director', 'DG'),
+    assigned_to_role: DataTypes.ENUM('Agent', 'Reviewer', 'Attendee', 'Head of Unit', 'Director', 'DG'),
     evidence_url: DataTypes.STRING,
     review_notes: DataTypes.TEXT,
     approval_notes: DataTypes.TEXT,

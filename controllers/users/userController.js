@@ -49,7 +49,7 @@ const createUser = async (req, res) => {
         "supervisor",
         "agent",
         "attendee",
-        "coordinator",
+        "reviewer",
         "head-of-unit",
         "manager",
         "director",

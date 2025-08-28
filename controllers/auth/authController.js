@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { Op } = require("sequelize");
+const { getEffectiveRoles } = require("../../utils/roleMapper");
 require("dotenv").config();
 
 const registerSuperAdmin = async () => {
@@ -166,17 +167,22 @@ const login = async (req, res) => {
       console.log(`Agent ${user.full_name} logged in.`);
     }
 
+    // Get effective roles based on user's base role and unit section
+    const effectiveRoles = getEffectiveRoles(user.role, user.unit_section);
+    
     res.json({
       message: "Login successful",
       token,
       user: {
         full_name: user.full_name,
         isActive: user.isActive,
-        role: user.role,
+        role: user.role, // Base role
+        effectiveRoles: effectiveRoles, // All effective roles including mapped ones
         id: user.id,
         report_to: user.report_to,
         designation: user.designation,
         extension: user.extension,
+        unit_section: user.unit_section,
       },
       credentials: {
         username: username,

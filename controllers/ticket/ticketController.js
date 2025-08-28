@@ -88,7 +88,7 @@ function checkTicketSlaBreach(ticket, holidays = []) {
 async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   // Per-role SLA days
   const SLA_ROLE_DAYS = {
-    coordinator: 2,
+    reviewer: 2,
     attendee: { minor: 3, major: 10 },
     "head-of-unit": 1,
     manager: 1,
@@ -150,9 +150,9 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       "manager",
       "director",
     ],
-    complaint_minor: ["coordinator", "head-of-unit", "manager", "director"],
+    complaint_minor: ["reviewer", "head-of-unit", "manager", "director"],
     complaint_major: [
-      "coordinator",
+      "reviewer",
       "head-of-unit",
       "manager",
       "director",
@@ -716,9 +716,9 @@ const createTicket = async (req, res) => {
         });
       }
     } else if (["Complaint", "Suggestion", "Compliment"].includes(category)) {
-      // Assign to coordinator
+      // Assign to reviewer
       assignedUser = await User.findOne({
-        where: { role: "coordinator" },
+        where: { role: "reviewer" },
         attributes: ["id", "full_name", "email", "role", "unit_section"],
       });
     }
@@ -1199,7 +1199,32 @@ const getOpenTickets = async (req, res) => {
         include: [
           {
             model: User,
+            as: "creator",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
             as: "assignee",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "attendedBy",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "ratedBy",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "convertedBy",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "forwardedBy",
             attributes: ["id", "full_name", "email"],
           },
           {
@@ -1230,7 +1255,32 @@ const getOpenTickets = async (req, res) => {
         include: [
           {
             model: User,
+            as: "creator",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
             as: "assignee",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "attendedBy",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "ratedBy",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "convertedBy",
+            attributes: ["id", "full_name", "email"],
+          },
+          {
+            model: User,
+            as: "forwardedBy",
             attributes: ["id", "full_name", "email"],
           },
           {
@@ -2345,7 +2395,7 @@ const mockComplaintWorkflow = async (req, res) => {
     // Mock workflow actions
     switch (action) {
       case "rate":
-        // Coordinator rates and assigns complaint
+        // Reviewer rates and assigns complaint
         mockTicket.complaint_rating = "minor";
         mockTicket.complaint_type = "unit";
         mockTicket.status = "assigned";
@@ -2386,7 +2436,7 @@ const mockComplaintWorkflow = async (req, res) => {
         break;
 
       case "convert":
-        // Coordinator converts to inquiry
+        // Reviewer converts to inquiry
         mockTicket.category = "inquiry";
         mockTicket.status = "pending";
         break;
@@ -2659,7 +2709,7 @@ const closeTicket = async (req, res) => {
       attended_by_role = attendedByUser ? attendedByUser.role : null;
     }
 
-    // Notify all coordinators and supervisors
+    // Notify all reviewers and supervisors
     const notifySubject = `Ticket Closed: ${ticket.subject}`;
     const notifyHtml = `
       <p><strong>Ticket Closed</strong></p>
@@ -2685,7 +2735,7 @@ const closeTicket = async (req, res) => {
       attended_by_name || "Unknown"
     } (${attended_by_role || "Unknown Role"}).`;
     await notifyUsersByRole(
-      ["coordinator", "supervisor"],
+      ["reviewer", "supervisor"],
       notifySubject,
       notifyHtml,
       ticketId,
@@ -2795,7 +2845,7 @@ const closeTicket = async (req, res) => {
   }
 };
 
-const closeCoordinatorTicket = async (req, res) => {
+const closeReviewerTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const {
@@ -2826,7 +2876,7 @@ const closeCoordinatorTicket = async (req, res) => {
       where: {
         id: ticketId,
         category: {
-          [Op.in]: ["Complaint", "Suggestion", "Compliment"], // Allow all coordinator-managed categories
+          [Op.in]: ["Complaint", "Suggestion", "Compliment"], // Allow all reviewer-managed categories
         },
       },
       include: [
@@ -2846,33 +2896,33 @@ const closeCoordinatorTicket = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({
         success: false,
-        message: "Ticket not found or not a coordinator-managed ticket type",
+        message: "Ticket not found or not a reviewer-managed ticket type",
         details: {
           ticket_id: ticketId,
           allowed_categories: ["Complaint", "Suggestion", "Compliment"],
           suggestion:
-            "Please check the ticket ID and ensure it's a coordinator-managed ticket type",
+            "Please check the ticket ID and ensure it's a reviewer-managed ticket type",
         },
       });
     }
 
-    // Check if the user is authorized (must be a coordinator)
-    const coordinator = await User.findOne({
+          // Check if the user is authorized (must be a reviewer)
+      const reviewer = await User.findOne({
       where: {
         id: userId,
-        role: "coordinator",
+        role: "reviewer",
       },
     });
 
-    if (!coordinator) {
+    if (!reviewer) {
       return res.status(403).json({
         success: false,
-        message: "Only coordinators can close these types of tickets",
+        message: "Only reviewers can close these types of tickets",
         details: {
           user_id: userId,
-          required_role: "coordinator",
+          required_role: "reviewer",
           suggestion:
-            "Please ensure you have coordinator privileges to close this ticket",
+            "Please ensure you have reviewer privileges to close this ticket",
         },
       });
     }
@@ -2886,7 +2936,7 @@ const closeCoordinatorTicket = async (req, res) => {
       attended_by_id: userId,
     });
 
-    // Update resolution details if coordinator edited them
+    // Update resolution details if reviewer edited them
     // if (resolution_details) {
     //   await ticket.update({
     //     resolution_details: resolution_details
@@ -2898,7 +2948,7 @@ const closeCoordinatorTicket = async (req, res) => {
       const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
       const emailBody = `
         <p>Dear ${ticket.creator.full_name},</p>
-        <p>Your ticket has been closed by a coordinator. Here are the details:</p>
+        <p>Your ticket has been closed by a reviewer. Here are the details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
           <li><strong>Subject:</strong> ${ticket.subject}</li>
@@ -2908,7 +2958,7 @@ const closeCoordinatorTicket = async (req, res) => {
             ticket
           )}</li>
           <li><strong>Resolution:</strong> ${
-            resolution_details || "Ticket closed by coordinator"
+            resolution_details || "Ticket closed by reviewer"
           }</li>
         </ul>
         <p>Thank you for using the WCF Customer Care System.</p>
@@ -2925,17 +2975,17 @@ const closeCoordinatorTicket = async (req, res) => {
       });
     }
 
-    // Notify all coordinators and supervisors
+    // Notify all reviewers and supervisors
     const notifySubject2 = `Ticket Closed: ${ticket.subject}`;
     const notifyHtml2 = `
-      <p><strong>Ticket Closed by Coordinator</strong></p>
+      <p><strong>Ticket Closed by Reviewer</strong></p>
       <p>The following ticket has been closed:</p>
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
         <li><strong>Subject:</strong> ${ticket.subject}</li>
         <li><strong>Category:</strong> ${ticket.category}</li>
         <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-        <li><strong>Closed By:</strong> ${coordinator.full_name} (Coordinator)</li>
+        <li><strong>Closed By:</strong> ${reviewer.full_name} (Reviewer)</li>
         <li><strong>Resolution Type:</strong> ${
           resolution_type || "Resolved"
         }</li>
@@ -2943,9 +2993,9 @@ const closeCoordinatorTicket = async (req, res) => {
         <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
       </ul>
     `;
-    const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed by ${coordinator.full_name} (Coordinator).`;
+    const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed by ${reviewer.full_name} (Reviewer).`;
     await notifyUsersByRole(
-      ["coordinator", "supervisor"],
+      ["reviewer", "supervisor"],
       notifySubject2,
       notifyHtml2,
       ticketId,
@@ -2959,7 +3009,7 @@ const closeCoordinatorTicket = async (req, res) => {
         ticket_id: ticketId,
         sender_id: userId,
         recipient_id: ticket.assigned_to,
-        message: `${ticket.category} ticket ${ticket.ticket_id} has been resolved and closed by ${coordinator.full_name} (Coordinator)`,
+        message: `${ticket.category} ticket ${ticket.ticket_id} has been resolved and closed by ${reviewer.full_name} (Reviewer)`,
         status: "unread",
       });
     }
@@ -2971,21 +3021,21 @@ const closeCoordinatorTicket = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `${ticket.category} ticket ${ticket.ticket_id} closed successfully by ${coordinator.full_name} (Coordinator)`,
+              message: `${ticket.category} ticket ${ticket.ticket_id} closed successfully by ${reviewer.full_name} (Reviewer)`,
       details: {
         ticket_id: ticket.ticket_id,
         subject: ticket.subject,
         category: ticket.category,
         resolution_type: resolution_type || "Resolved",
         resolution_details: resolution_details,
-        closed_by: coordinator.full_name,
-        closed_by_role: "Coordinator",
+        closed_by: reviewer.full_name,
+        closed_by_role: "reviewer",
         closed_date: new Date().toLocaleString(),
       },
       ticket: {
         ...ticket.toJSON(),
         resolution_date: new Date(),
-        resolved_by: coordinator.full_name,
+        resolved_by: reviewer.full_name,
       },
     });
     return;
@@ -3352,8 +3402,8 @@ const getDashboardCounts = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    // ALL ROLES (except coordinator) LOGIC: use assigned_to_id for all counts
-    if (user.role !== "coordinator") {
+    // ALL ROLES (except reviewer) LOGIC: use assigned_to_id for all counts
+    if (user.role !== "reviewer") {
       // For super admin and supervisor, show all tickets
       // For other roles, show only assigned tickets
       const ticketWhere = (user.role === "super-admin" || user.role === "supervisor") ? {} : { assigned_to_id: userId };
@@ -3663,9 +3713,9 @@ const getDashboardCounts = async (req, res) => {
         },
       });
     }
-    // COORDINATOR LOGIC (add as needed)
-    if (user.role === "coordinator") {
-      // Use the same logic as coordinator dashboard
+    // REVIEWER LOGIC (add as needed)
+    if (user.role === "reviewer") {
+      // Use the same logic as reviewer dashboard
       const newTicketsCount = await Ticket.count({
         where: {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
@@ -3743,7 +3793,7 @@ const getDashboardCounts = async (req, res) => {
       // Return the full nested structure expected by the sidebar
       return res.status(200).json({
         success: true,
-        message: "Dashboard counts for coordinator",
+        message: "Dashboard counts for reviewer",
         ticketStats: {
           newTickets: {
             "New Tickets": newTicketsCount,
@@ -4028,7 +4078,7 @@ const reverseTicket = async (req, res) => {
       // Fetch previous user details
       const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
 
-      // Notify all coordinators and supervisors
+      // Notify all reviewers and supervisors
       const notifySubject = `Ticket Reversed: ${ticket.subject}`;
       const notifyHtml = `
         <p><strong>Ticket Reversed</strong></p>
@@ -4050,7 +4100,7 @@ const reverseTicket = async (req, res) => {
       const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
       
       await notifyUsersByRole(
-        ["coordinator", "supervisor"],
+        ["reviewer", "supervisor"],
         notifySubject,
         notifyHtml,
         ticketId,
@@ -4129,7 +4179,7 @@ const reverseTicket = async (req, res) => {
       // Fetch previous user details
       const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
 
-      // Notify all coordinators and supervisors
+      // Notify all reviewers and supervisors
       const notifySubject = `Ticket Reversed: ${ticket.subject}`;
       const notifyHtml = `
         <p><strong>Ticket Reversed</strong></p>
@@ -4149,7 +4199,7 @@ const reverseTicket = async (req, res) => {
       const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
       
       await notifyUsersByRole(
-        ["coordinator", "supervisor"],
+        ["reviewer", "supervisor"],
         notifySubject,
         notifyHtml,
         ticketId,
@@ -4672,7 +4722,7 @@ function getRequesterDisplayName(ticket) {
   return "-";
 }
 
-// Coordinator forwards major complaint to Director General
+// Reviewer forwards major complaint to Director General
 const forwardToDirectorGeneral = async (req, res) => {
   try {
     const { ticketId } = req.params;
@@ -4704,7 +4754,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    // Check if this is a major complaint assigned to coordinator OR a reversed ticket assigned to coordinator
+    // Check if this is a major complaint assigned to reviewer OR a reversed ticket assigned to reviewer
     const isMajorComplaint = ticket.category === "Complaint" && 
                             ticket.complaint_type === "Major" && 
                             ticket.assigned_to_id === userId;
@@ -4729,7 +4779,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Update resolution details if coordinator edited them
+    // Update resolution details if reviewer edited them
     if (resolution_details) {
       await ticket.update({
         resolution_details: resolution_details
@@ -4766,7 +4816,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       assigned_to_id: directorGeneral.id,
       assigned_to_role: directorGeneral.role,
       action: "Forwarded",
-      reason: "Coordinator reviewed and forwarded to Director General for final approval",
+      reason: "Reviewer reviewed and forwarded to Director General for final approval",
       created_at: new Date()
     });
 
@@ -5160,7 +5210,7 @@ const reverseComplaint = async (req, res) => {
     let attended_by_name = currentUser.full_name;
     let attended_by_role = currentUser.role;
 
-    // Notify all coordinators and supervisors
+    // Notify all reviewers and supervisors
     const notifySubject = `Complaint Reversed: ${ticket.subject}`;
     const notifyHtml = `
       <p><strong>Complaint Reversed</strong></p>
@@ -5178,7 +5228,7 @@ const reverseComplaint = async (req, res) => {
     `;
     const notifyMsg = `Complaint ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${targetUserName}.`;
     await notifyUsersByRole(
-      ["coordinator", "supervisor"],
+      ["reviewer", "supervisor"],
       notifySubject,
       notifyHtml,
       ticketId,
@@ -5228,8 +5278,8 @@ const reverseComplaint = async (req, res) => {
   }
 };
 
-// DG approves and forwards to coordinator
-const approveAndForwardToCoordinator = async (req, res) => {
+// DG approves and forwards to reviewer
+const approveAndForwardToReviewer = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { userId, dg_notes } = req.body;
@@ -5260,53 +5310,53 @@ const approveAndForwardToCoordinator = async (req, res) => {
 
     
 
-    // Find Coordinator
-    const coordinator = await User.findOne({
-      where: { role: "coordinator" }
+    // Find Reviewer
+    const reviewer = await User.findOne({
+      where: { role: "reviewer" }
     });
 
-    if (!coordinator) {
+    if (!reviewer) {
       return res.status(404).json({ 
-        message: "Coordinator not found" 
+        message: "Reviewer not found" 
       });
     }
 
-    // Forward to Coordinator
+    // Forward to Reviewer
     await Ticket.update(
       {
-        assigned_to_id: coordinator.id,
-        assigned_to_role: coordinator.role,
+        assigned_to_id: reviewer.id,
+        assigned_to_role: reviewer.role,
         status: "Assigned"
       },
       { where: { id: ticketId } }
     );
 
-    // Record the assignment to Coordinator
+    // Record the assignment to Reviewer
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: userId,
-      assigned_to_id: coordinator.id,
-      assigned_to_role: coordinator.role,
+      assigned_to_id: reviewer.id,
+      assigned_to_role: reviewer.role,
       action: "Forwarded",
-      reason: dg_notes || "Director General approved and forwarded to coordinator",
+      reason: dg_notes || "Director General approved and forwarded to reviewer",
       created_at: new Date()
     });
 
-    // Create notification for Coordinator
+    // Create notification for Reviewer
     await Notification.create({
       ticket_id: ticketId,
       sender_id: userId,
-      recipient_id: coordinator.id,
+      recipient_id: reviewer.id,
       message: `Ticket forwarded to you by Director General: ${ticket.subject || ticket.ticket_id}`,
       channel: "In-System",
       status: "unread",
     });
 
-    // Send email to assigned Coordinator (if email exists)
-    if (coordinator.email) {
+    // Send email to assigned Reviewer (if email exists)
+    if (reviewer.email) {
       const emailSubject = `Ticket Forwarded: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
       const emailHtmlBody = `
-        <p>Dear ${coordinator.full_name || coordinator.username},</p>
+        <p>Dear ${reviewer.full_name || reviewer.username},</p>
         <p>A ticket has been forwarded to you by the Director General. Details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
@@ -5336,23 +5386,23 @@ const approveAndForwardToCoordinator = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Ticket approved and forwarded to coordinator successfully",
+      message: "Ticket approved and forwarded to reviewer successfully",
       ticket: {
         ...ticket.toJSON(),
-        assigned_to_name: coordinator.full_name
+        assigned_to_name: reviewer.full_name
       }
     });
   } catch (error) {
-    console.error("Error approving and forwarding to coordinator:", error);
+    console.error("Error approving and forwarding to reviewer:", error);
     return res.status(500).json({
-      message: "Failed to approve and forward to coordinator",
+      message: "Failed to approve and forward to reviewer",
       error: error.message
     });
   }
 };
 
-// DG reverses and assigns to coordinator
-const reverseAndAssignToCoordinator = async (req, res) => {
+// DG reverses and assigns to reviewer
+const reverseAndAssignToReviewer = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { userId, dg_notes } = req.body;
@@ -5383,53 +5433,53 @@ const reverseAndAssignToCoordinator = async (req, res) => {
 
    
 
-    // Find Coordinator
-    const coordinator = await User.findOne({
-      where: { role: "coordinator" }
+    // Find Reviewer
+    const reviewer = await User.findOne({
+      where: { role: "reviewer" }
     });
 
-    if (!coordinator) {
+    if (!reviewer) {
       return res.status(404).json({ 
-        message: "Coordinator not found" 
+        message: "Reviewer not found" 
       });
     }
 
-    // Assign to Coordinator
+    // Assign to Reviewer
     await Ticket.update(
       {
-        assigned_to_id: coordinator.id,
-        assigned_to_role: coordinator.role,
+        assigned_to_id: reviewer.id,
+        assigned_to_role: reviewer.role,
         status: "Assigned"
       },
       { where: { id: ticketId } }
     );
 
-    // Record the assignment to Coordinator
+    // Record the assignment to Reviewer
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: userId,
-      assigned_to_id: coordinator.id,
-      assigned_to_role: coordinator.role,
+      assigned_to_id: reviewer.id,
+      assigned_to_role: reviewer.role,
       action: "Assigned",
-      reason: dg_notes || "Director General reversed and assigned to coordinator for more clarification",
+      reason: dg_notes || "Director General reversed and assigned to reviewer for more clarification",
       created_at: new Date()
     });
 
-    // Create notification for Coordinator
+    // Create notification for Reviewer
     await Notification.create({
       ticket_id: ticketId,
       sender_id: userId,
-      recipient_id: coordinator.id,
+      recipient_id: reviewer.id,
       message: `Ticket assigned to you by Director General for clarification: ${ticket.subject || ticket.ticket_id}`,
       channel: "In-System",
       status: "unread",
     });
 
-    // Send email to assigned Coordinator (if email exists)
-    if (coordinator.email) {
+    // Send email to assigned Reviewer (if email exists)
+    if (reviewer.email) {
       const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
       const emailHtmlBody = `
-        <p>Dear ${coordinator.full_name || coordinator.username},</p>
+        <p>Dear ${reviewer.full_name || reviewer.username},</p>
         <p>A ticket has been assigned to you by the Director General for more clarification. Details:</p>
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
@@ -5459,16 +5509,16 @@ const reverseAndAssignToCoordinator = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Ticket reversed and assigned to coordinator successfully",
+      message: "Ticket reversed and assigned to reviewer successfully",
       ticket: {
         ...ticket.toJSON(),
-        assigned_to_name: coordinator.full_name
+        assigned_to_name: reviewer.full_name
       }
     });
   } catch (error) {
-    console.error("Error reversing and assigning to coordinator:", error);
+    console.error("Error reversing and assigning to reviewer:", error);
     return res.status(500).json({
-      message: "Failed to reverse and assign to coordinator",
+      message: "Failed to reverse and assign to reviewer",
       error: error.message
     });
   }
@@ -5793,7 +5843,7 @@ module.exports = {
   getTicketById,
   notifyUsersByRole,
   closeTicket,
-  closeCoordinatorTicket,
+  closeReviewerTicket,
   assignTicket,
   getAllAttendee,
   getTicketAssignments,
@@ -5820,8 +5870,8 @@ module.exports = {
   getUserAgingStats,
   getTicketStatusExternal,
   reverseComplaint,
-  approveAndForwardToCoordinator,
-  reverseAndAssignToCoordinator,
+  approveAndForwardToReviewer,
+  reverseAndAssignToReviewer,
   getTicketWorkflowInfo,
   getTicketWorkflowAuditTrail,
   managerAttendMajor,
