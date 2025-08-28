@@ -224,7 +224,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (previousAssignee && previousAssignee.email) {
     setImmediate(() => {
       sendEmail({
-        to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
+        // to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
+        to:`rehema.said3@ttcl.co.tz`,
         subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
         htmlBody: `
           <p>Dear ${previousAssignee.full_name},</p>
@@ -244,7 +245,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (nextUser && nextUser.email) {
     setImmediate(() => {
       sendEmail({
-        to: [nextUser.email, "rehema.said3@ttcl.co.tz"],
+        // to: [nextUser.email, "rehema.said3@ttcl.co.tz"],
+        to:`rehema.said3@ttcl.co.tz`,
         subject: `New Escalated Ticket Assigned: ${
           ticket.ticket_id || ticket.id
         }`,
@@ -1004,7 +1006,8 @@ const createTicket = async (req, res) => {
           <p>Please review the resolution details above.</p>
         `;
         sendEmail({
-          to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+          // to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+          to:`rehema.said3@ttcl.co.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
         }).catch((emailError) => {
@@ -1082,7 +1085,8 @@ const createTicket = async (req, res) => {
           <p>Thank you for using the WCF Customer Care System.</p>
         `;
         sendEmail({
-          to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
+          // to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
+          to:`rehema.said3@ttcl.co.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
         }).catch((emailError) => {
@@ -2639,7 +2643,8 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          to: [user.email, "rehema.said3@ttcl.co.tz"],
+          // to: [user.email, "rehema.said3@ttcl.co.tz"],
+          to:`rehema.said3@ttcl.co.tz`,
           subject,
           htmlBody,
         }).catch((e) =>
@@ -2964,7 +2969,8 @@ const closeReviewerTicket = async (req, res) => {
         <p>Thank you for using the WCF Customer Care System.</p>
       `;
       sendEmail({
-        to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
+        // to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
+        to:`rehema.said3@ttcl.co.tz`,
         subject: emailSubject,
         htmlBody: emailBody,
       }).catch((emailError) => {
@@ -4130,7 +4136,8 @@ const reverseTicket = async (req, res) => {
 
         try {
           await sendEmail({
-            to: prevUser.email,
+            to:`rehema.said3@ttcl.co.tz`,
+            // to: prevUser.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           });
@@ -4227,7 +4234,8 @@ const reverseTicket = async (req, res) => {
 
         try {
           await sendEmail({
-            to: prevUser.email,
+            // to: prevUser.email,
+            to:`rehema.said3@ttcl.co.tz`,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           });
