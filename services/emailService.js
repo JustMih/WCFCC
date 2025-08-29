@@ -17,12 +17,16 @@ const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <style>
         body{margin:0;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f2937}
-        .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
-        .header{background:#0ea5e9;color:#fff;padding:16px 20px;font-size:18px;font-weight:700}
-        .content{padding:20px}.label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:6px}
-        .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;font-size:13px;color:#374151}
-        .btn-wrap{padding:0 20px 20px}.btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;font-size:14px}
-        .footnote{padding:0 20px 16px;font-size:13px;color:#374151}
+        .card{max-width:500px;margin:0 auto;background:#fff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden}
+        .header{background:#0ea5e9;color:#fff;padding:12px 16px;font-size:16px;font-weight:600}
+        .content{padding:16px}
+        .label{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:4px}
+        .message{font-size:14px;line-height:1.5;margin-bottom:12px}
+        .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;font-size:12px;color:#374151;margin-top:8px}
+        .btn-wrap{padding:0 16px 16px}
+        .btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:10px 16px;border-radius:6px;font-weight:600;font-size:13px}
+        .footnote{padding:0 16px 12px;font-size:12px;color:#374151;border-top:1px solid #e5e7eb;margin-top:12px}
+        .footnote p{margin:4px 0}
       </style>
     </head>
     <body>
@@ -30,9 +34,8 @@ const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
         <div class="header">${subject}</div>
         <div class="content">
           <div class="label">Message</div>
-          <div>${bodyHtml}</div>
-          <div class="label" style="margin-top:12px;">Details</div>
-          <div class="details">${detailsHtml}</div>
+          <div class="message">${bodyHtml}</div>
+          ${detailsHtml ? `<div class="label">Details</div><div class="details">${detailsHtml}</div>` : ''}
           <div class="footnote">
             <p>Please log in to the system to review and handle this ticket.</p>
             <p>Thank you,</p>

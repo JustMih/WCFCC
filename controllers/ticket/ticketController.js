@@ -2708,26 +2708,24 @@ const closeTicket = async (req, res) => {
 
     // Notify all reviewers and supervisors
     const notifySubject = `Ticket Closed: ${ticket.subject}`;
-    const notifyHtml = `
-      <p><strong>Ticket Closed</strong></p>
-      <p>The following ticket has been closed:</p>
+    const notifyBody = `
+      <p>A ticket has been closed successfully. Here are the details:</p>
+    `;
+    const notifyDetails = `
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
         <li><strong>Subject:</strong> ${ticket.subject}</li>
         <li><strong>Category:</strong> ${ticket.category}</li>
         <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-        <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${
-      attended_by_role || "Unknown Role"
-    })</li>
-        <li><strong>Resolution Type:</strong> ${
-          resolution_type || "Resolved"
-        }</li>
-        <li><strong>Resolution Details:</strong> ${
-          resolution_details || "Ticket closed by agent"
-        }</li>
+        <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+        <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+        <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
         <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
       </ul>
     `;
+    
+    const { renderEmailCard } = require('../../services/emailService');
+    const notifyHtml = renderEmailCard(notifySubject, notifyBody, notifyDetails);
     const notifyMsg = `Ticket ${ticket.ticket_id} has been closed by ${
       attended_by_name || "Unknown"
     } (${attended_by_role || "Unknown Role"}).`;
@@ -2742,29 +2740,34 @@ const closeTicket = async (req, res) => {
 
     // Notify the creator (agent) by email if available
     if (ticket.creator && ticket.creator.email) {
-      const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      const emailSubject = `Ticket Closed: ${ticket.subject}`;
       const emailBody = `
         <p>Dear ${ticket.creator.full_name},</p>
-        <p>Your ticket has been closed. Here are the details:</p>
+        <p>Your ticket has been closed successfully. Here are the details:</p>
+      `;
+      
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
           <li><strong>Subject:</strong> ${ticket.subject}</li>
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Description:</strong> ${ticket.description}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(
-            ticket
-          )}</li>
-          <li><strong>Resolution:</strong> ${
-            resolution_details || "Ticket closed by agent"
-          }</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+          <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+          <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+          <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
         </ul>
-        <p>Thank you for using the WCF Customer Care System.</p>
       `;
+      
+      const { renderEmailCard } = require('../../services/emailService');
+      const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
+      
       sendEmail({
         // to: ticket.creator.email,
         to: "rehema.said3@ttcl.co.tz",
         subject: emailSubject,
-        htmlBody: emailBody,
+        htmlBody: htmlBody,
       }).catch((emailError) => {
         console.error(
           "Error sending closure email to creator:",
@@ -2942,29 +2945,34 @@ const closeReviewerTicket = async (req, res) => {
 
     // Notify the creator (agent) by email if available
     if (ticket.creator && ticket.creator.email) {
-      const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      const emailSubject = `Ticket Closed by Reviewer: ${ticket.subject}`;
       const emailBody = `
         <p>Dear ${ticket.creator.full_name},</p>
         <p>Your ticket has been closed by a reviewer. Here are the details:</p>
+      `;
+      
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
           <li><strong>Subject:</strong> ${ticket.subject}</li>
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Description:</strong> ${ticket.description}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(
-            ticket
-          )}</li>
-          <li><strong>Resolution:</strong> ${
-            resolution_details || "Ticket closed by reviewer"
-          }</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Closed By:</strong> ${reviewer.full_name} (Reviewer)</li>
+          <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+          <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by reviewer"}</li>
+          <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
         </ul>
-        <p>Thank you for using the WCF Customer Care System.</p>
       `;
+      
+      const { renderEmailCard } = require('../../services/emailService');
+      const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
+      
       sendEmail({
         // to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
         to:`rehema.said3@ttcl.co.tz`,
         subject: emailSubject,
-        htmlBody: emailBody,
+        htmlBody: htmlBody,
       }).catch((emailError) => {
         console.error(
           "Error sending closure email to creator:",
@@ -2974,23 +2982,24 @@ const closeReviewerTicket = async (req, res) => {
     }
 
     // Notify all reviewers and supervisors
-    const notifySubject2 = `Ticket Closed: ${ticket.subject}`;
-    const notifyHtml2 = `
-      <p><strong>Ticket Closed by Reviewer</strong></p>
-      <p>The following ticket has been closed:</p>
+    const notifySubject2 = `Ticket Closed by Reviewer: ${ticket.subject}`;
+    const notifyBody2 = `
+      <p>A ticket has been closed by a reviewer. Here are the details:</p>
+    `;
+    const notifyDetails2 = `
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
         <li><strong>Subject:</strong> ${ticket.subject}</li>
         <li><strong>Category:</strong> ${ticket.category}</li>
         <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
         <li><strong>Closed By:</strong> ${reviewer.full_name} (Reviewer)</li>
-        <li><strong>Resolution Type:</strong> ${
-          resolution_type || "Resolved"
-        }</li>
+        <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
         <li><strong>Resolution Details:</strong> ${resolution_details}</li>
         <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
       </ul>
     `;
+    
+    const notifyHtml2 = renderEmailCard(notifySubject2, notifyBody2, notifyDetails2);
     const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed by ${reviewer.full_name} (Reviewer).`;
     await notifyUsersByRole(
       ["reviewer", "supervisor"],
