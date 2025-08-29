@@ -31,7 +31,7 @@ const {
 router.post(
   "/create-ticket",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   createTicket
 );
 
@@ -283,6 +283,15 @@ router.post(
   authMiddleware,
   roleMiddleware(['manager']),
   managerAttendMajor
+);
+
+// General close ticket route for all roles (except reviewers who have their own route)
+router.post(
+  '/:ticketId/close',
+  authMiddleware,
+  uploadSingle,
+  handleMulterError,
+  closeTicket
 );
 
 // router.get('/ticket/escalated/:userId', getEscalatedTicketsForUser);

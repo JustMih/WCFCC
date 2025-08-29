@@ -251,12 +251,12 @@ const getNotificationsByTicketId = async (req, res) => {
         {
           model: require("../../models/User"),
           as: "sender",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
         {
           model: require("../../models/User"),
           as: "recipient",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
       ],
       order: [["created_at", "DESC"]],
@@ -321,12 +321,12 @@ const getNotificationsByTicketAndRecipient = async (req, res) => {
         {
           model: require("../../models/User"),
           as: "sender",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
         {
           model: require("../../models/User"),
           as: "recipient",
-          attributes: ["id", "name"],
+          attributes: ["id", "full_name"],
         },
       ],
       order: [["created_at", "DESC"]],

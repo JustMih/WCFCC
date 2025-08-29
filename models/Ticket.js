@@ -30,7 +30,14 @@ const Ticket = sequelize.define(
     assigned_to_id: DataTypes.UUID,
     attended_by_id: DataTypes.UUID,
     rated_by_id: DataTypes.UUID,
-    responsible_unit_id: DataTypes.UUID,
+    responsible_unit_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'FunctionData',
+        key: 'id',
+      },
+    },
     converted_by_id: DataTypes.UUID,
     forwarded_by_id: DataTypes.UUID,
     assigned_to: DataTypes.UUID,
