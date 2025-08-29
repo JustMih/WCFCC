@@ -2,7 +2,7 @@ const Notification = require("../../models/Notification");
 const User = require("../../models/User");
 const { Op } = require("sequelize");
 const Ticket = require("../../models/Ticket");
-const { sendEmail } = require("../../services/emailService");
+const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const { Sequelize } = require("sequelize");
 
 // Create a notification
@@ -72,32 +72,23 @@ const createNotification = async (req, res) => {
     // Step 5: Send email to the recipient
     if (recipientUser.email) {
       const emailSubject = `New Notification: ${category}`;
-      const emailHtmlBody = `
-        <div style="font-family: Arial, sans-serif; background: #f9f9f9; padding: 24px; border-radius: 8px; max-width: 600px; margin: auto;">
-          <div style="background: #1976d2; color: #fff; padding: 16px 24px; border-radius: 8px 8px 0 0; font-size: 1.3rem; font-weight: bold;">
-            WCF Customer Care Notification
-          </div>
-          <div style="background: #fff; padding: 24px; border-radius: 0 0 8px 8px;">
-            <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
-              recipientUser.full_name
-            }</strong>,</p>
-            <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
-              recipientUser.id
-            }</strong>,</p>
-            <p style="font-size: 1.05rem; color: #333;">${default_message}</p>
-            <p style="font-size: 1.05rem; color: #333;">${message}</p>
-            <hr style="margin: 24px 0; border: none; border-top: 1px solid #eee;" />
-            <p style="font-size: 1rem; color: #555;"><strong>Ticket Subject:</strong> ${
-              ticket ? ticket.subject : ""
-            }</p>
-            <p style="font-size: 1rem; color: #555;"><strong>Category:</strong> ${
-              ticket ? ticket.category : ""
-            }</p>
-            <p style="font-size: 0.95rem; color: #888; margin-top: 32px;">Please log in to the system for more details.</p>
-            <p style="font-size: 0.95rem; color: #888;">WCF Customer Care System</p>
-          </div>
-        </div>
+      const bodyHtml = `
+        <p style="font-size: 1.1rem; color: #333;">Dear <strong>${
+          recipientUser.full_name
+        }</strong>,</p>
+        <p style="font-size: 1.05rem; color: #333;">${default_message}</p>
+        <p style="font-size: 1.05rem; color: #333;">${message}</p>
       `;
+      const detailsHtml = `
+        <p style="font-size: 1rem; color: #555;"><strong>Ticket Subject:</strong> ${
+          ticket ? ticket.subject : ""
+        }</p>
+        <p style="font-size: 1rem; color: #555;"><strong>Category:</strong> ${
+          ticket ? ticket.category : ""
+        }</p>
+        <p style="font-size: 0.95rem; color: #888; margin-top: 32px;">Please log in to the system for more details.</p>
+      `;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       try {
         // await sendEmail({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
         await sendEmail({

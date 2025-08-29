@@ -7,7 +7,7 @@ const FunctionModel = require("../../models/Function");
 const Section = require("../../models/Section");
 const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
-const { sendEmail } = require("../../services/emailService");
+const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const Notification = require("../../models/Notification"); // Added Notification model
 
 // Helper to get requester display name
@@ -1285,19 +1285,22 @@ const closeReviewerTicket = async (req, res) => {
     const creator = await User.findOne({ where: { id: ticket.userId } });
     if (creator && creator.email) {
       const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
-      const emailBody = `
+      const bodyHtml = `
         <p>Dear ${creator.name || 'User'},</p>
         <p>Your ticket has been closed by a reviewer. Here are the details:</p>
+      `;
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
           <li><strong>Subject:</strong> ${ticket.subject}</li>
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Description:</strong> ${ticket.description}</li>
           <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-                      <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by reviewer'}</li>
+          <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by reviewer'}</li>
         </ul>
         <p>Thank you for using the WCF Customer Care System.</p>
       `;
+      const emailBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       sendEmail({
         to:'rehema.said3@ttcl.co.tz',
         subject: emailSubject,

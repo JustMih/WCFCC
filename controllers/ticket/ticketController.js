@@ -10,7 +10,7 @@ const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
 const { Op } = require("sequelize");
 const { sendQuickSms } = require("../../services/smsService");
-const { sendEmail } = require("../../services/emailService");
+const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
@@ -928,9 +928,8 @@ const createTicket = async (req, res) => {
     let emailWarning = "";
     if (assignedUser.email && !shouldClose) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
-      const emailHtmlBody = `
-        <p>Dear ${assignedUser.full_name},</p>
-        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+      const bodyHtml = `<p>Dear ${assignedUser.full_name},</p><p>A new ${category} ticket has been assigned to you.</p>`;
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
           <li><strong>Subject:</strong> ${newTicket.subject}</li>
@@ -938,11 +937,8 @@ const createTicket = async (req, res) => {
           <li><strong>Description:</strong> ${newTicket.description}</li>
           <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
           <li><strong>Channel:</strong> ${newTicket.channel}</li>
-        </ul>
-        <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
-      `;
+        </ul>`;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       try {
         await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
         await sendEmail({
@@ -1028,9 +1024,8 @@ const createTicket = async (req, res) => {
     // --- Send email to assignee in background ---
     if (assignedUser.email && !shouldClose) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
-      const emailHtmlBody = `
-        <p>Dear ${assignedUser.full_name},</p>
-        <p>A new ${category} ticket has been assigned to you. Here are the details:</p>
+      const bodyHtml2 = `<p>Dear ${assignedUser.full_name},</p><p>A new ${category} ticket has been assigned to you.</p>`;
+      const detailsHtml2 = `
         <ul>
           <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
           <li><strong>Subject:</strong> ${newTicket.subject}</li>
@@ -1038,11 +1033,8 @@ const createTicket = async (req, res) => {
           <li><strong>Description:</strong> ${newTicket.description}</li>
           <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
           <li><strong>Channel:</strong> ${newTicket.channel}</li>
-        </ul>
-        <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
-      `;
+        </ul>`;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml2, detailsHtml2);
       sendEmail({
         to: "rehema.said3@ttcl.co.tz",
         subject: emailSubject,
@@ -3127,9 +3119,11 @@ const assignTicket = async (req, res) => {
     try {
       if (assignedTo.email) {
         const subject = `Ticket Assigned: ${ticket.ticket_id || ticket.id}`;
-        const htmlBody = `
+        const bodyHtml = `
           <p>Hello ${assignedTo.full_name || ""},</p>
           <p>The following ticket has been <b>assigned</b> to you:</p>
+        `;
+        const detailsHtml = `
           <ul>
             <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
             <li><b>Subject:</b> ${ticket.subject}</li>
@@ -3139,8 +3133,8 @@ const assignTicket = async (req, res) => {
             <li><b>Assignment Reason:</b> ${reason || "Ticket assigned"}</li>
           </ul>
           <p>Please log into the system to review and take action.</p>
-          <p>Regards,<br/>WCF Support Desk</p>
         `;
+        const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         try {
           await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
         } catch (emailErr) {
@@ -3893,9 +3887,11 @@ const reassignTicket = async (req, res) => {
       const newAssignee = await User.findByPk(assigned_to_id);
       if (newAssignee && newAssignee.email) {
         const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
-        const htmlBody = `
+        const bodyHtml = `
           <p>Hello ${newAssignee.full_name || ""},</p>
           <p>The following ticket has been <b>reassigned</b> to you:</p>
+        `;
+        const detailsHtml = `
           <ul>
             <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
             <li><b>Subject:</b> ${ticket.subject}</li>
@@ -3905,8 +3901,8 @@ const reassignTicket = async (req, res) => {
             <li><b>Reassignment Reason:</b> ${reassignment_reason || notes || "Ticket reassigned"}</li>
           </ul>
           <p>Please log into the system to review and take action.</p>
-          <p>Regards,<br/>WCF Support Desk</p>
         `;
+        const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         try {
           // await sendEmail({ to: newAssignee.email, subject, htmlBody });
           await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
@@ -4086,9 +4082,8 @@ const reverseTicket = async (req, res) => {
 
       // Notify all reviewers and supervisors
       const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-      const notifyHtml = `
-        <p><strong>Ticket Reversed</strong></p>
-        <p>The following ticket has been reversed:</p>
+      const portalUrl = `https://192.168.21.70/`;
+      const notifyDetailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
           <li><strong>Subject:</strong> ${ticket.subject}</li>
@@ -4100,8 +4095,30 @@ const reverseTicket = async (req, res) => {
           <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
           <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
           <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
-        </ul>
-      `;
+        </ul>`;
+      const notifyBodyHtml = `<p>The following ticket has been reversed:</p>`;
+      const notifyHtml = `<!doctype html>
+        <html><head><meta name="viewport" content="width=device-width,initial-scale=1" /><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <style>
+          body{margin:0;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f2937}
+          .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
+          .header{background:#0ea5e9;color:#fff;padding:16px 20px;font-size:18px;font-weight:700}
+          .content{padding:20px}.label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:6px}
+          .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;font-size:13px;color:#374151}
+          .btn-wrap{padding:0 20px 20px}.btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;font-size:14px}
+        </style></head>
+        <body><div class="card">
+          <div class="header">${notifySubject}</div>
+          <div class="content">
+            <div class="label">Message</div>
+            <div>${notifyBodyHtml}</div>
+            <div class="label" style="margin-top:12px;">Details</div>
+            <div class="details">${notifyDetailsHtml}</div>
+          </div>
+          <div class="btn-wrap">
+            <a class="btn" href="${portalUrl}" target="_blank" rel="noopener">Open in Portal</a>
+          </div>
+        </div></body></html>`;
       
       const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
       
@@ -4117,9 +4134,8 @@ const reverseTicket = async (req, res) => {
       // Send email to the previous user
       if (prevUser && prevUser.email) {
         const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
-        const emailHtmlBody = `
-          <p>Dear ${prevUser.full_name || prevUser.username},</p>
-          <p>A ticket has been reversed back to you:</p>
+        const bodyHtml = `<p>Dear ${prevUser.full_name || prevUser.username},</p><p>A ticket has been reversed back to you:</p>`;
+        const detailsHtml = `
           <ul>
             <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
             <li><strong>Subject:</strong> ${ticket.subject}</li>
@@ -4128,11 +4144,8 @@ const reverseTicket = async (req, res) => {
             <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
             <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
             <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
-          </ul>
-          <p>Please review and take appropriate action.</p>
-          <p>Thank you,</p>
-          <p>WCF Customer Care System</p>
-        `;
+          </ul>`;
+        const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
 
         try {
           await sendEmail({
@@ -4217,9 +4230,11 @@ const reverseTicket = async (req, res) => {
       // Send email to the previous user
       if (prevUser && prevUser.email) {
         const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
-        const emailHtmlBody = `
+        const bodyHtml = `
           <p>Dear ${prevUser.full_name || prevUser.username},</p>
           <p>A ticket has been reversed back to you:</p>
+        `;
+        const detailsHtml = `
           <ul>
             <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
             <li><strong>Subject:</strong> ${ticket.subject}</li>
@@ -4228,9 +4243,8 @@ const reverseTicket = async (req, res) => {
             <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
           </ul>
           <p>Please review and take appropriate action.</p>
-          <p>Thank you,</p>
-          <p>WCF Customer Care System</p>
         `;
+        const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
 
         try {
           await sendEmail({
@@ -4841,9 +4855,11 @@ const forwardToDirectorGeneral = async (req, res) => {
     // Send email to assigned Director General (if email exists)
     if (directorGeneral.email) {
       const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
-      const emailHtmlBody = `
+      const bodyHtml = `
         <p>Dear ${directorGeneral.full_name || directorGeneral.username},</p>
         <p>A ticket has been assigned to you for review. Details:</p>
+      `;
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
           <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
@@ -4853,9 +4869,8 @@ const forwardToDirectorGeneral = async (req, res) => {
           <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
         </ul>
         <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
       `;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       try {
         // Send assignment email in background
         setImmediate(() => {
@@ -5248,9 +5263,11 @@ const reverseComplaint = async (req, res) => {
     const targetUser = await User.findByPk(targetUserId);
     if (targetUser && targetUser.email) {
       const subject = `Complaint Reversed: ${ticket.ticket_id || ticket.id}`;
-      const htmlBody = `
+      const bodyHtml = `
         <p>Hello ${targetUser.full_name || ""},</p>
         <p>The following complaint has been <b>reversed</b> to you:</p>
+      `;
+      const detailsHtml = `
         <ul>
           <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
           <li><b>Subject:</b> ${ticket.subject}</li>
@@ -5262,8 +5279,8 @@ const reverseComplaint = async (req, res) => {
           ${attachmentPath ? `<li><b>Attachment:</b> Included</li>` : ''}
         </ul>
         <p>Please log into the system to review and take action.</p>
-        <p>Regards,<br/>WCF Support Desk</p>
       `;
+      const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
       try {
         // await sendEmail({ to: targetUser.email, subject, htmlBody });
         await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
@@ -5363,9 +5380,11 @@ const approveAndForwardToReviewer = async (req, res) => {
     // Send email to assigned Reviewer (if email exists)
     if (reviewer.email) {
       const emailSubject = `Ticket Forwarded: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
-      const emailHtmlBody = `
+      const bodyHtml = `
         <p>Dear ${reviewer.full_name || reviewer.username},</p>
         <p>A ticket has been forwarded to you by the Director General. Details:</p>
+      `;
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
           <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
@@ -5375,9 +5394,8 @@ const approveAndForwardToReviewer = async (req, res) => {
           <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
         </ul>
         <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
       `;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       try {
         setImmediate(() => {
           sendEmail({
@@ -5486,9 +5504,11 @@ const reverseAndAssignToReviewer = async (req, res) => {
     // Send email to assigned Reviewer (if email exists)
     if (reviewer.email) {
       const emailSubject = `Ticket Assigned: ${ticket.subject || ""} (ID: ${ticket.ticket_id || ticketId})`;
-      const emailHtmlBody = `
+      const bodyHtml = `
         <p>Dear ${reviewer.full_name || reviewer.username},</p>
         <p>A ticket has been assigned to you by the Director General for more clarification. Details:</p>
+      `;
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticketId}</li>
           <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
@@ -5498,9 +5518,8 @@ const reverseAndAssignToReviewer = async (req, res) => {
           <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
         </ul>
         <p>Please log in to the system to review and handle this ticket.</p>
-        <p>Thank you,</p>
-        <p>WCF Customer Care System</p>
       `;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       try {
         setImmediate(() => {
           sendEmail({

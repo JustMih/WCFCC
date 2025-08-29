@@ -1,5 +1,52 @@
 const nodemailer = require('nodemailer');
 
+/**
+ * Render a standardized email card with consistent styling
+ * @param {string} subject - Email subject (used as header)
+ * @param {string} bodyHtml - Main message content
+ * @param {string} detailsHtml - Additional details content
+ * @returns {string} Complete HTML email body
+ */
+const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
+  const portalUrl = "https://192.168.21.70/";
+  
+  return `<!doctype html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <style>
+        body{margin:0;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f2937}
+        .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
+        .header{background:#0ea5e9;color:#fff;padding:16px 20px;font-size:18px;font-weight:700}
+        .content{padding:20px}.label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:6px}
+        .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;font-size:13px;color:#374151}
+        .btn-wrap{padding:0 20px 20px}.btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;font-size:14px}
+        .footnote{padding:0 20px 16px;font-size:13px;color:#374151}
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">${subject}</div>
+        <div class="content">
+          <div class="label">Message</div>
+          <div>${bodyHtml}</div>
+          <div class="label" style="margin-top:12px;">Details</div>
+          <div class="details">${detailsHtml}</div>
+          <div class="footnote">
+            <p>Please log in to the system to review and handle this ticket.</p>
+            <p>Thank you,</p>
+            <p>WCF Customer Care System</p>
+          </div>
+        </div>
+        <div class="btn-wrap">
+          <a class="btn" href="${portalUrl}" target="_blank" rel="noopener">Open in Portal</a>
+        </div>
+      </div>
+    </body>
+    </html>`;
+};
+
 // Create fallback transporter object using SMTP transport
 const emailTransporter = nodemailer.createTransport({
   host: process.env.MAIL_HOST || 'smtp.wcf.go.tz',
@@ -372,5 +419,6 @@ const sendRatingNotification = async (userEmail, ticketId, rating, justification
 module.exports = {
   sendEmail,
   sendForwardNotification,
-  sendRatingNotification
+  sendRatingNotification,
+  renderEmailCard
 }; 
