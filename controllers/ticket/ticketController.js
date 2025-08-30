@@ -209,7 +209,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   // Record escalation in assignment history
   await TicketAssignment.create({
     ticket_id: ticket.id,
-    assigned_by_id: systemUser ? systemUser.id : ticket.assigned_to_id,
+    assigned_by_id: systemUser ? systemUser.id : (ticket.assigned_to_id || nextUser.id), // Fallback to nextUser.id if both are null
     assigned_to_id: nextUser.id,
     assigned_to_role: nextRole,
     action: "Escalated",
