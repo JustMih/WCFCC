@@ -140,14 +140,14 @@ router.post(
 router.get(
   "/search-by-phone/:phoneNumber",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   searchByPhoneNumber
 );
 
 // Get ticket by ID
 router.get('/:ticketId', 
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketById
 );
 
@@ -183,7 +183,7 @@ router.get(
 router.post(
   '/:ticketId/close',
   authMiddleware,
-  roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'reviewer', "focal-person", "claim-focal-person", "compliance-focal-person", "manager"]),
+  // roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'reviewer', "focal-person", "claim-focal-person", "compliance-focal-person", "manager"]),
   uploadSingle,
   handleMulterError,
   closeTicket
@@ -209,7 +209,7 @@ router.get(
 router.get(
   '/in-progress',
   authMiddleware,
-  roleMiddleware(['super-admin', 'reviewer', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
+  // roleMiddleware(['super-admin', 'reviewer', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
   getInProgressAssignments
 );
 
