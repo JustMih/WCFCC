@@ -18,8 +18,13 @@ const addTicketUpdate = async (req, res) => {
     const userId = req.user?.userId;
     const user = req.user;
 
+    console.log('➕ [TicketUpdates] Adding new update for ticket:', ticket_id);
+    console.log('➕ [TicketUpdates] User ID:', userId);
+    console.log('➕ [TicketUpdates] Update text length:', update_text?.length);
+
     // Check if user is authenticated
     if (!req.user || !userId) {
+      console.log('❌ [TicketUpdates] User not authenticated');
       return res.status(401).json({
         success: false,
         message: 'User not authenticated or user ID not found'
@@ -28,6 +33,7 @@ const addTicketUpdate = async (req, res) => {
 
     // Validate required fields
     if (!ticket_id || !update_text) {
+      console.log('❌ [TicketUpdates] Missing required fields - ticket_id:', !!ticket_id, 'update_text:', !!update_text);
       return res.status(400).json({
         success: false,
         message: 'Ticket ID and update text are required'
@@ -37,28 +43,37 @@ const addTicketUpdate = async (req, res) => {
     // Check if ticket exists and user is assigned to it
     const ticket = await Ticket.findByPk(ticket_id);
     if (!ticket) {
+      console.log('❌ [TicketUpdates] Ticket not found:', ticket_id);
       return res.status(404).json({
         success: false,
         message: 'Ticket not found'
       });
     }
 
+    console.log('✅ [TicketUpdates] Ticket found:', ticket.ticket_id);
+
     // Check if user can add updates to this ticket
     if (!canUserAddUpdate(ticket, userId)) {
+      console.log('❌ [TicketUpdates] User cannot add updates - assigned_to_id:', ticket.assigned_to_id, 'user_id:', userId, 'status:', ticket.status);
       return res.status(403).json({
         success: false,
         message: 'You can only add updates to tickets assigned to you and that are not closed'
       });
     }
 
+    console.log('✅ [TicketUpdates] User can add updates');
+
     // Fetch user details from database to get full_name
     const userDetails = await User.findByPk(userId);
     if (!userDetails) {
+      console.log('❌ [TicketUpdates] User details not found:', userId);
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
+
+    console.log('✅ [TicketUpdates] User details found:', userDetails.full_name);
 
     // Create the update
     const update = await TicketUpdate.create({
@@ -71,6 +86,8 @@ const addTicketUpdate = async (req, res) => {
       is_active: true
     });
 
+    console.log('✅ [TicketUpdates] Update created successfully with ID:', update.id);
+
     res.status(201).json({
       success: true,
       message: 'Update added successfully',
@@ -78,7 +95,8 @@ const addTicketUpdate = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error adding ticket update:', error);
+    console.error('❌ [TicketUpdates] Error adding ticket update:', error);
+    console.error('❌ [TicketUpdates] Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -93,14 +111,20 @@ const getTicketUpdates = async (req, res) => {
     const { ticket_id } = req.params;
     const userId = req.user.userId;
 
+    console.log('🔍 [TicketUpdates] Fetching updates for ticket:', ticket_id);
+    console.log('🔍 [TicketUpdates] User ID:', userId);
+
     // Check if ticket exists
     const ticket = await Ticket.findByPk(ticket_id);
     if (!ticket) {
+      console.log('❌ [TicketUpdates] Ticket not found:', ticket_id);
       return res.status(404).json({
         success: false,
         message: 'Ticket not found'
       });
     }
+
+    console.log('✅ [TicketUpdates] Ticket found:', ticket.ticket_id);
 
     // Get all updates for this ticket, ordered by date (newest first)
     const updates = await TicketUpdate.findAll({
@@ -115,13 +139,16 @@ const getTicketUpdates = async (req, res) => {
       ]
     });
 
+    console.log('✅ [TicketUpdates] Found', updates.length, 'updates for ticket:', ticket_id);
+
     res.status(200).json({
       success: true,
       data: updates
     });
 
   } catch (error) {
-    console.error('Error fetching ticket updates:', error);
+    console.error('❌ [TicketUpdates] Error fetching ticket updates:', error);
+    console.error('❌ [TicketUpdates] Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -176,8 +203,13 @@ const updateTicketUpdate = async (req, res) => {
     const { update_text } = req.body;
     const userId = req.user.userId;
 
+    console.log('✏️ [TicketUpdates] Updating update ID:', update_id);
+    console.log('✏️ [TicketUpdates] User ID:', userId);
+    console.log('✏️ [TicketUpdates] New text length:', update_text?.length);
+
     // Validate required fields
     if (!update_text) {
+      console.log('❌ [TicketUpdates] Update text is required');
       return res.status(400).json({
         success: false,
         message: 'Update text is required'
@@ -187,23 +219,33 @@ const updateTicketUpdate = async (req, res) => {
     // Find the update
     const update = await TicketUpdate.findByPk(update_id);
     if (!update) {
+      console.log('❌ [TicketUpdates] Update not found:', update_id);
       return res.status(404).json({
         success: false,
         message: 'Update not found'
       });
     }
 
+    console.log('✅ [TicketUpdates] Update found for ticket:', update.ticket_id);
+
     // Check if user owns this update
     if (update.user_id !== userId) {
+      console.log('❌ [TicketUpdates] User does not own this update - update_user_id:', update.user_id, 'current_user_id:', userId);
       return res.status(403).json({
         success: false,
         message: 'You can only edit your own updates'
       });
     }
 
-    // Update the text
-    update.update_text = update_text;
-    await update.save();
+    console.log('✅ [TicketUpdates] User owns this update');
+
+    // Update the update
+    await update.update({
+      update_text,
+      updated_at: new Date()
+    });
+
+    console.log('✅ [TicketUpdates] Update modified successfully');
 
     res.status(200).json({
       success: true,
@@ -212,7 +254,8 @@ const updateTicketUpdate = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error updating ticket update:', error);
+    console.error('❌ [TicketUpdates] Error modifying update:', error);
+    console.error('❌ [TicketUpdates] Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -227,25 +270,36 @@ const deleteTicketUpdate = async (req, res) => {
     const { update_id } = req.params;
     const userId = req.user.userId;
 
+    console.log('🗑️ [TicketUpdates] Deleting update ID:', update_id);
+    console.log('🗑️ [TicketUpdates] User ID:', userId);
+
     // Find the update
     const update = await TicketUpdate.findByPk(update_id);
     if (!update) {
+      console.log('❌ [TicketUpdates] Update not found for deletion:', update_id);
       return res.status(404).json({
         success: false,
         message: 'Update not found'
       });
     }
 
+    console.log('✅ [TicketUpdates] Update found for deletion, ticket:', update.ticket_id);
+
     // Check if user owns this update
     if (update.user_id !== userId) {
+      console.log('❌ [TicketUpdates] User does not own this update for deletion - update_user_id:', update.user_id, 'current_user_id:', userId);
       return res.status(403).json({
         success: false,
         message: 'You can only delete your own updates'
       });
     }
 
+    console.log('✅ [TicketUpdates] User owns this update, proceeding with deletion');
+
     // Delete the update
     await update.destroy();
+
+    console.log('✅ [TicketUpdates] Update deleted successfully');
 
     res.status(200).json({
       success: true,
@@ -253,7 +307,8 @@ const deleteTicketUpdate = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error deleting ticket update:', error);
+    console.error('❌ [TicketUpdates] Error deleting update:', error);
+    console.error('❌ [TicketUpdates] Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
