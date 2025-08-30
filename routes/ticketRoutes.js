@@ -10,7 +10,7 @@ const {
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, updateReversedTicketDetails
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -298,5 +298,12 @@ router.post(
 // router.get('/ticket/ever-assigned/:userId', getEverAssignedTickets);
 // router.get('/ticket/ever-assigned-count/:userId', getEverAssignedTicketsCount);
 router.get('/all-count/:userId', getAllTicketsCount);
+
+// Route for updating reversed ticket details (subject and section)
+router.post(
+  '/:ticketId/update-reversed-details',
+  authMiddleware,
+  updateReversedTicketDetails
+);
 
 module.exports = router;

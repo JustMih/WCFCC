@@ -4048,6 +4048,88 @@ const getInProgressAssignments = async (req, res) => {
   }
 };
 
+// Helper function to send emails in background
+const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name, attended_by_role, reason, userId) => {
+  try {
+    // Notify all reviewers and supervisors
+    const notifySubject = `Ticket Reversed: ${ticket.subject}`;
+    const portalUrl = `https://192.168.21.70/`;
+    const notifyDetailsHtml = `
+      <ul>
+        <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+        <li><strong>Subject:</strong> ${ticket.subject}</li>
+        <li><strong>Category:</strong> ${ticket.category}</li>
+        <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+        <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
+        <li><strong>Reversed To:</strong> ${prevUser ? prevUser.full_name : 'Unknown'} (${prevUser ? prevUser.role : 'Unknown'})</li>
+        <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+        <li><strong>Workflow Path:</strong> ${ticket.workflow_path || 'N/A'}</li>
+        <li><strong>Current Step:</strong> ${ticket.current_workflow_step || 'N/A'}/${ticket.workflow_total_steps || 'N/A'}</li>
+        <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
+      </ul>`;
+    const notifyBodyHtml = `<p>The following ticket has been reversed:</p>`;
+    const notifyHtml = `<!doctype html>
+      <html><head><meta name="viewport" content="width=device-width,initial-scale=1" /><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <style>
+        body{margin:0;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f2937}
+        .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
+        .header{background:#0ea5e9;color:#fff;padding:16px 20px;font-size:18px;font-weight:700}
+        .content{padding:20px}.label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:6px}
+        .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;font-size:13px;color:#374151}
+        .btn-wrap{padding:0 20px 20px}.btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;font-size:14px}
+      </style></head>
+      <body><div class="card">
+        <div class="header">${notifySubject}</div>
+        <div class="content">
+          <div class="label">Message</div>
+          <div>${notifyBodyHtml}</div>
+          <div class="label" style="margin-top:12px;">Details</div>
+          <div class="details">${notifyDetailsHtml}</div>
+        </div>
+        <div class="btn-wrap">
+          <a class="btn" href="${portalUrl}" target="_blank" rel="noopener">Open in Portal</a>
+        </div>
+      </div></body></html>`;
+    
+    const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
+    
+    await notifyUsersByRole(
+      ["reviewer", "supervisor"],
+      notifySubject,
+      notifyHtml,
+      ticket.id,
+      userId,
+      notifyMsg
+    );
+
+    // Send email to the previous user
+    if (prevUser && prevUser.email) {
+      const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
+      const bodyHtml = `<p>Dear ${prevUser.full_name || prevUser.username},</p><p>A ticket has been reversed back to you:</p>`;
+      const detailsHtml = `
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
+          <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
+          <li><strong>Workflow Path:</strong> ${ticket.workflow_path || 'N/A'}</li>
+          <li><strong>Current Step:</strong> ${ticket.current_workflow_step || 'N/A'}/${ticket.workflow_total_steps || 'N/A'}</li>
+        </ul>`;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
+
+      await sendEmail({
+        to:`rehema.said3@ttcl.co.tz`,
+        // to: prevUser.email,
+        subject: emailSubject,
+        htmlBody: emailHtmlBody
+      });
+    }
+  } catch (error) {
+    console.error("Error sending reversal emails in background:", error);
+  }
+};
+
 const reverseTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
@@ -4063,28 +4145,41 @@ const reverseTicket = async (req, res) => {
       order: [["created_at", "DESC"]],
     });
 
-    if (assignments.length < 2) {
-      return res
-        .status(400)
-        .json({ message: "No previous user to reverse to." });
-    }
-
-    // The previous user is the second most recent assignment
-    const prevAssignment = assignments[1];
-
+    // Get the ticket with creator information
     const ticket = await Ticket.findOne({
       where: { id: ticketId },
       include: [
         {
           model: User,
           as: "creator",
-          attributes: ["id", "full_name"]
+          attributes: ["id", "full_name", "email", "role"]
         }
       ]
     });
 
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    let prevAssignment = null;
+    let targetUserId = null;
+    let targetUserRole = null;
+
+    // If there are at least 2 assignments, use the second most recent
+    if (assignments.length >= 2) {
+      prevAssignment = assignments[1];
+      targetUserId = prevAssignment.assigned_to_id;
+      targetUserRole = prevAssignment.assigned_to_role;
+    } else {
+      // If no previous assignments, reverse to the ticket creator
+      console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
+      targetUserId = ticket.creator.id;
+      targetUserRole = ticket.creator.role;
+      // Create a mock assignment object for consistency
+      prevAssignment = {
+        assigned_to_id: ticket.creator.id,
+        assigned_to_role: ticket.creator.role
+      };
     }
 
     // Handle file upload if present
@@ -4118,6 +4213,17 @@ const reverseTicket = async (req, res) => {
         });
       }
 
+      // Create notification for the target user (the one receiving the reversed ticket)
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: targetUserId,
+        message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+        channel: "In-System",
+        status: "unread",
+        category: ticket.category,
+      });
+
       // Update attachment path if file was uploaded
       if (attachmentPath) {
         await ticket.update({ attachment_path: attachmentPath });
@@ -4127,87 +4233,27 @@ const reverseTicket = async (req, res) => {
       let attended_by_name = assignedBy.full_name;
       let attended_by_role = assignedBy.role;
 
-      // Fetch previous user details
-      const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
-
-      // Notify all reviewers and supervisors
-      const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-      const portalUrl = `https://192.168.21.70/`;
-      const notifyDetailsHtml = `
-        <ul>
-          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${ticket.subject}</li>
-          <li><strong>Category:</strong> ${ticket.category}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-          <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
-          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.full_name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
-          <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-          <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
-          <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
-          <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
-        </ul>`;
-      const notifyBodyHtml = `<p>The following ticket has been reversed:</p>`;
-      const notifyHtml = `<!doctype html>
-        <html><head><meta name="viewport" content="width=device-width,initial-scale=1" /><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-        <style>
-          body{margin:0;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f2937}
-          .card{max-width:640px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
-          .header{background:#0ea5e9;color:#fff;padding:16px 20px;font-size:18px;font-weight:700}
-          .content{padding:20px}.label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:6px}
-          .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;font-size:13px;color:#374151}
-          .btn-wrap{padding:0 20px 20px}.btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;font-size:14px}
-        </style></head>
-        <body><div class="card">
-          <div class="header">${notifySubject}</div>
-          <div class="content">
-            <div class="label">Message</div>
-            <div>${notifyBodyHtml}</div>
-            <div class="label" style="margin-top:12px;">Details</div>
-            <div class="details">${notifyDetailsHtml}</div>
-          </div>
-          <div class="btn-wrap">
-            <a class="btn" href="${portalUrl}" target="_blank" rel="noopener">Open in Portal</a>
-          </div>
-        </div></body></html>`;
+      // Fetch previous user details - try assignment first, then fall back to creator
+      let prevUser = await User.findByPk(targetUserId);
       
-      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
-      
-      await notifyUsersByRole(
-        ["reviewer", "supervisor"],
-        notifySubject,
-        notifyHtml,
-        ticketId,
-        userId,
-        notifyMsg
-      );
-
-      // Send email to the previous user
-      if (prevUser && prevUser.email) {
-        const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
-        const bodyHtml = `<p>Dear ${prevUser.full_name || prevUser.username},</p><p>A ticket has been reversed back to you:</p>`;
-        const detailsHtml = `
-          <ul>
-            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-            <li><strong>Subject:</strong> ${ticket.subject}</li>
-            <li><strong>Category:</strong> ${ticket.category}</li>
-            <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
-            <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-            <li><strong>Workflow Path:</strong> ${ticket.workflow_path}</li>
-            <li><strong>Current Step:</strong> ${result.ticket.current_workflow_step}/${result.ticket.workflow_total_steps}</li>
-          </ul>`;
-        const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
-
-        try {
-          await sendEmail({
-            to:`rehema.said3@ttcl.co.tz`,
-            // to: prevUser.email,
-            subject: emailSubject,
-            htmlBody: emailHtmlBody
-          });
-        } catch (emailError) {
-          console.error("Error sending reversal email:", emailError.message);
-        }
+      // If previous user not found, try to use the ticket creator as fallback
+      if (!prevUser && ticket.creator) {
+        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
+        prevUser = ticket.creator;
       }
+      
+      // If still no user found, return an error
+      if (!prevUser) {
+        console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+        return res.status(404).json({ 
+          message: "Cannot reverse ticket: Previous user not found. Please contact administrator." 
+        });
+      }
+
+      // Send emails in background (non-blocking)
+      setImmediate(() => {
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
+      });
 
       return res.json({
         message: "Ticket reversed successfully with workflow tracking",
@@ -4218,8 +4264,8 @@ const reverseTicket = async (req, res) => {
     } else {
       // Fallback to original reversal logic for tickets without workflow
       await ticket.update({
-        assigned_to_id: prevAssignment.assigned_to_id,
-        assigned_to_role: prevAssignment.assigned_to_role,
+        assigned_to_id: targetUserId,
+        assigned_to_role: targetUserRole,
         status: "Reversed",
         attachment_path: attachmentPath,
         attended_by_id: userId
@@ -4229,12 +4275,23 @@ const reverseTicket = async (req, res) => {
       await TicketAssignment.create({
         ticket_id: ticketId,
         assigned_by_id: userId,
-        assigned_to_id: prevAssignment.assigned_to_id,
-        assigned_to_role: prevAssignment.assigned_to_role,
+        assigned_to_id: targetUserId,
+        assigned_to_role: targetUserRole,
         action: "Reversed",
         reason: reason || "Ticket reversed to previous user",
         attachment_path: attachmentPath,
         created_at: new Date()
+      });
+
+      // Create notification for the target user (the one receiving the reversed ticket)
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: targetUserId,
+        message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+        channel: "In-System",
+        status: "unread",
+        category: ticket.category,
       });
 
       // Fetch attended_by user name and role
@@ -4246,67 +4303,27 @@ const reverseTicket = async (req, res) => {
         attended_by_role = attendedByUser ? attendedByUser.role : null;
       }
 
-      // Fetch previous user details
-      const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
-
-      // Notify all reviewers and supervisors
-      const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-      const notifyHtml = `
-        <p><strong>Ticket Reversed</strong></p>
-        <p>The following ticket has been reversed:</p>
-        <ul>
-          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${ticket.subject}</li>
-          <li><strong>Category:</strong> ${ticket.category}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-          <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
-          <li><strong>Reversed To:</strong> ${prevUser ? prevUser.full_name : 'Unknown'} (${prevAssignment.assigned_to_role})</li>
-          <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-          <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
-        </ul>
-      `;
+      // Fetch previous user details - try assignment first, then fall back to creator
+      let prevUser = await User.findByPk(targetUserId);
       
-      const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
-      
-      await notifyUsersByRole(
-        ["reviewer", "supervisor"],
-        notifySubject,
-        notifyHtml,
-        ticketId,
-        userId,
-        notifyMsg
-      );
-
-      // Send email to the previous user
-      if (prevUser && prevUser.email) {
-        const emailSubject = `Ticket Reversed Back to You: ${ticket.subject}`;
-        const bodyHtml = `
-          <p>Dear ${prevUser.full_name || prevUser.username},</p>
-          <p>A ticket has been reversed back to you:</p>
-        `;
-        const detailsHtml = `
-          <ul>
-            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-            <li><strong>Subject:</strong> ${ticket.subject}</li>
-            <li><strong>Category:</strong> ${ticket.category}</li>
-            <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
-            <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-          </ul>
-          <p>Please review and take appropriate action.</p>
-        `;
-        const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
-
-        try {
-          await sendEmail({
-            // to: prevUser.email,
-            to:`rehema.said3@ttcl.co.tz`,
-            subject: emailSubject,
-            htmlBody: emailHtmlBody
-          });
-        } catch (emailError) {
-          console.error("Error sending reversal email:", emailError.message);
-        }
+      // If previous user not found, try to use the ticket creator as fallback
+      if (!prevUser && ticket.creator) {
+        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
+        prevUser = ticket.creator;
       }
+      
+      // If still no user found, return an error
+      if (!prevUser) {
+        console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+        return res.status(404).json({ 
+          message: "Cannot reverse ticket: Previous user not found. Please contact administrator." 
+        });
+      }
+
+      // Send emails in background (non-blocking)
+      setImmediate(() => {
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
+      });
 
       return res.json({ message: "Ticket reversed successfully" });
     }
@@ -5218,7 +5235,7 @@ const reverseComplaint = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "full_name"]
+          attributes: ["id", "full_name", "email", "role"]
         }
       ]
     });
@@ -5244,19 +5261,43 @@ const reverseComplaint = async (req, res) => {
       order: [["created_at", "DESC"]]
     });
 
-    if (assignments.length < 2) {
-      return res
-        .status(400)
-        .json({ message: "No previous user to reverse to." });
+    // If there are at least 2 assignments, use the second most recent
+    if (assignments.length >= 2) {
+      const prevAssignment = assignments[1];
+      targetUserId = prevAssignment.assigned_to_id;
+      targetUserRole = prevAssignment.assigned_to_role;
+    } else {
+      // If no previous assignments, reverse to the ticket creator
+      console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
+      targetUserId = ticket.creator.id;
+      targetUserRole = ticket.creator.role;
     }
-
-    // The previous user is the second most recent assignment
-    const prevAssignment = assignments[1];
-    targetUserId = prevAssignment.assigned_to_id;
-    targetUserRole = prevAssignment.assigned_to_role;
     
-    const prevUser = await User.findByPk(prevAssignment.assigned_to_id);
-    targetUserName = prevUser ? prevUser.full_name : "Unknown";
+    // Fetch previous user details - try assignment first, then fall back to creator
+    let prevUser = null;
+    
+    if (assignments.length >= 2) {
+      prevUser = await User.findByPk(targetUserId);
+      
+      // If previous user not found, try to use the ticket creator as fallback
+      if (!prevUser && ticket.creator) {
+        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
+        prevUser = ticket.creator;
+      }
+    } else {
+      // Use the ticket creator directly
+      prevUser = ticket.creator;
+    }
+    
+    // If still no user found, return an error
+    if (!prevUser) {
+      console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+      return res.status(404).json({ 
+        message: "Cannot reverse complaint: Previous user not found. Please contact administrator." 
+      });
+    }
+    
+    targetUserName = prevUser.full_name;
 
     // Update the ticket to assign to the target user
     await ticket.update({
@@ -5277,6 +5318,17 @@ const reverseComplaint = async (req, res) => {
       reason: recommendation || "Complaint reversed with recommendation",
       attachment_path: attachmentPath, // Use attachment_path for consistency
       created_at: new Date()
+    });
+
+    // Create notification for the target user (the one receiving the reversed ticket)
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: targetUserId,
+      message: `Complaint reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+      channel: "In-System",
+      status: "unread",
+      category: ticket.category,
     });
 
     // Fetch attended_by user name and role
@@ -5309,8 +5361,8 @@ const reverseComplaint = async (req, res) => {
       notifyMsg
     );
 
-    // Send email to the target user
-    const targetUser = await User.findByPk(targetUserId);
+    // Send email to the target user - use the same user we found earlier
+    const targetUser = prevUser; // Use the user we already found (with fallback logic)
     if (targetUser && targetUser.email) {
       const subject = `Complaint Reversed: ${ticket.ticket_id || ticket.id}`;
       const bodyHtml = `
@@ -5901,6 +5953,179 @@ const managerAttendMajor = async (req, res) => {
   }
 };
 
+// Update reversed ticket details (subject and section)
+const updateReversedTicketDetails = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, subject, section, sub_section, responsible_unit_id, responsible_unit_name } = req.body;
+
+    if (!ticketId || !userId) {
+      return res.status(400).json({ message: "Ticket ID and user ID are required" });
+    }
+
+    if (!subject) {
+      return res.status(400).json({ message: "Subject is required" });
+    }
+
+    // Get the ticket
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "full_name"]
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Check if ticket is reversed and assigned to the current user
+    if (ticket.status !== "Reversed") {
+      return res.status(400).json({ message: "Only reversed tickets can be updated" });
+    }
+
+    if (!ticket.assigned_to_id || String(ticket.assigned_to_id) !== String(userId)) {
+      return res.status(403).json({ message: "You can only update tickets assigned to you" });
+    }
+
+    // Map function_data ID to function ID if needed
+    console.log('🔍 Received responsible_unit_id:', responsible_unit_id);
+    const mappedResponsibleUnitId = mapFunctionDataToFunctionId(responsible_unit_id);
+    console.log('🔍 Mapped to function ID:', mappedResponsibleUnitId);
+
+    // Update the ticket details
+    const updateData = {
+      subject: subject,
+      responsible_unit_id: mappedResponsibleUnitId || null,
+      responsible_unit_name: responsible_unit_name || null
+    };
+
+    // Add section and sub_section if provided
+    if (section) {
+      updateData.section = section;
+    }
+    if (sub_section) {
+      updateData.sub_section = sub_section;
+    }
+
+    // Find focal person for the new responsible unit
+    let focalPerson = null;
+    if (responsible_unit_name && responsible_unit_name.trim() !== "") {
+      focalPerson = await User.findOne({
+        where: {
+          role: "focal-person",
+          unit_section: responsible_unit_name,
+        },
+        attributes: ["id", "full_name", "email", "role", "unit_section"],
+      });
+      console.log("Found focal person for updated unit:", focalPerson?.full_name);
+    }
+
+    // If no focal person found for the specific unit, try to find any focal person
+    if (!focalPerson) {
+      focalPerson = await User.findOne({
+        where: {
+          role: "focal-person",
+        },
+        attributes: ["id", "full_name", "email", "role", "unit_section"],
+      });
+      console.log("Found fallback focal person:", focalPerson?.full_name);
+    }
+
+    // Update ticket with focal person assignment if found
+    if (focalPerson) {
+      updateData.assigned_to_id = focalPerson.id;
+      updateData.assigned_to_role = focalPerson.role;
+      console.log(`Ticket will be reassigned to focal person: ${focalPerson.full_name} (${focalPerson.role})`);
+    }
+
+    await ticket.update(updateData);
+
+    // Create assignment record if ticket was reassigned to focal person
+    if (focalPerson && focalPerson.id !== userId) {
+      await TicketAssignment.create({
+        ticket_id: ticketId,
+        assigned_by_id: userId,
+        assigned_to_id: focalPerson.id,
+        assigned_to_role: focalPerson.role,
+        action: "Reassigned to focal person after details update",
+        reason: `Ticket details updated - Subject: ${subject}, Section: ${section || 'N/A'}, Sub-section: ${sub_section || 'N/A'}`,
+        created_at: new Date(),
+      });
+    }
+
+    // Create a notification for the update
+    const notificationMessage = focalPerson 
+      ? `Ticket details updated and reassigned to focal person: ${ticket.subject} (ID: ${ticket.ticket_id})`
+      : `Ticket details updated: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: ticket.assigned_to_id,
+      message: notificationMessage,
+      channel: "In-System",
+      status: "unread",
+      category: ticket.category,
+    });
+
+    // If ticket was reassigned to a focal person, create notification for the new assignee
+    if (focalPerson && focalPerson.id !== userId) {
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: focalPerson.id,
+        message: `Ticket reassigned to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+        channel: "In-System",
+        status: "unread",
+        category: ticket.category,
+      });
+    }
+
+    // Log the update
+    console.log(`Ticket ${ticketId} details updated by user ${userId}:`, updateData);
+
+    const responseData = {
+      message: focalPerson 
+        ? "Ticket details updated successfully and reassigned to focal person"
+        : "Ticket details updated successfully",
+      ticket: {
+        id: ticket.id,
+        ticket_id: ticket.ticket_id,
+        subject: ticket.subject,
+        section: ticket.section,
+        sub_section: ticket.sub_section,
+        responsible_unit_id: ticket.responsible_unit_id,
+        responsible_unit_name: ticket.responsible_unit_name,
+        assigned_to_id: ticket.assigned_to_id,
+        assigned_to_role: ticket.assigned_to_role
+      }
+    };
+
+    if (focalPerson) {
+      responseData.focal_person = {
+        id: focalPerson.id,
+        full_name: focalPerson.full_name,
+        role: focalPerson.role,
+        unit_section: focalPerson.unit_section
+      };
+    }
+
+    return res.json(responseData);
+
+  } catch (error) {
+    console.error("Error updating reversed ticket details:", error);
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   getTicketCounts,
   generateTicketId,
@@ -5952,5 +6177,6 @@ module.exports = {
   getTicketWorkflowInfo,
   getTicketWorkflowAuditTrail,
   managerAttendMajor,
-  escalateAndUpdateTicketOnSlaBreach
+  escalateAndUpdateTicketOnSlaBreach,
+  updateReversedTicketDetails
 };
