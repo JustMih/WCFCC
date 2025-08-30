@@ -48,9 +48,20 @@ require('./amiServer'); // ✅ This line ensures AMI event listeners start
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors({
-  origin: ["http://localhost:3000", "http://192.168.21.70:3000"],
+  origin: [
+    "http://localhost:3000", 
+    "http://192.168.21.70:3000",
+    "http://localhost:5070",
+    "http://192.168.21.70:5070",
+    "https://192.168.21.70",
+    "https://demoportal.wcf.go.tz",
+    "https://portal.wcf.go.tz",
+    "https://essp.wcf.go.tz",
+    // Allow any origin in development (you can remove this in production)
+    process.env.NODE_ENV === 'development' ? true : false
+  ].filter(Boolean),
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
   credentials: true
 }));
 
@@ -126,7 +137,18 @@ app.use("/api", require("./routes/dtmfRoutes"));
 /* ------------------------------ SOCKET.IO ------------------------------ */
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://10.52.0.19:3000"],
+    origin: [
+      "http://localhost:3000", 
+      "http://192.168.21.70:3000",
+      "http://localhost:5070",
+      "http://192.168.21.70:5070",
+      "https://192.168.21.70",
+      "https://demoportal.wcf.go.tz",
+      "https://portal.wcf.go.tz",
+      "https://essp.wcf.go.tz",
+      // Allow any origin in development
+      process.env.NODE_ENV === 'development' ? true : false
+    ].filter(Boolean),
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     credentials: true
   }
