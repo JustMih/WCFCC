@@ -748,12 +748,19 @@ const createTicket = async (req, res) => {
     let requesterFullName = `${firstName} ${lastName || ""}`;
     // Handle Employer details and association
     if (requester === "Employer") {
-      let employer = await Employer.findOne({
-        where: { registration_number: employerRegistrationNumber },
-      });
+      let employer = null;
+      
+      // Only search by registration_number if it's provided
+      if (employerRegistrationNumber) {
+        employer = await Employer.findOne({
+          where: { registration_number: employerRegistrationNumber },
+        });
+      }
+      
       if (!employer) {
+        // Create new employer record (registration_number can be null now)
         employer = await Employer.create({
-          registration_number: employerRegistrationNumber,
+          registration_number: employerRegistrationNumber || null,
           name: employerName,
           tin: employerTin,
           phone: employerPhone,
