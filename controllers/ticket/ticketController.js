@@ -3518,7 +3518,7 @@ const getDashboardCounts = async (req, res) => {
       let assignedCount = await Ticket.count({
         where: {
           assigned_to_id: userId,
-          status: { [Op.in]: ["Assigned", "Open"] },
+          status: { [Op.in]: ["Assigned", "Open", "Reversed", "Escalated"] },
         },
       });
       // Escalated tickets: all roles show only escalated tickets from them
@@ -4386,7 +4386,7 @@ const getAssignedTicketsCount = async (req, res) => {
       count = await Ticket.count({
         where: {
           assigned_to_id: userId,
-          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", 
+          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "Reversed", "Escalated", 
             "In Progress", "Attended and Recommended", "Escalated"] }
         }
       });
