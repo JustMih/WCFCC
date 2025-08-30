@@ -743,7 +743,17 @@ const createTicket = async (req, res) => {
 
     const initialStatus = shouldClose ? "Closed" : status || "Open";
     let ticketEmployerId = null;
-    let ticketPhoneNumber = phoneNumber;
+    console.log("🔍 PHONE NUMBER DEBUG:");
+    console.log("- Original phoneNumber:", phoneNumber);
+    console.log("- Type:", typeof phoneNumber);
+    console.log("- Is null:", phoneNumber === null);
+    console.log("- Is undefined:", phoneNumber === undefined);
+    console.log("- Is empty string:", phoneNumber === "");
+    console.log("- Trimmed length:", phoneNumber ? phoneNumber.toString().trim().length : 0);
+    
+    let ticketPhoneNumber = phoneNumber || "N/A"; // Provide fallback value
+    console.log("- Final ticketPhoneNumber:", ticketPhoneNumber);
+    console.log("- Final type:", typeof ticketPhoneNumber);
     let ticketInstitution = institution;
     let requesterFullName = `${firstName} ${lastName || ""}`;
     // Handle Employer details and association
@@ -772,13 +782,26 @@ const createTicket = async (req, res) => {
         });
       }
       ticketEmployerId = employer.id;
-      ticketPhoneNumber = employerPhone;
+      ticketPhoneNumber = employerPhone || phoneNumber || "N/A"; // Fallback to original phoneNumber if employerPhone is null
       ticketInstitution = employerName;
       requesterFullName = employerName;
     } else if (requester === "Representative") {
-      ticketPhoneNumber = requesterPhoneNumber;
+      ticketPhoneNumber = requesterPhoneNumber || phoneNumber || "N/A"; // Fallback to original phoneNumber if requesterPhoneNumber is null
       requesterFullName = requesterName;
+    } else {
+      // For regular tickets (Employee), use the original phoneNumber
+      // ticketPhoneNumber is already set to phoneNumber || "N/A" above
+      requesterFullName = `${firstName} ${lastName || ""}`;
     }
+    
+    console.log("🔍 PHONE NUMBER PROCESSING DEBUG:");
+    console.log("- Requester type:", requester);
+    console.log("- Original phoneNumber:", phoneNumber);
+    console.log("- employerPhone:", employerPhone);
+    console.log("- requesterPhoneNumber:", requesterPhoneNumber);
+    console.log("- Final ticketPhoneNumber:", ticketPhoneNumber);
+    console.log("- Final ticketPhoneNumber type:", typeof ticketPhoneNumber);
+    console.log("- Final ticketPhoneNumber length:", ticketPhoneNumber ? ticketPhoneNumber.length : 0);
 
     const ticketData = {
       ticket_id: ticketId,
@@ -910,11 +933,21 @@ const createTicket = async (req, res) => {
       .replace(/^\+/, "")
       .replace(/^0/, "255");
     const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+    
+    console.log("🔍 PHONE NUMBER SAVING DEBUG:");
+    console.log("- Original phoneNumber from request:", phoneNumber);
+    console.log("- ticketPhoneNumber after processing:", ticketPhoneNumber);
+    console.log("- smsRecipient:", smsRecipient);
+    console.log("- Requester type:", requester);
+    console.log("- employerPhone:", employerPhone);
+    console.log("- requesterPhoneNumber:", requesterPhoneNumber);
+    console.log("- shouldClose value:", shouldClose);
+    console.log("- !shouldClose value:", !shouldClose);
 
     // Only send SMS if ticket is NOT closed at creation
     if (
       !shouldClose &&
-      (requester === "Employee" || requester === "Representative") &&
+      (requester === "Employee" || requester === "Employer" || requester === "Pensioners" || requester === "Stakeholders" || requester === "Representative") &&
       isValidTzPhone(smsRecipient)
     ) {
       const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
@@ -2723,6 +2756,7 @@ const closeTicket = async (req, res) => {
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
         <li><strong>Subject:</strong> ${ticket.subject}</li>
         <li><strong>Category:</strong> ${ticket.category}</li>
+        <li><strong>Description:</strong> ${ticket.description}</li>
         <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
         <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
         <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
