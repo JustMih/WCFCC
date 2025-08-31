@@ -4,6 +4,7 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const https = require("https");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
@@ -232,9 +233,51 @@ sequelize.sync({ force: false, alter: false }).then(() => {
   registerSuperAdmin();
 
   const PORT = process.env.PORT || 5070;
+  const HTTPS_PORT = process.env.HTTPS_PORT || 5071;
+
+  // Create HTTP server
   server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🚀 HTTP Server running on port ${PORT}`);
   });
+
+  // Create HTTPS server if SSL certificates exist
+  const sslOptions = {
+    key: fs.existsSync('./ssl/private.key') ? fs.readFileSync('./ssl/private.key') : null,
+    cert: fs.existsSync('./ssl/certificate.crt') ? fs.readFileSync('./ssl/certificate.crt') : null
+  };
+
+  if (sslOptions.key && sslOptions.cert) {
+    const httpsServer = https.createServer(sslOptions, app);
+    const httpsIo = new Server(httpsServer, {
+      cors: {
+        origin: [
+          "http://localhost:3000", 
+          "http://192.168.21.70:3000",
+          "http://localhost:5070",
+          "http://192.168.21.70:5070",
+          "https://192.168.21.70",
+          "https://demoportal.wcf.go.tz",
+          "https://portal.wcf.go.tz",
+          "https://essp.wcf.go.tz",
+          process.env.NODE_ENV === 'development' ? true : false
+        ].filter(Boolean),
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        credentials: true
+      }
+    });
+
+    httpsServer.listen(HTTPS_PORT, () => {
+      console.log(`🔒 HTTPS Server running on port ${HTTPS_PORT}`);
+    });
+
+    // Setup socket for HTTPS
+    global._ioHttps = httpsIo;
+    setupSocket(httpsIo);
+  } else {
+    console.log("⚠️ SSL certificates not found. HTTPS server not started.");
+    console.log("📁 Expected files: ./ssl/private.key and ./ssl/certificate.crt");
+  }
+
 }).catch(error => {
   console.error("❌ Database sync failed:", error);
   process.exit(1);

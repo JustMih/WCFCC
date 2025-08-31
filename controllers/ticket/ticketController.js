@@ -543,6 +543,127 @@ const mapFunctionDataToFunctionId = (functionDataId) => {
   return mapping[functionDataId] || functionDataId; // Return original if not found in mapping
 };
 
+// Helper function to find head of unit or manager for a section
+const findSupervisorForSection = async (section) => {
+  try {
+    const supervisors = [];
+    
+    console.log(`🔍 Looking for supervisors for section: "${section}"`);
+    
+    // Debug: Let's see what users exist with these roles
+    const allHeadOfUnits = await User.findAll({
+      where: { role: "head-of-unit" },
+      attributes: ["id", "full_name", "email", "role", "unit_section"],
+    });
+    
+    const allManagers = await User.findAll({
+      where: { role: "manager" },
+      attributes: ["id", "full_name", "email", "role", "unit_section"],
+    });
+    
+    const allSupervisors = await User.findAll({
+      where: { role: "supervisor" },
+      attributes: ["id", "full_name", "email", "role", "unit_section"],
+    });
+    
+    console.log(`📊 Found ${allHeadOfUnits.length} head-of-unit users:`);
+    allHeadOfUnits.forEach(user => {
+      console.log(`  - ${user.full_name} (${user.role}) - unit_section: "${user.unit_section}"`);
+    });
+    
+    console.log(`📊 Found ${allManagers.length} manager users:`);
+    allManagers.forEach(user => {
+      console.log(`  - ${user.full_name} (${user.role}) - unit_section: "${user.unit_section}"`);
+    });
+    
+    console.log(`📊 Found ${allSupervisors.length} supervisor users:`);
+    allSupervisors.forEach(user => {
+      console.log(`  - ${user.full_name} (${user.role}) - unit_section: "${user.unit_section}"`);
+    });
+    
+    // First try to find head-of-unit for the specific section/unit
+    let headOfUnit = await User.findOne({
+      where: {
+        role: "head-of-unit",
+        unit_section: section,
+      },
+      attributes: ["id", "full_name", "email", "role", "unit_section"],
+    });
+
+    // If head-of-unit found for the section, add to supervisors list
+    if (headOfUnit) {
+      supervisors.push(headOfUnit);
+      console.log(`✅ Found head-of-unit: ${headOfUnit.full_name} (${headOfUnit.role}) for section: ${section}`);
+    } else {
+      console.log(`❌ No head-of-unit found for section: "${section}"`);
+    }
+
+    // Try to find manager for the specific section/unit
+    let manager = await User.findOne({
+      where: {
+        role: "manager",
+        unit_section: section,
+      },
+      attributes: ["id", "full_name", "email", "role", "unit_section"],
+    });
+
+    // If manager found for the section, add to supervisors list
+    if (manager) {
+      supervisors.push(manager);
+      console.log(`✅ Found manager: ${manager.full_name} (${manager.role}) for section: ${section}`);
+    } else {
+      console.log(`❌ No manager found for section: "${section}"`);
+    }
+
+    // Always try to find any supervisor (general role) - this should always be included
+    let generalSupervisor = await User.findOne({
+      where: {
+        role: "supervisor",
+      },
+      attributes: ["id", "full_name", "email", "role", "unit_section"],
+    });
+
+    // If general supervisor found, add to supervisors list
+    if (generalSupervisor) {
+      supervisors.push(generalSupervisor);
+      console.log(`✅ Found general supervisor: ${generalSupervisor.full_name} (${generalSupervisor.role})`);
+    } else {
+      console.log(`❌ No general supervisor found`);
+    }
+
+    // If still no supervisors found, try to find any head-of-unit or manager (any section) as fallback
+    if (supervisors.length === 0) {
+      let fallbackSupervisor = await User.findOne({
+        where: {
+          role: {
+            [Op.in]: ["head-of-unit", "manager"]
+          }
+        },
+        attributes: ["id", "full_name", "email", "role", "unit_section"],
+      });
+      
+      if (fallbackSupervisor) {
+        supervisors.push(fallbackSupervisor);
+        console.log(`✅ Found fallback supervisor: ${fallbackSupervisor.full_name} (${fallbackSupervisor.role}) for section: ${section}`);
+      }
+    }
+
+    if (supervisors.length > 0) {
+      console.log(`✅ Found ${supervisors.length} supervisor(s) for section: ${section}`);
+      supervisors.forEach(sup => {
+        console.log(`  - ${sup.full_name} (${sup.role}) - ${sup.unit_section || 'General'}`);
+      });
+    } else {
+      console.log(`⚠️ No supervisors found for section: ${section}`);
+    }
+
+    return supervisors;
+  } catch (error) {
+    console.error("Error finding supervisors for section:", error);
+    return [];
+  }
+};
+
 const createTicket = async (req, res) => {
   console.log("🎯 CREATE TICKET ENDPOINT CALLED!");
   console.log("Request body received:", req.body);
@@ -683,9 +804,8 @@ const createTicket = async (req, res) => {
 
       // If no allocated user from search response, assign to focal-person with matching section
       if (!assignedUser) {
-        // Get the section from ticket data - use inputSection instead of undefined sub_section
-        const ticketSection =
-          responsible_unit_name || finalSection || inputSection || section;
+        // Get the section from ticket data - use section directly
+        const ticketSection = section;
 
         console.log(
           "TicketSection for focal-person assignment:",
@@ -1003,6 +1123,43 @@ const createTicket = async (req, res) => {
       channel: channel,
       status: "unread",
     });
+
+    // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) ---
+    const supervisors = await findSupervisorForSection(newTicket.section);
+    if (supervisors && supervisors.length > 0) {
+      const supervisorEmailSubject = `New ${category} Ticket Created: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+      
+      // Send email to each supervisor
+      for (const supervisor of supervisors) {
+        const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A new ${category} ticket has been created and assigned to ${assignedUser.full_name}.</p>`;
+        const supervisorDetailsHtml = `
+          <ul>
+            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${newTicket.subject}</li>
+            <li><strong>Category:</strong> ${newTicket.category}</li>
+            <li><strong>Description:</strong> ${newTicket.description}</li>
+            <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+            <li><strong>Assigned To:</strong> ${assignedUser.full_name} (${assignedUser.role})</li>
+            <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
+            <li><strong>Channel:</strong> ${newTicket.channel}</li>
+            <li><strong>Status:</strong> ${shouldClose ? "Closed" : "Open"}</li>
+          </ul>`;
+        const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+        
+        try {
+          await sendEmail({
+            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+            subject: supervisorEmailSubject,
+            htmlBody: supervisorEmailHtmlBody,
+          });
+          console.log(`✅ Email sent to ${supervisor.role} ${supervisor.full_name} for ticket ${newTicket.ticket_id}`);
+        } catch (emailError) {
+          console.error(`Error sending email to ${supervisor.role} ${supervisor.full_name}:`, emailError.message);
+        }
+      }
+    } else {
+      console.log(`⚠️ No supervisors found for section: ${newTicket.section}`);
+    }
     // --- Email to Head of Unit if Closed on Creation (background) ---
     if (shouldClose) {
       // Find head-of-unit for the ticket's section/unit
@@ -2267,7 +2424,10 @@ const getAllTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor" 
+      || user.role === "head-of-unit" || user.role === "manager" 
+      || user.role === "focal-person"
+    ) {
       tickets = await Ticket.findAll({
         attributes: { exclude: ["userId"] },
         include: [
@@ -2778,6 +2938,45 @@ const closeTicket = async (req, res) => {
       userId,
       notifyMsg
     );
+
+    // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) for ticket closure ---
+    const supervisors = await findSupervisorForSection(ticket.section);
+    if (supervisors && supervisors.length > 0) {
+      const supervisorEmailSubject = `Ticket Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      
+      // Send email to each supervisor
+      for (const supervisor of supervisors) {
+        const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A ticket has been closed in your unit/section.</p>`;
+        const supervisorDetailsHtml = `
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${ticket.subject}</li>
+            <li><strong>Category:</strong> ${ticket.category}</li>
+            <li><strong>Description:</strong> ${ticket.description}</li>
+            <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+            <li><strong>Assigned To:</strong> ${ticket.assigned_to_name || "Unknown"}</li>
+            <li><strong>Section/Unit:</strong> ${ticket.section}</li>
+            <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+            <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+            <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+            <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+          </ul>`;
+        const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+        
+        try {
+          await sendEmail({
+            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+            subject: supervisorEmailSubject,
+            htmlBody: supervisorEmailHtmlBody,
+          });
+          console.log(`✅ Closure email sent to ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
+        } catch (emailError) {
+          console.error(`Error sending closure email to ${supervisor.role} ${supervisor.full_name}:`, emailError.message);
+        }
+      }
+    } else {
+      console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
+    }
 
     // Notify the creator (agent) by email if available
     if (ticket.creator && ticket.creator.email) {
@@ -6126,6 +6325,8 @@ const updateReversedTicketDetails = async (req, res) => {
   }
 };
 
+
+
 module.exports = {
   getTicketCounts,
   generateTicketId,
@@ -6178,5 +6379,6 @@ module.exports = {
   getTicketWorkflowAuditTrail,
   managerAttendMajor,
   escalateAndUpdateTicketOnSlaBreach,
-  updateReversedTicketDetails
+  updateReversedTicketDetails,
+  findSupervisorForSection
 };

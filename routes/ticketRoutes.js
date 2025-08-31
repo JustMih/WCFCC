@@ -103,7 +103,7 @@ router.get(
 router.get(
   "/count/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketCounts
 );
 
@@ -125,7 +125,7 @@ router.get('/attachment/:filename', (req, res) => {
 router.get(
   "/all-customer-tickets",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   getAllCustomersTickets
 );
 
