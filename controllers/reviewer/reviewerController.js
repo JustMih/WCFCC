@@ -1302,7 +1302,7 @@ const closeReviewerTicket = async (req, res) => {
       `;
       const emailBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       sendEmail({
-        to:'rehema.said3@ttcl.co.tz',
+        to:'grace.tarimo@wcf.go.tz',
         subject: emailSubject,
         htmlBody: emailBody
       }).catch(emailError => {

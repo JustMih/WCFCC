@@ -224,8 +224,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (previousAssignee && previousAssignee.email) {
     setImmediate(() => {
       sendEmail({
-        // to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
-        to:`rehema.said3@ttcl.co.tz`,
+        // to: [previousAssignee.email, "grace.tarimo@wcf.go.tz"],
+        to:`grace.tarimo@wcf.go.tz`,
         subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
         htmlBody: `
           <p>Dear ${previousAssignee.full_name},</p>
@@ -245,8 +245,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (nextUser && nextUser.email) {
     setImmediate(() => {
       sendEmail({
-        // to: [nextUser.email, "rehema.said3@ttcl.co.tz"],
-        to:`rehema.said3@ttcl.co.tz`,
+        // to: [nextUser.email, "grace.tarimo@wcf.go.tz"],
+        to:`grace.tarimo@wcf.go.tz`,
         subject: `New Escalated Ticket Assigned: ${
           ticket.ticket_id || ticket.id
         }`,
@@ -1102,13 +1102,13 @@ const createTicket = async (req, res) => {
       try {
         await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
         await sendEmail({
-          to: "rehema.said3@ttcl.co.tz",
+          to: "grace.tarimo@wcf.go.tz",
           subject: emailSubject,
           htmlBody: emailHtmlBody,
         });
       } catch (emailError) {
         console.error("Error sending email:", emailError.message);
-        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
+        console.error("Error sending email:", 'grace.tarimo@wcf.go.tz');
         emailWarning += " (Warning: Failed to send email to assignee.)";
       }
     }
@@ -1148,7 +1148,7 @@ const createTicket = async (req, res) => {
         
         try {
           await sendEmail({
-            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+            to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
             subject: supervisorEmailSubject,
             htmlBody: supervisorEmailHtmlBody,
           });
@@ -1199,8 +1199,8 @@ const createTicket = async (req, res) => {
           <p>Please review the resolution details above.</p>
         `;
         sendEmail({
-          // to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
-          to:`rehema.said3@ttcl.co.tz`,
+          // to: [headOfUnit.email, "grace.tarimo@wcf.go.tz"],
+          to:`grace.tarimo@wcf.go.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
         }).catch((emailError) => {
@@ -1233,7 +1233,7 @@ const createTicket = async (req, res) => {
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml2, detailsHtml2);
       sendEmail({
-        to: "rehema.said3@ttcl.co.tz",
+        to: "grace.tarimo@wcf.go.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
       }).catch((emailError) => {
@@ -1274,8 +1274,8 @@ const createTicket = async (req, res) => {
           <p>Thank you for using the WCF Customer Care System.</p>
         `;
         sendEmail({
-          // to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
-          to:`rehema.said3@ttcl.co.tz`,
+          // to: [closingAgent.email, "grace.tarimo@wcf.go.tz"],
+          to:`grace.tarimo@wcf.go.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
         }).catch((emailError) => {
@@ -2835,8 +2835,8 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          // to: [user.email, "rehema.said3@ttcl.co.tz"],
-          to:`rehema.said3@ttcl.co.tz`,
+          // to: [user.email, "grace.tarimo@wcf.go.tz"],
+          to:`grace.tarimo@wcf.go.tz`,
           subject,
           htmlBody,
         }).catch((e) =>
@@ -2965,7 +2965,7 @@ const closeTicket = async (req, res) => {
         
         try {
           await sendEmail({
-            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+            to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
             subject: supervisorEmailSubject,
             htmlBody: supervisorEmailHtmlBody,
           });
@@ -3005,7 +3005,7 @@ const closeTicket = async (req, res) => {
       
       sendEmail({
         // to: ticket.creator.email,
-        to: "rehema.said3@ttcl.co.tz",
+        to: "grace.tarimo@wcf.go.tz",
         subject: emailSubject,
         htmlBody: htmlBody,
       }).catch((emailError) => {
@@ -3209,8 +3209,8 @@ const closeReviewerTicket = async (req, res) => {
       const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
       
       sendEmail({
-        // to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
-        to:`rehema.said3@ttcl.co.tz`,
+        // to: [ticket.creator.email, "grace.tarimo@wcf.go.tz"],
+        to:`grace.tarimo@wcf.go.tz`,
         subject: emailSubject,
         htmlBody: htmlBody,
       }).catch((emailError) => {
@@ -3385,7 +3385,7 @@ const assignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         try {
-          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+          await sendEmail({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody });
         } catch (emailErr) {
           console.error("Failed to send assignment email:", emailErr.message);
           // Do not fail the assignment if email fails
@@ -4154,7 +4154,7 @@ const reassignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         try {
           // await sendEmail({ to: newAssignee.email, subject, htmlBody });
-          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+          await sendEmail({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody });
         } catch (emailErr) {
           console.error("Failed to send reassignment email:", emailErr.message);
           // Do not fail the reassignment if email fails
@@ -4318,7 +4318,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
 
       await sendEmail({
-        to:`rehema.said3@ttcl.co.tz`,
+        to:`grace.tarimo@wcf.go.tz`,
         // to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody
@@ -5141,7 +5141,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ['rehema.said3@ttcl.co.tz'],
+            to: ['grace.tarimo@wcf.go.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -5584,7 +5584,7 @@ const reverseComplaint = async (req, res) => {
       const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
       try {
         // await sendEmail({ to: targetUser.email, subject, htmlBody });
-        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+        await sendEmail({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody });
       } catch (emailErr) {
         console.error("Failed to send reversal email:", emailErr.message);
         // Do not fail the reversal if email fails
@@ -5700,7 +5700,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['rehema.said3@ttcl.co.tz'],
+            to: ['grace.tarimo@wcf.go.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -5824,7 +5824,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['rehema.said3@ttcl.co.tz'],
+            to: ['grace.tarimo@wcf.go.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -6126,7 +6126,7 @@ const managerAttendMajor = async (req, res) => {
       
       sendEmail({
         // to: headOfUnit.email,
-        to: ['rehema.said3@ttcl.co.tz'],
+        to: ['grace.tarimo@wcf.go.tz'],
         subject: emailSubject,
         htmlBody: emailBody
       }).catch(emailError => {
