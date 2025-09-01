@@ -61,7 +61,11 @@ const getAllCoordinator = async (req, res) => {
 const getAllHeadOfUnit = async (req, res) => {
   try {
     const headOfUnit = await User.findAll({
-      where: { role: "head-of-unit" },
+      where: { 
+        role: {
+          [Op.in]: ["head-of-unit", "director"]
+        }
+      },
     });
     const headOfUnitCount = headOfUnit.length;
     res.status(200).json({ headOfUnitCount });

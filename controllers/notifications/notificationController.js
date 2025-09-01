@@ -92,7 +92,7 @@ const createNotification = async (req, res) => {
       try {
         // await sendEmail({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
         await sendEmail({
-          to: "grace.tarimo@wcf.go.tz",
+          to: "rehema.said3@ttcl.co.tz",
           subject: emailSubject,
           htmlBody: emailHtmlBody,
         });

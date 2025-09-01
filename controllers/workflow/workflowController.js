@@ -355,21 +355,25 @@ const canUserPerformAction = (ticket, user, action) => {
   const rolePermissions = {
     'attend': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'attendee': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
     },
     'recommend': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'attendee': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
     },
     'reverse': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'director-general': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE']
     },
     'close': {
       'head-of-unit': ['MINOR_UNIT'],
+      'director': ['MINOR_UNIT'],
       'director-general': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
     }
   };

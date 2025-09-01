@@ -224,8 +224,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (previousAssignee && previousAssignee.email) {
     setImmediate(() => {
       sendEmail({
-        // to: [previousAssignee.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        // to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
+        to:`rehema.said3@ttcl.co.tz`,
         subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
         htmlBody: `
           <p>Dear ${previousAssignee.full_name},</p>
@@ -245,8 +245,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (nextUser && nextUser.email) {
     setImmediate(() => {
       sendEmail({
-        // to: [nextUser.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        // to: [nextUser.email, "rehema.said3@ttcl.co.tz"],
+        to:`rehema.said3@ttcl.co.tz`,
         subject: `New Escalated Ticket Assigned: ${
           ticket.ticket_id || ticket.id
         }`,
@@ -581,10 +581,12 @@ const findSupervisorForSection = async (section) => {
       console.log(`  - ${user.full_name} (${user.role}) - unit_section: "${user.unit_section}"`);
     });
     
-    // First try to find head-of-unit for the specific section/unit
+    // First try to find head-of-unit or director for the specific section/unit
     let headOfUnit = await User.findOne({
       where: {
-        role: "head-of-unit",
+        role: {
+          [Op.in]: ["head-of-unit", "director"]
+        },
         unit_section: section,
       },
       attributes: ["id", "full_name", "email", "role", "unit_section"],
@@ -631,12 +633,12 @@ const findSupervisorForSection = async (section) => {
       console.log(`❌ No general supervisor found`);
     }
 
-    // If still no supervisors found, try to find any head-of-unit or manager (any section) as fallback
+    // If still no supervisors found, try to find any head-of-unit, director, or manager (any section) as fallback
     if (supervisors.length === 0) {
       let fallbackSupervisor = await User.findOne({
         where: {
           role: {
-            [Op.in]: ["head-of-unit", "manager"]
+            [Op.in]: ["head-of-unit", "director", "manager"]
           }
         },
         attributes: ["id", "full_name", "email", "role", "unit_section"],
@@ -1102,13 +1104,13 @@ const createTicket = async (req, res) => {
       try {
         await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
         await sendEmail({
-          to: "grace.tarimo@wcf.go.tz",
+          to: "rehema.said3@ttcl.co.tz",
           subject: emailSubject,
           htmlBody: emailHtmlBody,
         });
       } catch (emailError) {
         console.error("Error sending email:", emailError.message);
-        console.error("Error sending email:", 'grace.tarimo@wcf.go.tz');
+        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
         emailWarning += " (Warning: Failed to send email to assignee.)";
       }
     }
@@ -1148,7 +1150,7 @@ const createTicket = async (req, res) => {
         
         try {
           await sendEmail({
-            to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
             subject: supervisorEmailSubject,
             htmlBody: supervisorEmailHtmlBody,
           });
@@ -1162,10 +1164,12 @@ const createTicket = async (req, res) => {
     }
     // --- Email to Head of Unit if Closed on Creation (background) ---
     if (shouldClose) {
-      // Find head-of-unit for the ticket's section/unit
+      // Find head-of-unit or director for the ticket's section/unit
       let headOfUnit = await User.findOne({
         where: {
-          role: "head-of-unit",
+          role: {
+            [Op.in]: ["head-of-unit", "director"]
+          },
           unit_section: newTicket.section,
         },
         attributes: ["id", "full_name", "email"],
@@ -1199,8 +1203,8 @@ const createTicket = async (req, res) => {
           <p>Please review the resolution details above.</p>
         `;
         sendEmail({
-          // to: [headOfUnit.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          // to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
+          to:`rehema.said3@ttcl.co.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
         }).catch((emailError) => {
@@ -1233,7 +1237,7 @@ const createTicket = async (req, res) => {
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml2, detailsHtml2);
       sendEmail({
-        to: "grace.tarimo@wcf.go.tz",
+        to: "rehema.said3@ttcl.co.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
       }).catch((emailError) => {
@@ -1242,10 +1246,12 @@ const createTicket = async (req, res) => {
     }
     // --- Email to Supervisor if Closed on Creation (background) ---
     if (shouldClose) {
-      // Find head-of-unit for the ticket's section/unit
+      // Find head-of-unit or director for the ticket's section/unit
       let headOfUnit = await User.findOne({
         where: {
-          role: "head-of-unit",
+          role: {
+            [Op.in]: ["head-of-unit", "director"]
+          },
           unit_section: newTicket.section,
         },
         attributes: ["id", "full_name", "email"],
@@ -1274,8 +1280,8 @@ const createTicket = async (req, res) => {
           <p>Thank you for using the WCF Customer Care System.</p>
         `;
         sendEmail({
-          // to: [closingAgent.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          // to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
+          to:`rehema.said3@ttcl.co.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
         }).catch((emailError) => {
@@ -1557,7 +1563,8 @@ const getAssignedTickets = async (req, res) => {
       tickets = await Ticket.findAll({
         where: { 
           assigned_to_id: userId,
-          status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended","Reversed","Returned"] } 
+          status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended",
+            "Reversed","Returned", "Escalated"] } 
         },
         include: [
           {
@@ -2425,7 +2432,7 @@ const getAllTickets = async (req, res) => {
     let tickets;
 
     if (user.role === "super-admin" || user.role === "supervisor" 
-      || user.role === "head-of-unit" || user.role === "manager" 
+      || user.role === "head-of-unit" || user.role === "director" || user.role === "manager" 
       || user.role === "focal-person"
     ) {
       tickets = await Ticket.findAll({
@@ -2835,8 +2842,8 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          // to: [user.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          // to: [user.email, "rehema.said3@ttcl.co.tz"],
+          to:`rehema.said3@ttcl.co.tz`,
           subject,
           htmlBody,
         }).catch((e) =>
@@ -2965,7 +2972,7 @@ const closeTicket = async (req, res) => {
         
         try {
           await sendEmail({
-            to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
             subject: supervisorEmailSubject,
             htmlBody: supervisorEmailHtmlBody,
           });
@@ -3005,7 +3012,7 @@ const closeTicket = async (req, res) => {
       
       sendEmail({
         // to: ticket.creator.email,
-        to: "grace.tarimo@wcf.go.tz",
+        to: "rehema.said3@ttcl.co.tz",
         subject: emailSubject,
         htmlBody: htmlBody,
       }).catch((emailError) => {
@@ -3209,8 +3216,8 @@ const closeReviewerTicket = async (req, res) => {
       const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
       
       sendEmail({
-        // to: [ticket.creator.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        // to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
+        to:`rehema.said3@ttcl.co.tz`,
         subject: emailSubject,
         htmlBody: htmlBody,
       }).catch((emailError) => {
@@ -3385,7 +3392,7 @@ const assignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         try {
-          await sendEmail({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody });
+          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
         } catch (emailErr) {
           console.error("Failed to send assignment email:", emailErr.message);
           // Do not fail the assignment if email fails
@@ -3431,8 +3438,8 @@ const getAllAttendee = async (req, res) => {
     // Determine which role to show based on current user's role and unit section
     let targetRole = "attendee"; // Default role
     
-    // If current user is Head of Unit and their unit section contains "directorate", show managers
-    if (currentUser.role === "head-of-unit" && 
+    // If current user is Head of Unit or Director and their unit section contains "directorate", show managers
+    if ((currentUser.role === "head-of-unit" || currentUser.role === "director") && 
         currentUser.unit_section && 
         currentUser.unit_section.toLowerCase().includes("directorate")) {
       targetRole = "manager";
@@ -3679,6 +3686,9 @@ const getDashboardCounts = async (req, res) => {
           created_at: { [Op.lt]: tenDaysAgo },
         },
       });
+      
+      // Debug logging for overdue count
+      console.log("DEBUG - Overdue count:", overdueCount);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       // Tickets opened today by this agent (created by userId today)
@@ -3714,13 +3724,27 @@ const getDashboardCounts = async (req, res) => {
       });
       const pendingCount = counts.open + counts.inprogress;
       // Assigned tickets: all roles show only tickets assigned to them
-      let assignedCount = await Ticket.count({
+      let assignedCount;
+      if (user.role === "super-admin" || user.role === "supervisor") {
+        assignedCount = await Ticket.count({
         where: {
           assigned_to_id: userId,
-          status: { [Op.in]: ["Assigned", "Open", "Reversed", "Escalated"] },
+            status: { [Op.in]: ["Assigned", "Open", "Forwarded", "Attended and Recommended",
+              "Reversed", "Returned", "Escalated"] },
         },
       });
-      // Escalated tickets: all roles show only escalated tickets from them
+      } else {
+        assignedCount = await Ticket.count({
+          where: {
+            assigned_to_id: userId,
+            status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "Escalated", 
+              "Reversed", "In Progress", "Attended and Recommended"] },
+          },
+        });
+      }
+      
+      // Escalated tickets: use the same logic as getEscalatedTicketsForUser
+      // Count tickets that were escalated TO this user
       const escalatedAssignments = await TicketAssignment.findAll({
         where: {
           assigned_to_id: userId,
@@ -3739,10 +3763,13 @@ const getDashboardCounts = async (req, res) => {
         attributes: ["ticket_id"],
         group: ["ticket_id"],
       });
-      const escalatedTicketIds = escalatedAssignments.map((a) => a.ticket_id);
-      const escalatedCount = escalatedTicketIds.length;
-      // Use the higher count to ensure we don't miss any assigned tickets
-      assignedCount = Math.max(assignedCount, escalatedCount);
+      
+      const escalatedCount = escalatedAssignments.length;
+      
+      // Debug logging for escalated count
+      console.log("DEBUG - Escalated assignments found:", escalatedAssignments.length);
+      console.log("DEBUG - Escalated ticket IDs:", escalatedAssignments.map(a => a.ticket_id));
+      console.log("DEBUG - Final escalated count:", escalatedCount);
       // Wait Time metrics (copy from getTicketCounts)
       const tickets = await Ticket.findAll({ where: ticketWhere });
       let longestWait = "00:00";
@@ -3771,42 +3798,50 @@ const getDashboardCounts = async (req, res) => {
           slaBreaches = waitTimes.filter((t) => t > 1440).length; // > 24 hours
         }
       }
-      // In Progress: for super admin/supervisor show all in-progress tickets, for others show only their relevant tickets
-      let inProgressCount;
-      if (user.role === "super-admin" || user.role === "supervisor") {
-        // For super admin and supervisor, count all tickets that are not closed
-        inProgressCount = await Ticket.count({
-          where: {
-            status: { [Op.ne]: "Closed" },
-          },
+      // In Progress: use the same logic as the sidebar (getInProgressAssignments)
+      let inProgressCount = 0;
+      try {
+        // Use the same logic as getInProgressAssignments
+        let whereClause = {
+          action: { [Op.in]: ["Assigned", "Reassigned", "Open", "Forwarded", "In progress",
+            "Attended and Recommended"
+          ] }
+        };
+
+        // For super admin and supervisor, show all assignments
+        // For other roles, show only assignments made by this user
+        if (user.role !== "super-admin" && user.role !== "supervisor") {
+          whereClause.assigned_by_id = userId;
+        }
+
+        // Get only the most recent assignment per ticket_id
+        const assignments = await TicketAssignment.findAll({
+          where: whereClause,
+          order: [
+            ["ticket_id", "ASC"],
+            ["created_at", "DESC"],
+          ],
+          include: [
+            {
+              model: Ticket,
+              as: "ticket",
+              where: { status: { [Op.ne]: "Closed" } },
+            },
+          ],
         });
-      } else {
-        // For other roles, count tickets assigned to or created by this user and not closed
-        const assignedTicketAssignments = await TicketAssignment.findAll({
-          where: { assigned_to_id: userId },
-          attributes: ["ticket_id"],
-          group: ["ticket_id"],
-        });
-        const assignedTicketIds = assignedTicketAssignments.map(
-          (a) => a.ticket_id
-        );
-        // Find all ticket IDs created by this user
-        const createdTickets = await Ticket.findAll({
-          where: { userId },
-          attributes: ["id"],
-        });
-        const createdTicketIds = createdTickets.map((t) => t.id);
-        // Combine IDs (remove duplicates)
-        const allRelevantTicketIds = Array.from(
-          new Set([...assignedTicketIds, ...createdTicketIds])
-        );
-        // Count tickets where id in allRelevantTicketIds and status != 'Closed'
-        inProgressCount = await Ticket.count({
-          where: {
-            id: { [Op.in]: allRelevantTicketIds },
-            status: { [Op.ne]: "Closed" },
-          },
-        });
+        
+        // Reduce to only the latest assignment per ticket_id
+        const latestAssignmentsMap = new Map();
+        for (const assignment of assignments) {
+          if (!latestAssignmentsMap.has(assignment.ticket_id)) {
+            latestAssignmentsMap.set(assignment.ticket_id, assignment);
+          }
+        }
+        
+        inProgressCount = latestAssignmentsMap.size;
+      } catch (error) {
+        console.error("Error calculating in progress count:", error);
+        inProgressCount = 0;
       }
       // Add closedByAgent: tickets closed by this agent
       const closedByAgent = await Ticket.count({
@@ -3817,7 +3852,9 @@ const getDashboardCounts = async (req, res) => {
       });
       // Debug log
       console.log("inProgressCount (dashboard logic):", inProgressCount);
-      return res.status(200).json({
+      console.log("DEBUG - Final response escalated count:", escalatedCount);
+      
+      const response = {
         success: true,
         ticketStats: {
           total,
@@ -3842,7 +3879,10 @@ const getDashboardCounts = async (req, res) => {
           slaBreaches: slaBreaches || 0,
           closedByAgent, // <-- Added here
         },
-      });
+      };
+      
+      console.log("DEBUG - Full response ticketStats:", response.ticketStats);
+      return res.status(200).json(response);
     }
     // FOCAL PERSON/MANAGEMENT LOGIC
     if (
@@ -3851,7 +3891,8 @@ const getDashboardCounts = async (req, res) => {
         "claim-focal-person",
         "compliance-focal-person",
         "head-of-unit",
-        "manager",
+        "director",
+        // "manager",
         "supervisor",
         "director-general",
         "director",
@@ -4154,7 +4195,7 @@ const reassignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         try {
           // await sendEmail({ to: newAssignee.email, subject, htmlBody });
-          await sendEmail({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody });
+          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
         } catch (emailErr) {
           console.error("Failed to send reassignment email:", emailErr.message);
           // Do not fail the reassignment if email fails
@@ -4318,7 +4359,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
 
       await sendEmail({
-        to:`grace.tarimo@wcf.go.tz`,
+        to:`rehema.said3@ttcl.co.tz`,
         // to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody
@@ -4577,7 +4618,8 @@ const getAssignedTicketsCount = async (req, res) => {
     if (user.role === "super-admin" || user.role === "supervisor") {
       count = await Ticket.count({ 
         where: { 
-          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "Escalated", "In Progress", "Attended and Recommended"] } 
+          status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded",
+             "Escalated", "In Progress", "Attended and Recommended"] } 
         } 
       });
     } else {
@@ -4586,7 +4628,7 @@ const getAssignedTicketsCount = async (req, res) => {
         where: {
           assigned_to_id: userId,
           status: { [Op.in]: ["Assigned", "Open", "Returned", "Forwarded", "Reversed", "Escalated", 
-            "In Progress", "Attended and Recommended", "Escalated"] }
+            "In Progress", "Attended and Recommended"] }
         }
       });
     }
@@ -5141,7 +5183,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: ['rehema.said3@ttcl.co.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -5584,7 +5626,7 @@ const reverseComplaint = async (req, res) => {
       const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
       try {
         // await sendEmail({ to: targetUser.email, subject, htmlBody });
-        await sendEmail({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody });
+        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
       } catch (emailErr) {
         console.error("Failed to send reversal email:", emailErr.message);
         // Do not fail the reversal if email fails
@@ -5700,7 +5742,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: ['rehema.said3@ttcl.co.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -5824,7 +5866,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: ['rehema.said3@ttcl.co.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -6051,11 +6093,13 @@ const managerAttendMajor = async (req, res) => {
       return res.status(400).json({ message: "No target unit section found" });
     }
 
-    // Find Head of Unit in the target unit section
+    // Find Head of Unit or Director in the target unit section
     const headOfUnit = await User.findOne({
       where: {
         unit_section: targetUnitSection,
-        role: "head-of-unit"
+        role: {
+          [Op.in]: ["head-of-unit", "director"]
+        }
       }
     });
 
@@ -6077,9 +6121,9 @@ const managerAttendMajor = async (req, res) => {
       created_at: new Date()
     });
 
-    // Update ticket to assign to Head of Unit
+    // Update ticket to assign to Head of Unit or Director
     ticket.assigned_to_id = headOfUnit.id;
-    ticket.assigned_to_role = "head-of-unit";
+    ticket.assigned_to_role = headOfUnit.role;
     ticket.status = "Assigned";
     ticket.responsible_unit_name = targetUnitSection;
     await ticket.save();
@@ -6089,7 +6133,7 @@ const managerAttendMajor = async (req, res) => {
       ticket_id: ticketId,
       assigned_by_id: userId,
       assigned_to_id: headOfUnit.id,
-      assigned_to_role: "head-of-unit",
+      assigned_to_role: headOfUnit.role,
       action: "Assigned",
       reason: `Ticket attended by manager and assigned to Head of Unit of ${targetUnitSection}`,
       created_at: new Date()
@@ -6126,7 +6170,7 @@ const managerAttendMajor = async (req, res) => {
       
       sendEmail({
         // to: headOfUnit.email,
-        to: ['grace.tarimo@wcf.go.tz'],
+        to: ['rehema.said3@ttcl.co.tz'],
         subject: emailSubject,
         htmlBody: emailBody
       }).catch(emailError => {
