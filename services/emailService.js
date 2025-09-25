@@ -80,16 +80,41 @@ const sendEmail = async ({ to, subject, htmlBody }) => {
     html: htmlBody,
   };
 
-  try {
+  return new Promise((resolve, reject) => {
     // Use only the primary transporter (WCF settings)
     console.log('Attempting to send email using WCF transporter...');
-    const info = await emailTransporter.sendMail(mailOptions);
-    console.log('Email sent successfully with WCF transporter:', info.messageId);
-    return info;
-  } catch (primaryError) {
-    console.error('WCF transporter failed:', primaryError.message);
-    throw new Error(`Email sending failed with WCF transporter: ${primaryError.message}`);
-  }
+    
+    emailTransporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('WCF transporter failed:', error.message);
+        reject(new Error(`Email sending failed with WCF transporter: ${error.message}`));
+      } else {
+        console.log('Email sent successfully with WCF transporter:', info.messageId);
+        resolve(info);
+      }
+    });
+  });
+};
+
+// Non-blocking version of sendEmail for fire-and-forget emails
+const sendEmailNonBlocking = ({ to, subject, htmlBody }) => {
+  const mailOptions = {
+    from: 'WCF MAC <noreply.mac@wcf.go.tz>',
+    to,
+    subject,
+    html: htmlBody,
+  };
+
+  // Use only the primary transporter (WCF settings)
+  console.log('Attempting to send email using WCF transporter (non-blocking)...');
+  
+  emailTransporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      console.error('WCF transporter failed:', error.message);
+    } else {
+      console.log('Email sent successfully with WCF transporter:', info.messageId);
+    }
+  });
 };
 
 const sendForwardNotification = async (supervisorEmail, ticketId, unitName, justification) => {
@@ -243,7 +268,8 @@ const sendForwardNotification = async (supervisorEmail, ticketId, unitName, just
     </html>
   `;
 
-  return await sendEmail({ to: supervisorEmail, subject, htmlBody });
+  // Send email in background to avoid blocking
+  sendEmailNonBlocking({ to: supervisorEmail, subject, htmlBody });
 };
 
 const sendRatingNotification = async (userEmail, ticketId, rating, justification) => {
@@ -416,11 +442,13 @@ const sendRatingNotification = async (userEmail, ticketId, rating, justification
     </html>
   `;
 
-  return await sendEmail({ to: userEmail, subject, htmlBody });
+  // Send email in background to avoid blocking
+  sendEmailNonBlocking({ to: userEmail, subject, htmlBody });
 };
 
 module.exports = {
   sendEmail,
+  sendEmailNonBlocking,
   sendForwardNotification,
   sendRatingNotification,
   renderEmailCard

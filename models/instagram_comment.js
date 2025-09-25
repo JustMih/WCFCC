@@ -3,13 +3,13 @@ const sequelize = require('../config/mysql_connection');
 
 const InstagramComment = sequelize.define('InstagramComment', {
   id: {
-    type: DataTypes.STRING,
+    type: DataTypes.BIGINT,
     primaryKey: true,
   },
-  media_id: DataTypes.STRING,
-  parent_id: DataTypes.STRING,
+  media_id: DataTypes.BIGINT,
+  parent_id: DataTypes.BIGINT,
   text: DataTypes.TEXT,
-  from_id: DataTypes.STRING,
+  from_id: DataTypes.BIGINT,
   from_username: DataTypes.STRING,
   raw_payload: DataTypes.JSON,
   replied: {
@@ -33,10 +33,6 @@ const InstagramComment = sequelize.define('InstagramComment', {
     defaultValue: true,
   },
   read: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false,
-  },
-  replied: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
   },

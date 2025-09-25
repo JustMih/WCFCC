@@ -31,6 +31,7 @@ const { setupSocket } = require("./controllers/livestream/livestreamController")
 const routes = require("./routes");
 const recordingRoutes = require("./routes/recordingRoutes");
 const instagramWebhookRoutes = require("./routes/instagramWebhookRoutes");
+const instagramManagementRoutes = require("./routes/instagramManagementRoutes");
 // const monitorRoutes = require('./routes/monitorRoutes');
 const holidayRoutes = require('./routes/holidayRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
@@ -133,6 +134,7 @@ app.use("/api/reports", reportsRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use("/api/livestream", livestreamRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
+app.use("/api/instagram-management", instagramManagementRoutes);
 app.use("/api", require("./routes/dtmfRoutes"));
 
 /* ------------------------------ SOCKET.IO ------------------------------ */

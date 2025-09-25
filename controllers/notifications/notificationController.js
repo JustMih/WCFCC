@@ -2,7 +2,7 @@ const Notification = require("../../models/Notification");
 const User = require("../../models/User");
 const { Op } = require("sequelize");
 const Ticket = require("../../models/Ticket");
-const { sendEmail, renderEmailCard } = require("../../services/emailService");
+const { sendEmail, sendEmailNonBlocking, renderEmailCard } = require("../../services/emailService");
 const { Sequelize } = require("sequelize");
 
 // Create a notification
@@ -89,16 +89,13 @@ const createNotification = async (req, res) => {
         <p style="font-size: 0.95rem; color: #888; margin-top: 32px;">Please log in to the system for more details.</p>
       `;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
-      try {
-        // await sendEmail({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({
-          to: "rehema.said3@ttcl.co.tz",
-          subject: emailSubject,
-          htmlBody: emailHtmlBody,
-        });
-      } catch (emailError) {
-        console.error("Error sending notification email:", emailError.message);
-      }
+      // Send email in background to avoid blocking
+      // sendEmailNonBlocking({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+      sendEmailNonBlocking({
+        to: "rehema.said3@ttcl.co.tz",
+        subject: emailSubject,
+        htmlBody: emailHtmlBody,
+      });
     }
 
     return res.status(201).json({

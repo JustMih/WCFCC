@@ -10,7 +10,7 @@ const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
 const { Op } = require("sequelize");
 const { sendQuickSms } = require("../../services/smsService");
-const { sendEmail, renderEmailCard } = require("../../services/emailService");
+const { sendEmail, sendEmailNonBlocking, renderEmailCard } = require("../../services/emailService");
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
@@ -1101,18 +1101,13 @@ const createTicket = async (req, res) => {
           <li><strong>Channel:</strong> ${newTicket.channel}</li>
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
-      try {
-        await sendEmail({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-        await sendEmail({
-          to: "rehema.said3@ttcl.co.tz",
-          subject: emailSubject,
-          htmlBody: emailHtmlBody,
-        });
-      } catch (emailError) {
-        console.error("Error sending email:", emailError.message);
-        console.error("Error sending email:", 'rehema.said3@ttcl.co.tz');
-        emailWarning += " (Warning: Failed to send email to assignee.)";
-      }
+      // Send emails in background to avoid blocking the assignment
+      sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+      sendEmailNonBlocking({
+        to: "rehema.said3@ttcl.co.tz",
+        subject: emailSubject,
+        htmlBody: emailHtmlBody,
+      });
     }
     // --- Notification for Assignee ---
     await Notification.create({
@@ -1148,16 +1143,13 @@ const createTicket = async (req, res) => {
           </ul>`;
         const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
         
-        try {
-          await sendEmail({
-            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
-            subject: supervisorEmailSubject,
-            htmlBody: supervisorEmailHtmlBody,
-          });
-          console.log(`✅ Email sent to ${supervisor.role} ${supervisor.full_name} for ticket ${newTicket.ticket_id}`);
-        } catch (emailError) {
-          console.error(`Error sending email to ${supervisor.role} ${supervisor.full_name}:`, emailError.message);
-        }
+        // Send email in background to avoid blocking
+        sendEmailNonBlocking({
+          to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+          subject: supervisorEmailSubject,
+          htmlBody: supervisorEmailHtmlBody,
+        });
+        console.log(`✅ Email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${newTicket.ticket_id}`);
       }
     } else {
       console.log(`⚠️ No supervisors found for section: ${newTicket.section}`);
@@ -2970,16 +2962,13 @@ const closeTicket = async (req, res) => {
           </ul>`;
         const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
         
-        try {
-          await sendEmail({
-            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
-            subject: supervisorEmailSubject,
-            htmlBody: supervisorEmailHtmlBody,
-          });
-          console.log(`✅ Closure email sent to ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
-        } catch (emailError) {
-          console.error(`Error sending closure email to ${supervisor.role} ${supervisor.full_name}:`, emailError.message);
-        }
+        // Send email in background to avoid blocking
+        sendEmailNonBlocking({
+          to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+          subject: supervisorEmailSubject,
+          htmlBody: supervisorEmailHtmlBody,
+        });
+        console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
       }
     } else {
       console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
@@ -3391,12 +3380,8 @@ const assignTicket = async (req, res) => {
           <p>Please log into the system to review and take action.</p>
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
-        try {
-          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
-        } catch (emailErr) {
-          console.error("Failed to send assignment email:", emailErr.message);
-          // Do not fail the assignment if email fails
-        }
+        // Send email in background to avoid blocking assignment
+        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -4193,13 +4178,9 @@ const reassignTicket = async (req, res) => {
           <p>Please log into the system to review and take action.</p>
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
-        try {
-          // await sendEmail({ to: newAssignee.email, subject, htmlBody });
-          await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
-        } catch (emailErr) {
-          console.error("Failed to send reassignment email:", emailErr.message);
-          // Do not fail the reassignment if email fails
-        }
+        // Send email in background to avoid blocking reassignment
+        // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody });
+        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -4358,7 +4339,8 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
 
-      await sendEmail({
+      // Send email in background to avoid blocking
+      sendEmailNonBlocking({
         to:`rehema.said3@ttcl.co.tz`,
         // to: prevUser.email,
         subject: emailSubject,
@@ -5624,13 +5606,9 @@ const reverseComplaint = async (req, res) => {
         <p>Please log into the system to review and take action.</p>
       `;
       const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
-      try {
-        // await sendEmail({ to: targetUser.email, subject, htmlBody });
-        await sendEmail({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
-      } catch (emailErr) {
-        console.error("Failed to send reversal email:", emailErr.message);
-        // Do not fail the reversal if email fails
-      }
+      // Send email in background to avoid blocking
+      // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody });
+      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
     }
 
     res
