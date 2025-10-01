@@ -52,10 +52,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors({
   origin: [
     "http://localhost:3000", 
-    "http://192.168.21.70:3000",
+    "http://10.52.0.19:3000",
     "http://localhost:5070",
-    "http://192.168.21.70:5070",
-    "https://192.168.21.70",
+    "http://10.52.0.19:5070",
+    "https://10.52.0.19",
     "https://demoportal.wcf.go.tz",
     "https://portal.wcf.go.tz",
     "https://essp.wcf.go.tz",
@@ -142,10 +142,10 @@ const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:3000", 
-      "http://192.168.21.70:3000",
+      "http://10.52.0.19:3000",
       "http://localhost:5070",
-      "http://192.168.21.70:5070",
-      "https://192.168.21.70",
+      "http://10.52.0.19:5070",
+      "https://10.52.0.19",
       "https://demoportal.wcf.go.tz",
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
@@ -254,10 +254,10 @@ sequelize.sync({ force: false, alter: false }).then(() => {
       cors: {
         origin: [
           "http://localhost:3000", 
-          "http://192.168.21.70:3000",
+          "http://10.52.0.19:3000",
           "http://localhost:5070",
-          "http://192.168.21.70:5070",
-          "https://192.168.21.70",
+          "http://10.52.0.19:5070",
+          "https://10.52.0.19",
           "https://demoportal.wcf.go.tz",
           "https://portal.wcf.go.tz",
           "https://essp.wcf.go.tz",
