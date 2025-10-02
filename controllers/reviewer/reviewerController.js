@@ -7,7 +7,7 @@ const FunctionModel = require("../../models/Function");
 const Section = require("../../models/Section");
 const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
-const { sendEmail } = require("../../services/emailService");
+const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const Notification = require("../../models/Notification"); // Added Notification model
 
 // Helper to get requester display name
@@ -21,9 +21,9 @@ function getRequesterDisplayName(ticket) {
   return '-';
 }
 
-const getAllCoordinatorTickets = async (req, res) => {
+const getAllReviewerTickets = async (req, res) => {
   try {
-    // Get tickets assigned to the coordinator with status "Open" or "Assigned"
+    // Get tickets assigned to the reviewer with status "Open" or "Assigned"
     const allTickets = await Ticket.findAll({
       where: {
         assigned_to_id: req.user.userId,
@@ -39,28 +39,28 @@ const getAllCoordinatorTickets = async (req, res) => {
         {
           model: User,
           as: 'creator',
-          attributes: ['id', 'name', 'username', 'email']
+          attributes: ['id', 'full_name', 'username', 'email']
         },
         {
           model: User,
           as: 'ratedBy',
-          attributes: ['id', 'name', 'email']
+          attributes: ['id', 'full_name', 'email']
         }
       ]
     });
 
     if (!allTickets.length) {
       return res.status(404).json({
-        message: "No tickets assigned to coordinator found."
+        message: "No tickets assigned to reviewer found."
       });
     }
 
     res.status(200).json({
-      message: "All tickets assigned to Coordinator fetched successfully.",
+      message: "All tickets assigned to reviewer fetched successfully.",
       tickets: allTickets
     });
   } catch (error) {
-    console.error("Error fetching all Coordinator tickets:", error);
+    console.error("Error fetching all reviewer tickets:", error);
     res.status(500).json({
       message: "Server error",
       error: error.message
@@ -264,8 +264,8 @@ const convertOrForwardTicket = async (req, res) => {
             ticket.assigned_to_id = anyUnitUser.id;
             ticket.status = "Assigned";
           } else {
-            // Keep with coordinator as fallback
-            ticket.assigned_to_role = 'coordinator';
+            // Keep with reviewer as fallback
+            ticket.assigned_to_role = 'reviewer';
             ticket.assigned_to_id = userId;
             ticket.status = "Assigned";
           }
@@ -357,8 +357,8 @@ const convertOrForwardTicket = async (req, res) => {
         ticket.assigned_to_role = anyUnitUser.role;
         ticket.assigned_to_id = anyUnitUser.id; // Assign to any user in the unit
       } else {
-        // If no user found in the unit, keep with coordinator as fallback
-        ticket.assigned_to_role = 'coordinator';
+        // If no user found in the unit, keep with reviewer as fallback
+        ticket.assigned_to_role = 'reviewer';
         ticket.assigned_to_id = userId;
       }
 
@@ -371,16 +371,16 @@ const convertOrForwardTicket = async (req, res) => {
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
-        assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId), // Use coordinator ID as fallback
-        assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'coordinator'),
+        assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId), // Use reviewer ID as fallback
+        assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'reviewer'),
         action: "Forwarded",
-        reason: `Ticket forwarded to ${responsible_unit_name} by coordinator`,
+        reason: `Ticket forwarded to ${responsible_unit_name} by reviewer`,
         created_at: new Date()
       }, { transaction });
 
       // Create notification for the assigned user (head of unit or any unit user)
       const assignedUserId = unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId);
-      if (assignedUserId !== userId) { // Only create notification if assigned to someone other than coordinator
+      if (assignedUserId !== userId) { // Only create notification if assigned to someone other than reviewer
         await Notification.create({
           ticket_id: ticket.id,
           sender_id: userId,
@@ -401,10 +401,10 @@ const convertOrForwardTicket = async (req, res) => {
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
-        assigned_to_id: userId, // Coordinator rates the ticket
-        assigned_to_role: 'coordinator',
+        assigned_to_id: userId, // Reviewer rates the ticket
+        assigned_to_role: 'reviewer',
         action: "Rated",
-        reason: `Ticket rated as ${complaintType} by coordinator`,
+        reason: `Ticket rated as ${complaintType} by reviewer`,
         created_at: new Date()
       }, { transaction });
     }
@@ -416,7 +416,7 @@ const convertOrForwardTicket = async (req, res) => {
         assigned_to_id: ticket.assigned_to_id, // Use the actual assigned user ID
         assigned_to_role: ticket.assigned_to_role, // Use the actual assigned role
         action: "Converted",
-        reason: `Ticket converted to Inquiry by coordinator and assigned to ${ticket.assigned_to_role}`,
+        reason: `Ticket converted to Inquiry by reviewer and assigned to ${ticket.assigned_to_role}`,
         created_at: new Date()
       }, { transaction });
     }
@@ -456,7 +456,7 @@ const convertOrForwardTicket = async (req, res) => {
   }
 };
 
-const getCoordinatorDashboardCounts = async (req, res) => {
+const getReviewerDashboardCounts = async (req, res) => {
   try {
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
@@ -512,7 +512,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
     });
 
     console.log('New Tickets Count Query Result:', newTicketsCount);
-    console.log('Coordinator User ID:', req.user.userId);
+    console.log('Reviewer User ID:', req.user.userId);
 
     // Escalated Tickets: 
     const escalatedTicketsCount = await Ticket.count({
@@ -548,7 +548,7 @@ const getCoordinatorDashboardCounts = async (req, res) => {
       }
     });
 
-    // Ticket Status Breakdown - Filtered by coordinator and excluding forwarded tickets
+          // Ticket Status Breakdown - Filtered by reviewer and excluding forwarded tickets
     const closedCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
@@ -759,7 +759,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
 // const getTicketsByStatus = async (userId, status, isOverdue = false) => {
 //   const user = await User.findOne({
 //     where: { id: userId },
-//     attributes: ['id', 'name', 'role']
+//     attributes: ['id', 'full_name', 'role']
 //   });
 
 //   if (!user) {
@@ -789,7 +789,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
 //       {
 //         model: User,
 //         as: 'creator',
-//         attributes: ['id', 'name', 'phone']
+//         attributes: ['id', 'full_name', 'phone']
 //       }
 //     ],
 //     order: [['created_at', 'DESC']]
@@ -1097,7 +1097,7 @@ const getTicketsByStatus = async (req, res) => {
         {
           model: User,
           as: 'creator',
-          attributes: ['id', 'name', 'username', 'email']
+          attributes: ['id', 'full_name', 'username', 'email']
         }
       ],
       order: [["created_at", "DESC"]]
@@ -1115,7 +1115,7 @@ const rateAndRegisterComplaint = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { rating, registrationNotes } = req.body;
-    const coordinatorId = req.user.userId;
+    const reviewerId = req.user.userId;
 
     const ticket = await Ticket.findOne({
       where: {
@@ -1132,7 +1132,7 @@ const rateAndRegisterComplaint = async (req, res) => {
     await ticket.update({
       complaint_rating: rating,
       registration_notes: registrationNotes,
-      registered_by: coordinatorId,
+      registered_by: reviewerId,
       registration_date: new Date(),
       status: "Registered"
     });
@@ -1152,7 +1152,7 @@ const convertToInquiry = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { conversionReason } = req.body;
-    const coordinatorId = req.user.userId;
+    const reviewerId = req.user.userId;
 
     const ticket = await Ticket.findOne({
       where: {
@@ -1170,7 +1170,7 @@ const convertToInquiry = async (req, res) => {
       category: "Inquiry",
       converted_to: "Inquiry",
       conversion_reason: conversionReason,
-      converted_by: coordinatorId,
+      converted_by: reviewerId,
       conversion_date: new Date(),
       status: "Open"
     });
@@ -1190,7 +1190,7 @@ const channelComplaint = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { unitId, channelingNotes } = req.body;
-    const coordinatorId = req.user.userId;
+    const reviewerId = req.user.userId;
 
     const ticket = await Ticket.findOne({
       where: {
@@ -1222,7 +1222,7 @@ const channelComplaint = async (req, res) => {
       assigned_to: supervisor.id,
       channeled_to_unit: unitId,
       channeling_notes: channelingNotes,
-      channeled_by: coordinatorId,
+      channeled_by: reviewerId,
       channeling_date: new Date(),
       status: "Assigned"
     });
@@ -1237,12 +1237,12 @@ const channelComplaint = async (req, res) => {
   }
 };
 
-// Coordinator closes a ticket
-const closeCoordinatorTicket = async (req, res) => {
+// Reviewer closes a ticket
+const closeReviewerTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { resolution_details, resolution_type } = req.body;
-    const coordinatorId = req.user.userId;
+    const reviewerId = req.user.userId;
 
     const ticket = await Ticket.findOne({
       where: { id: ticketId }
@@ -1262,21 +1262,21 @@ const closeCoordinatorTicket = async (req, res) => {
     // Update ticket with resolution details and attachment path
     await ticket.update({
       status: 'Closed',
-      resolution_details: resolution_details || 'Ticket closed by coordinator',
+      resolution_details: resolution_details || 'Ticket closed by reviewer',
       resolution_type: resolution_type || 'Resolved',
       attachment_path: attachmentPath, // Save attachment path to ticket
       date_of_resolution: new Date(),
-      attended_by_id: coordinatorId
+      attended_by_id: reviewerId
     });
 
     // Record in Ticket_assignments with attachment path
     await TicketAssignment.create({
       ticket_id: ticket.id,
-      assigned_by_id: coordinatorId,
-      assigned_to_id: coordinatorId,
-      assigned_to_role: 'coordinator',
+      assigned_by_id: reviewerId,
+      assigned_to_id: reviewerId,
+      assigned_to_role: 'reviewer',
       action: 'Closed',
-      reason: resolution_details || 'Ticket closed by coordinator',
+      reason: resolution_details || 'Ticket closed by reviewer',
       attachment_path: attachmentPath, // Save attachment path to assignment record
       created_at: new Date()
     });
@@ -1285,21 +1285,24 @@ const closeCoordinatorTicket = async (req, res) => {
     const creator = await User.findOne({ where: { id: ticket.userId } });
     if (creator && creator.email) {
       const emailSubject = `Your Ticket Has Been Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
-      const emailBody = `
+      const bodyHtml = `
         <p>Dear ${creator.name || 'User'},</p>
-        <p>Your ticket has been closed by a coordinator. Here are the details:</p>
+        <p>Your ticket has been closed by a reviewer. Here are the details:</p>
+      `;
+      const detailsHtml = `
         <ul>
           <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
           <li><strong>Subject:</strong> ${ticket.subject}</li>
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Description:</strong> ${ticket.description}</li>
           <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-          <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by coordinator'}</li>
+          <li><strong>Resolution:</strong> ${resolution_details || 'Ticket closed by reviewer'}</li>
         </ul>
         <p>Thank you for using the WCF Customer Care System.</p>
       `;
+      const emailBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       sendEmail({
-        to:'rehema.said3@ttcl.co.tz',
+        to:'grace.tarimo@wcf.go.tz',
         subject: emailSubject,
         htmlBody: emailBody
       }).catch(emailError => {
@@ -1309,26 +1312,26 @@ const closeCoordinatorTicket = async (req, res) => {
 
     console.log("Closing ticket details with attachment:", attachmentPath);
     res.status(200).json({
-      message: "Ticket closed successfully by coordinator",
+      message: "Ticket closed successfully by reviewer",
       ticket: {
         ...ticket.toJSON(),
         attachment_path: attachmentPath
       }
     });
   } catch (error) {
-    console.error("Error closing ticket by coordinator:", error);
+    console.error("Error closing ticket by reviewer:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 module.exports = {
-  getAllCoordinatorTickets,
+  getAllReviewerTickets,
   rateAndRegisterComplaint,
   convertToInquiry,
   channelComplaint,
   rateTickets,
   convertOrForwardTicket,
-  getCoordinatorDashboardCounts,
+  getReviewerDashboardCounts,
   getTicketsByCategoryAndType,
   getOpenTickets,
   getAssignedTickets,
@@ -1337,5 +1340,5 @@ module.exports = {
   getClosedTickets,
   getOverdueTickets,
   getTicketsByStatus,
-  closeCoordinatorTicket
+  closeReviewerTicket
 };

@@ -32,7 +32,7 @@ const User = sequelize.define(
         "supervisor",
         "agent",
         "attendee",
-        "coordinator",
+        "reviewer",
         "focal-person",
         "claim-focal-person",
         "compliance-focal-person",
@@ -132,6 +132,11 @@ User.associate = (models) => {
     foreignKey: "userId",
     otherKey: "roleId",
     as: "roles",
+  });
+
+  User.hasMany(models.TicketUpdate, {
+    as: "ticketUpdates",
+    foreignKey: "user_id",
   });
 };
 

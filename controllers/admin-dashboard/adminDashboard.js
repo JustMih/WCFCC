@@ -50,7 +50,7 @@ const getAllAttendee = async (req, res) => {
 const getAllCoordinator = async (req, res) => {
   try {
     const coordinator = await User.findAll({
-      where: { role: "coordinator" },
+      where: { role: "reviewer" },
     });
     const coordinatorCount = coordinator.length;
     res.status(200).json({ coordinatorCount });
@@ -61,7 +61,11 @@ const getAllCoordinator = async (req, res) => {
 const getAllHeadOfUnit = async (req, res) => {
   try {
     const headOfUnit = await User.findAll({
-      where: { role: "head-of-unit" },
+      where: { 
+        role: {
+          [Op.in]: ["head-of-unit", "director"]
+        }
+      },
     });
     const headOfUnitCount = headOfUnit.length;
     res.status(200).json({ headOfUnitCount });

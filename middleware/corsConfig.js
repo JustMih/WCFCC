@@ -9,7 +9,14 @@ const externalCorsOptions = {
     // List of allowed origins
     const allowedOrigins = process.env.ALLOWED_ORIGINS ? 
       process.env.ALLOWED_ORIGINS.split(',') : 
-      ['http://localhost:5070', 'http://127.0.0.1:8005',];
+      ['http://localhost:3000', 'http://127.0.0.1:3000', 
+        'http://localhost:5070', 
+        'http://127.0.0.1:8005', 
+        'http://127.0.0.1:5070',
+        'http://localhost:8005',
+        'http://192.168.21.70:5070', 'https://demoportal.wcf.go.tz',
+        'https://portal.wcf.go.tz', 'https://essp.wcf.go.tz',
+      ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);

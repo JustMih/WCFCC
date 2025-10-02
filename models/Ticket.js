@@ -30,7 +30,14 @@ const Ticket = sequelize.define(
     assigned_to_id: DataTypes.UUID,
     attended_by_id: DataTypes.UUID,
     rated_by_id: DataTypes.UUID,
-    responsible_unit_id: DataTypes.UUID,
+    responsible_unit_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'FunctionData',
+        key: 'id',
+      },
+    },
     converted_by_id: DataTypes.UUID,
     forwarded_by_id: DataTypes.UUID,
     assigned_to: DataTypes.UUID,
@@ -90,7 +97,7 @@ const Ticket = sequelize.define(
     attachment_path: DataTypes.STRING,
     aging_days: { type: DataTypes.INTEGER, defaultValue: 0 },
     responsible_unit_name: DataTypes.STRING,
-    assigned_to_role: DataTypes.ENUM('Agent', 'Coordinator', 'Attendee', 'Head of Unit', 'Director', 'DG'),
+    assigned_to_role: DataTypes.ENUM('Agent', 'Reviewer', 'Attendee', 'Head of Unit', 'Director', 'DG'),
     evidence_url: DataTypes.STRING,
     review_notes: DataTypes.TEXT,
     approval_notes: DataTypes.TEXT,
@@ -179,6 +186,7 @@ Ticket.associate = (models) => {
 
   Ticket.hasMany(models.TicketAssignment, { foreignKey: 'ticket_id', as: 'assignments' });
   Ticket.hasMany(models.Notification, { foreignKey: 'ticket_id', as: 'notifications' });
+  Ticket.hasMany(models.TicketUpdate, { foreignKey: 'ticket_id', as: 'updates' });
   Ticket.hasOne(models.RequesterDetails, { foreignKey: 'ticketId', as: 'RequesterDetail' });
 };
 

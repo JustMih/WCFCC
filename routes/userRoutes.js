@@ -233,10 +233,10 @@ router.put(
   roleMiddleware(["admin", "super-admin"]),
   [
     body("email").optional().isEmail().withMessage("Invalid email address"),
-    body("name")
+    body("full_name")
       .optional()
       .isLength({ min: 3 })
-      .withMessage("Name must be at least 3 characters"),
+      .withMessage("Full name must be at least 3 characters"),
     body("password")
       .optional()
       .isLength({ min: 6 })

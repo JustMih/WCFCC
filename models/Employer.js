@@ -11,8 +11,8 @@ const Employer = sequelize.define(
     },
     registration_number: {
       type: DataTypes.STRING,
-      allowNull: false,
-      unique: true,
+      allowNull: true,
+      unique: false, // Remove unique constraint since it can be null
     },
     name: {
       type: DataTypes.STRING,

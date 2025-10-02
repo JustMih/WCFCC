@@ -2,10 +2,10 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const {
-    getAllCoordinatorTickets,
+    getAllReviewerTickets,
     rateTickets,
     convertOrForwardTicket,
-    getCoordinatorDashboardCounts,
+    getReviewerDashboardCounts,
     getOpenTickets,
     getAssignedTickets,
     getInprogressTickets,
@@ -16,8 +16,8 @@ const {
     rateAndRegisterComplaint,
     convertToInquiry,
     channelComplaint,
-    closeCoordinatorTicket,
-} = require("../controllers/coordinator/coordinatorController");
+    closeReviewerTicket,
+} = require("../controllers/reviewer/reviewerController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
 
@@ -35,66 +35,66 @@ if (!fs.existsSync(ticketAttachmentsDirectory)) {
 
 const router = express.Router();
 
-// Get coordinator dashboard counts
+// Get reviewer dashboard counts
 router.get('/dashboard-counts/:userId', 
     authMiddleware, 
-    roleMiddleware(['coordinator', 'super-admin']), 
-    getCoordinatorDashboardCounts
+    roleMiddleware(['reviewer', 'super-admin']), 
+    getReviewerDashboardCounts
 );
 
 // Get open tickets
 router.get('/open/:userId',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['reviewer', 'super-admin']),
     getOpenTickets
 );
 
 // Get assigned tickets
 router.get('/assigned/:userId',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['reviewer', 'super-admin']),
     getAssignedTickets
 );
 
 // Get in-progress tickets
 router.get('/in-progress/:userId',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['reviewer', 'super-admin']),
     getInprogressTickets
 );
 
 // Get carried forward tickets
 router.get('/carried-forward/:userId',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['reviewer', 'super-admin']),
     getCarriedForwardTickets
 );
 
 // Get closed tickets
 router.get('/closed/:userId',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['reviewer', 'super-admin']),
     getClosedTickets
 );
 
 // Get overdue tickets
 router.get('/overdue/:userId',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
+    roleMiddleware(['reviewer', 'super-admin']),
     getOverdueTickets
 );
 
 // Rate tickets
 router.post('/:id/rate',
     authMiddleware,
-    roleMiddleware(['coordinator']),
+    roleMiddleware(['reviewer']),
     rateTickets
 );
 
 // Convert or forward tickets
 router.put('/:id/convert-or-forward-ticket',
     authMiddleware,
-    roleMiddleware(['coordinator']),
+    roleMiddleware(['reviewer']),
     convertOrForwardTicket
 );
 
@@ -102,22 +102,22 @@ router.put('/:id/convert-or-forward-ticket',
 router.get(
     '/tickets',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin', 'focal-person']),
+    roleMiddleware(['reviewer', 'super-admin', 'focal-person']),
     getTicketsByStatus
   );
   
 // Get complaints tickets
 router.get('/all-tickets',
     authMiddleware,
-    roleMiddleware(['coordinator', 'super-admin']),
-    getAllCoordinatorTickets
+    roleMiddleware(['reviewer', 'super-admin']),
+    getAllReviewerTickets
 );
 
 // Rate and register complaint
 router.post(
   "/complaints/:ticketId/rate",
   authMiddleware,
-  roleMiddleware(['coordinator']),
+  roleMiddleware(['reviewer']),
   rateAndRegisterComplaint
 );
 
@@ -125,7 +125,7 @@ router.post(
 router.post(
   "/complaints/:ticketId/convert",
   authMiddleware,
-  roleMiddleware(['coordinator']),
+  roleMiddleware(['reviewer']),
   convertToInquiry
 );
 
@@ -133,18 +133,18 @@ router.post(
 router.post(
   "/complaints/:ticketId/channel",
   authMiddleware,
-  roleMiddleware(['coordinator']),
+  roleMiddleware(['reviewer']),
   channelComplaint
 );
 
-// Coordinator closes a ticket
+// Reviewer closes a ticket
 router.post(
   "/:ticketId/close",
   authMiddleware,
-  // roleMiddleware(['coordinator']),
+  // roleMiddleware(['reviewer']),
   uploadSingle,
   handleMulterError,
-  closeCoordinatorTicket
+  closeReviewerTicket
 );
 
 

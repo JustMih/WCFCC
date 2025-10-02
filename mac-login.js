@@ -25,8 +25,8 @@ const crypto = require('crypto');
 
   const payload = {
     username: 'mmsaki-admin',
-    notification_report_id: 17065,
-    employer_id: '',
+    notification_report_id:'',
+    employer_id: 13952,
   };
 
   const encryptedToken = encryptWithOpenSSL(payload);

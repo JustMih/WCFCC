@@ -1,5 +1,6 @@
 const { Ticket, User, TicketAssignment, Section } = require('../../models');
 const { Op } = require('sequelize');
+const { deactivateUserUpdates } = require('../ticket/ticketUpdateController');
 
 // Helper function for safe transaction rollback
 const safeRollback = async (transaction) => {
@@ -98,6 +99,10 @@ const attendTicket = async (req, res) => {
     }, { transaction });
 
     await ticket.save({ transaction });
+    
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+    
     await transaction.commit();
 
     return res.json({
@@ -181,6 +186,10 @@ const recommendTicket = async (req, res) => {
     }, { transaction });
 
     await ticket.save({ transaction });
+    
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+    
     await transaction.commit();
 
     return res.json({
@@ -318,6 +327,10 @@ const closeTicket = async (req, res) => {
     }, { transaction });
 
     await ticket.save({ transaction });
+    
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+    
     await transaction.commit();
 
     return res.json({
@@ -342,21 +355,25 @@ const canUserPerformAction = (ticket, user, action) => {
   const rolePermissions = {
     'attend': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'attendee': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
     },
     'recommend': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'attendee': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
     },
     'reverse': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
+      'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'director-general': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE']
     },
     'close': {
       'head-of-unit': ['MINOR_UNIT'],
+      'director': ['MINOR_UNIT'],
       'director-general': ['MINOR_UNIT', 'MINOR_DIRECTORATE', 'MAJOR_UNIT', 'MAJOR_DIRECTORATE']
     }
   };
@@ -365,7 +382,7 @@ const canUserPerformAction = (ticket, user, action) => {
   return allowedWorkflows.includes(workflowPath);
 };
 
-// Helper functions (same as in coordinatorController)
+    // Helper functions (same as in reviewerController)
 const getWorkflowTotalSteps = (workflowPath) => {
   const workflowSteps = {
     'MINOR_UNIT': 4,
@@ -378,10 +395,10 @@ const getWorkflowTotalSteps = (workflowPath) => {
 
 const getNextRoleInWorkflow = (workflowPath, currentStep) => {
   const workflowRoles = {
-    'MINOR_UNIT': ['coordinator', 'head-of-unit', 'attendee', 'head-of-unit'],
-    'MINOR_DIRECTORATE': ['coordinator', 'director-general', 'supervisor', 'attendee', 'supervisor'],
-    'MAJOR_UNIT': ['coordinator', 'head-of-unit', 'attendee', 'head-of-unit', 'director-general'],
-    'MAJOR_DIRECTORATE': ['coordinator', 'director-general', 'supervisor', 'attendee', 'supervisor', 'director-general', 'director-general']
+          'MINOR_UNIT': ['reviewer', 'head-of-unit', 'attendee', 'head-of-unit'],
+      'MINOR_DIRECTORATE': ['reviewer', 'director-general', 'supervisor', 'attendee', 'supervisor'],
+      'MAJOR_UNIT': ['reviewer', 'head-of-unit', 'attendee', 'head-of-unit', 'director-general'],
+      'MAJOR_DIRECTORATE': ['reviewer', 'director-general', 'supervisor', 'attendee', 'supervisor', 'director-general', 'director-general']
   };
   
   const roles = workflowRoles[workflowPath];

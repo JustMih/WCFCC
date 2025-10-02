@@ -2,6 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const InstagramComment = require("../../models/instagram_comment");
+const InstagramMessage = require("../../models/instagram_message");
 
 const VERIFY_TOKEN = "hBS9uiaIdMMmJmFw6N72FqOa2en9XGD2H";
 const ACCESS_TOKEN = 'EAAIIcLFpkvYBO5mbvYnw56QqWq3gBBW9zsmqvhRJVnGeJQLAygg6HAHxFmzo0BAxPMm2jBICN1VbG39eTK64xLY3IX40dZAWeXwXg6mkWxZApRQlT57ITDEmsyjm6xZBTx3Mt1CHZBYN0SHjiTNInZBzZCi355z39tnJvIbAuXnQyOhKgIsZAxY309HkN5RW064eTPO1qze4ENVZAyMQWyqnqtKmsQZDZD';
@@ -33,11 +34,11 @@ async function handleWebhook(req, res) {
         if (obj.field === "comments" && obj.value) {
           const value = obj.value;
           await InstagramComment.create({
-            id: value.id || `raw_${Date.now()}`,
-            media_id: value.media?.id || value.media_id || null,
-            parent_id: value.parent_id || null,
+            id: parseInt(value.id) || Date.now(),
+            media_id: parseInt(value.media?.id || value.media_id) || null,
+            parent_id: parseInt(value.parent_id) || null,
             text: value.text ? value.text : JSON.stringify(value),
-            from_id: value.from?.id || value.from_id || null,
+            from_id: parseInt(value.from?.id || value.from_id) || null,
             from_username: value.from?.username || value.from_username || null,
             raw_payload: value,
             unread: true,
@@ -46,13 +47,13 @@ async function handleWebhook(req, res) {
           saved = true;
         } else if (obj.field === "messages" && obj.value) {
           const value = obj.value;
-          await InstagramComment.create({
-            id: value.message?.mid || `raw_${Date.now()}`,
-            media_id: null,
-            parent_id: null,
-            text: value.message?.text || JSON.stringify(value),
-            from_id: value.sender?.id || null,
-            from_username: null,
+          await InstagramMessage.create({
+            id: parseInt(value.message?.mid) || Date.now(),
+            sender_id: parseInt(value.sender?.id) || null,
+            sender_username: value.sender?.username || null,
+            text: value.message?.text || null,
+            message_type: value.message?.type || 'text',
+            media_url: value.message?.attachments?.[0]?.url || null,
             raw_payload: value,
             unread: true,
             created_at: new Date()
@@ -70,11 +71,11 @@ async function handleWebhook(req, res) {
 
     if (!saved) {
       await InstagramComment.create({
-        id: `raw_${Date.now()}`,
-        media_id: payload.media_id || null,
-        parent_id: payload.parent_id || null,
+        id: Date.now(),
+        media_id: parseInt(payload.media_id) || null,
+        parent_id: parseInt(payload.parent_id) || null,
         text: JSON.stringify(payload),
-        from_id: payload.from_id || null,
+        from_id: parseInt(payload.from_id) || null,
         from_username: payload.from_username || null,
         raw_payload: payload,
         unread: true,

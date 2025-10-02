@@ -42,7 +42,7 @@ router.get(
 );
 
 router.get(
-  "/coordinator",
+  "/reviewer",
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   getAllCoordinator

@@ -5,12 +5,12 @@ const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
-  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeCoordinatorTicket, getClaimsWithValidNumbers,
+  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeReviewerTicket, getClaimsWithValidNumbers,
   assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers,
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToCoordinator, reverseAndAssignToCoordinator, managerAttendMajor
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, updateReversedTicketDetails
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -31,7 +31,7 @@ const {
 router.post(
   "/create-ticket",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   createTicket
 );
 
@@ -47,7 +47,7 @@ router.get(
 router.get(
   "/open/:userId",
   authMiddleware,
-  // roleMiddleware(["agent", "attendee","super-admin", "coordinator"]),
+  // roleMiddleware(["agent", "attendee","super-admin", "reviewer"]),
   getOpenTickets
 );
 
@@ -103,7 +103,7 @@ router.get(
 router.get(
   "/count/:userId",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketCounts
 );
 
@@ -125,7 +125,7 @@ router.get('/attachment/:filename', (req, res) => {
 router.get(
   "/all-customer-tickets",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   getAllCustomersTickets
 );
 
@@ -140,25 +140,25 @@ router.post(
 router.get(
   "/search-by-phone/:phoneNumber",
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   searchByPhoneNumber
 );
 
 // Get ticket by ID
 router.get('/:ticketId', 
   authMiddleware,
-  roleMiddleware(["agent", "attendee", "super-admin", "coordinator", "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  // roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketById
 );
 
-// Route for coordinator to close tickets
-router.post('/:ticketId/close-coordinator-ticket', closeCoordinatorTicket);
+// Route for reviewer to close tickets
+router.post('/:ticketId/close-reviewer-ticket', closeReviewerTicket);
 
 // Add after other ticket routes
 router.post(
   '/:ticketId/assign',
   authMiddleware,
-  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator']),
+  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'reviewer']),
   assignTicket
 );
 
@@ -166,7 +166,7 @@ router.post(
 router.post(
   '/:ticketId/reassign',
   authMiddleware,
-  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator']),
+  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'reviewer']),
   reassignTicket
 );
 
@@ -174,7 +174,7 @@ router.post(
 router.get(
   '/admin/attendee',
   authMiddleware,
-  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'coordinator', 'admin']),
+  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'reviewer', 'admin']),
   getAllAttendee
 );
 
@@ -183,7 +183,7 @@ router.get(
 router.post(
   '/:ticketId/close',
   authMiddleware,
-  roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person", "manager"]),
+  // roleMiddleware(['agent', 'head-of-unit','attendee', 'super-admin', 'reviewer', "focal-person", "claim-focal-person", "compliance-focal-person", "manager"]),
   uploadSingle,
   handleMulterError,
   closeTicket
@@ -202,21 +202,21 @@ router.get(
 router.get(
   "/dashboard-counts/:userId",
   authMiddleware,
-  // roleMiddleware(['agent', 'attendee', 'super-admin', 'coordinator', "focal-person", "claim-focal-person", "compliance-focal-person"]),
+  // roleMiddleware(['agent', 'attendee', 'super-admin', 'reviewer', "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getDashboardCounts
 );
 
 router.get(
   '/in-progress',
   authMiddleware,
-  roleMiddleware(['super-admin', 'coordinator', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
+  // roleMiddleware(['super-admin', 'reviewer', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
   getInProgressAssignments
 );
 
 router.get(
   '/assignments/in-progress',
   authMiddleware,
-  // roleMiddleware(['attendee','agent','super-admin', 'coordinator', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
+  // roleMiddleware(['attendee','agent','super-admin', 'reviewer', 'focal-person', 'claim-focal-person', 'compliance-focal-person']),
   getInProgressAssignments
 );
 
@@ -238,28 +238,28 @@ router.post(
   reverseComplaint
 );
 
-// Route for coordinator to forward major complaint to Director General
+// Route for reviewer to forward major complaint to Director General
 router.post(
   '/:ticketId/forward-to-dg',
   authMiddleware,
-  roleMiddleware(['coordinator']),
+  roleMiddleware(['reviewer']),
   forwardToDirectorGeneral
 );
 
-// Route for Director General to approve and forward to coordinator
+// Route for Director General to approve and forward to reviewer
 router.post(
   '/:ticketId/approve-and-forward',
   authMiddleware,
   roleMiddleware(['director-general']),
-  approveAndForwardToCoordinator
+  approveAndForwardToReviewer
 );
 
-// Route for Director General to reverse and assign to coordinator
+// Route for Director General to reverse and assign to reviewer
 router.post(
   '/:ticketId/reverse-and-assign',
   authMiddleware,
   roleMiddleware(['director-general']),
-  reverseAndAssignToCoordinator
+  reverseAndAssignToReviewer
 );
 
 
@@ -285,9 +285,25 @@ router.post(
   managerAttendMajor
 );
 
+// General close ticket route for all roles (except reviewers who have their own route)
+router.post(
+  '/:ticketId/close',
+  authMiddleware,
+  uploadSingle,
+  handleMulterError,
+  closeTicket
+);
+
 // router.get('/ticket/escalated/:userId', getEscalatedTicketsForUser);
 // router.get('/ticket/ever-assigned/:userId', getEverAssignedTickets);
 // router.get('/ticket/ever-assigned-count/:userId', getEverAssignedTicketsCount);
 router.get('/all-count/:userId', getAllTicketsCount);
+
+// Route for updating reversed ticket details (subject and section)
+router.post(
+  '/:ticketId/update-reversed-details',
+  authMiddleware,
+  updateReversedTicketDetails
+);
 
 module.exports = router;

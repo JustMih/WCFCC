@@ -37,7 +37,10 @@ const sendQuickSms = async ({ message, recipient }) => {
   };
 
   try {
-    const response = await axios.post(ENDPOINT, new URLSearchParams({ data: requestData, datetime }), { headers });
+    const response = await axios.post(ENDPOINT, new URLSearchParams({ data: requestData, datetime }), { 
+      headers,
+      timeout: 10000 // 10 second timeout
+    });
     console.log('SMS Response:', response.data);
     return response.data;
   } catch (error) {

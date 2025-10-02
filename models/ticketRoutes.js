@@ -13,7 +13,7 @@ const { Op } = require("sequelize");
 router.post(
   "/create-ticket",
   authMiddleware,
-  roleMiddleware(["agent", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "super-admin", "reviewer"]),
   createTicket
 );
 
@@ -93,7 +93,7 @@ router.get(
 router.get(
   "/all-customer-tickets",
   authMiddleware,
-  roleMiddleware(["agent", "super-admin", "coordinator"]),
+  roleMiddleware(["agent", "super-admin", "reviewer"]),
   getAllCustomersTickets
 );
 
