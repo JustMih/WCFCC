@@ -8,7 +8,7 @@ app.use(cors());
 
 // ✅ Connect to Asterisk AMI
 
-const ami = new AsteriskManager(5038, '192.168.21.70', 'admin', '@Ttcl123', true);
+const ami = new AsteriskManager(5038, '10.52.0.19', 'admin', '@Ttcl123', true);
 
 ami.keepConnected();
 
@@ -22,7 +22,7 @@ ami.on('error', (err) => {
 
 // ✅ Connect to MySQL (CEL + queue_log)
 const db = mysql.createPool({
-  host: '192.168.21.70',
+  host: '10.52.0.19',
   user: 'asterisk',
   password: 'Wcf@1234',
   database: 'asterisk'
