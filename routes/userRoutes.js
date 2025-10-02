@@ -60,25 +60,25 @@ router.get(
 // Get unread messages
 router.get(
   "/unread-messages/:userId",
-  // authMiddleware,
-  // roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
   unReadMessage
 );
 
 // Get unread messages count for sender and receiver
 router.get(
   "/unread-messages-count/:senderId/:receiverId",
-  // authMiddleware,
-  // roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
   getSenderReceiverUnreadCount
 );
 
 // update unread to read
 router.put(
   "/update-read-message/:senderId/:receiverId",
-  updateIsRead,
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent", "supervisor"])
+  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
+  updateIsRead
 );
 
 router.get(

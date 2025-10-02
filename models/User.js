@@ -62,19 +62,30 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: true,
     },
-    report_to: {
-      type: DataTypes.STRING(100),
+    report_to_id: {
+      type: DataTypes.INTEGER,
       allowNull: true,
+      references: {
+        model: "ReportTo",
+        key: "id",
+      },
     },
-    designation: {
-      type: DataTypes.STRING(100),
+    designation_id: {
+      type: DataTypes.INTEGER,
       allowNull: true,
+      references: {
+        model: "Designation",
+        key: "id",
+      },
     },
-    unit_section: {
-      type: DataTypes.STRING(100),
+    unit_section_id: {
+      type: DataTypes.INTEGER,
       allowNull: true,
-      comment: "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')"
-    }
+      references: {
+        model: "UnitSection",
+        key: "id",
+      },
+    },
   },
   {
     timestamps: true,
@@ -97,6 +108,30 @@ User.associate = (models) => {
   User.hasMany(models.Ticket, {
     as: "assignedTickets",
     foreignKey: "assigned_to_id",
+  });
+
+  // New associations for the lookup tables
+  User.belongsTo(models.ReportTo, {
+    foreignKey: "report_to_id",
+    as: "reportTo",
+  });
+
+  User.belongsTo(models.Designation, {
+    foreignKey: "designation_id",
+    as: "designation",
+  });
+
+  User.belongsTo(models.UnitSection, {
+    foreignKey: "unit_section_id",
+    as: "unitSection",
+  });
+
+  // Many-to-many relationship with roles
+  User.belongsToMany(models.NewRole, {
+    through: models.UserRole,
+    foreignKey: "userId",
+    otherKey: "roleId",
+    as: "roles",
   });
 };
 

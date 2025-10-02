@@ -1,30 +1,46 @@
-const { Model, DataTypes } = require('sequelize');
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/mysql_connection.js");
 
-module.exports = (sequelize) => {
-  class Role extends Model {}
-  Role.init({
+const Role = sequelize.define(
+  "Role",
+  {
     id: {
       type: DataTypes.INTEGER,
-      primaryKey: true,
+      allowNull: false,
       autoIncrement: true,
-      allowNull: false
+      primaryKey: true,
     },
     name: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true
+      unique: true,
     },
     description: {
-      type: DataTypes.STRING,
-      allowNull: true
-    }
-  }, {
-    sequelize,
-    modelName: 'Role',
-    tableName: 'Roles',
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    report_to: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    designation: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    unit_section: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: "The specific unit/directorate this role belongs to"
+    },
+    role: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+    },
+  },
+  {
     timestamps: true,
-    createdAt: 'created_at',
-    updatedAt: 'updated_at'
-  });
-  return Role;
-}; 
+    tableName: "Roles",
+  }
+);
+
+module.exports = Role; 
