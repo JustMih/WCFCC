@@ -80,6 +80,7 @@ const User = sequelize.define(
     timestamps: true,
     tableName: "Users", // Optional but helps if your table name is explicitly Users (plural)
   }
+  
 );
 
 // Associations
