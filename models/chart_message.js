@@ -32,6 +32,11 @@ const ChatMassage = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: false,
     },
+    isRead: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     sequelize,

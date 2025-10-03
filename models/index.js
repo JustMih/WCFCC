@@ -10,9 +10,10 @@ const basename = path.basename(__filename);
 const db = {};
 
 fs.readdirSync(__dirname)
-  .filter((file) => (
-    file.indexOf(".") !== 0 && file !== basename && file.slice(-3) === ".js"
-  ))
+  .filter(
+    (file) =>
+      file.indexOf(".") !== 0 && file !== basename && file.slice(-3) === ".js"
+  )
   .forEach((file) => {
     const model = require(path.join(__dirname, file));
     console.log("📦 Loaded model:", model.name); // Add this
@@ -26,25 +27,44 @@ Object.keys(db).forEach((modelName) => {
 });
 
 // Setup associations centrally
-const { IVRDTMFMapping, IVRVoice, IVRAction } = db;  // Ensure model names are singular and match exports
-const EmergencyNumber = require('./emergency_number')(sequelize, DataTypes);
+const { IVRDTMFMapping, IVRVoice, IVRAction } = db; // Ensure model names are singular and match exports
+const EmergencyNumber = require("./emergency_number")(sequelize, DataTypes);
 db.EmergencyNumber = EmergencyNumber;
 
 const Holiday = require("./holiday")(sequelize, Sequelize.DataTypes);
 db.holidays = Holiday; // lowercase 'holidays'
-const RecordedAudio = require("./recorded_audio.model.js")(sequelize, Sequelize.DataTypes);
+const RecordedAudio = require("./recorded_audio.model.js")(
+  sequelize,
+  Sequelize.DataTypes
+);
 db.RecordedAudio = RecordedAudio;
-const IVRDTMFLog = require('./IVRDTMFLog')(sequelize, DataTypes);
+const IVRDTMFLog = require("./IVRDTMFLog")(sequelize, DataTypes);
 
 db.IVRDTMFLog = IVRDTMFLog;
 
-console.log("Loaded models:", Object.keys(db));  // Debugging models
+// Import new lookup table models
+const ReportTo = require("./ReportTo");
+const Designation = require("./Designation");
+const UnitSection = require("./UnitSection");
+const NewRole = require("./NewRole");
+const UserRole = require("./UserRole");
 
-IVRDTMFMapping.belongsTo(IVRVoice, { foreignKey: 'ivr_voice_id', as: 'voice' });
-IVRDTMFMapping.belongsTo(IVRAction, { foreignKey: 'action_id', as: 'action' });
+db.ReportTo = ReportTo;
+db.Designation = Designation;
+db.UnitSection = UnitSection;
+db.NewRole = NewRole;
+db.UserRole = UserRole;
 
-IVRVoice.hasMany(IVRDTMFMapping, { foreignKey: 'ivr_voice_id', as: 'mappings' });
-IVRAction.hasMany(IVRDTMFMapping, { foreignKey: 'action_id', as: 'mappings' });
+console.log("Loaded models:", Object.keys(db)); // Debugging models
+
+IVRDTMFMapping.belongsTo(IVRVoice, { foreignKey: "ivr_voice_id", as: "voice" });
+IVRDTMFMapping.belongsTo(IVRAction, { foreignKey: "action_id", as: "action" });
+
+IVRVoice.hasMany(IVRDTMFMapping, {
+  foreignKey: "ivr_voice_id",
+  as: "mappings",
+});
+IVRAction.hasMany(IVRDTMFMapping, { foreignKey: "action_id", as: "mappings" });
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
