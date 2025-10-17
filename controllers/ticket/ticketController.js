@@ -3413,11 +3413,11 @@ const getAllAttendee = async (req, res) => {
       return res.status(404).json({ message: "Current user not found" });
     }
     
-    console.log(`DEBUG: Current user - Role: ${currentUser.role}, Unit: ${currentUser.unit_section}`);
+    console.log(`DEBUG: Current user - Role: ${currentUser.role}, Unit: ${currentUser.unit_section}, ID: ${currentUser.id}`);
     
     // Build the where clause to filter users
     let whereClause = { 
-      isActive: true // Only active users
+      // Removed isActive filter to return all users regardless of active status
     };
     
     // Determine which role to show based on current user's role and unit section
@@ -3431,31 +3431,109 @@ const getAllAttendee = async (req, res) => {
       console.log(`DEBUG: Head of Unit with directorate unit, showing managers instead of attendees`);
     }
     
+    // Special handling for focal persons - they should see attendees from their unit
+    if (currentUser.role === "focal-person") {
+      targetRole = "attendee";
+      console.log(`DEBUG: Focal person requesting attendees from their unit`);
+    }
+    
     whereClause.role = targetRole;
     
-    // If current user has a unit_section, filter users by the same unit
-    if (currentUser.unit_section) {
-      whereClause.unit_section = currentUser.unit_section;
-      console.log(`DEBUG: Filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
+    // Filter users based on current user's role and available data
+    if (currentUser.role === "focal-person") {
+      // For focal persons, filter by report_to field
+      if (currentUser.report_to && currentUser.report_to.trim() !== '') {
+        whereClause.report_to = currentUser.report_to;
+        console.log(`DEBUG: Filtering ${targetRole}s by report_to: ${currentUser.report_to}`);
+      } else {
+        console.log(`DEBUG: No report_to found for focal person, showing all ${targetRole}s`);
+        console.log(`DEBUG: Current user report_to value: "${currentUser.report_to}" (type: ${typeof currentUser.report_to})`);
+        console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have a report_to set!`);
+      }
+    } else if (currentUser.role === "head-of-unit") {
+      // For head-of-unit, filter by designation-based report_to mapping
+      const designationMapping = {
+        'HICT': 'Head of ICT Unit',
+        'HIAU': 'Head of Internal Audit Unit', 
+        'HASSRMU': 'Actuarial Services Statistics and Risk Management Unit',
+        'HHRMAU': 'Head of Human Resource Management and Administration',
+        'HLSU': 'Head of Legal Services Unit',
+        'HPMU': 'Head of Public Relation Unit'
+      };
+      
+      if (currentUser.designation && designationMapping[currentUser.designation]) {
+        const targetReportTo = designationMapping[currentUser.designation];
+        whereClause.report_to = targetReportTo;
+        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+      } else {
+        console.log(`DEBUG: No valid designation mapping found for head-of-unit, showing all ${targetRole}s`);
+        console.log(`DEBUG: Current user designation: "${currentUser.designation}"`);
+      }
+    } else if (currentUser.role === "manager") {
+      // For manager, filter by designation-based report_to mapping
+      const managerDesignationMapping = {
+        'WRAM': 'Work Place Risk Asessment Manager', // Note: matches database spelling
+        'CASM': 'Claim Assessment Manager',
+        'CADM': 'CLAIMS ADMINISTRATION MANAGER',
+        'CM': 'Compliance Manager',
+        'RMM': 'Records Management Manager',
+        'IM': 'Investment Manager',
+        'FM': 'Finance Manager',
+        'PRM': 'Planning and Research Manager'
+      };
+      
+      if (currentUser.designation && managerDesignationMapping[currentUser.designation]) {
+        const targetReportTo = managerDesignationMapping[currentUser.designation];
+        whereClause.report_to = targetReportTo;
+        console.log(`DEBUG: Manager with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+      } else {
+        console.log(`DEBUG: No valid designation mapping found for manager, showing all ${targetRole}s`);
+        console.log(`DEBUG: Current user designation: "${currentUser.designation}"`);
+      }
     } else {
-      console.log(`DEBUG: No unit_section found for current user, showing all ${targetRole}s`);
+      // For other roles, filter by unit_section
+      if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
+        whereClause.unit_section = currentUser.unit_section;
+        console.log(`DEBUG: Filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
+      } else {
+        console.log(`DEBUG: No unit_section found for current user, showing all ${targetRole}s`);
+        console.log(`DEBUG: Current user unit_section value: "${currentUser.unit_section}" (type: ${typeof currentUser.unit_section})`);
+      }
     }
     
     const users = await User.findAll({
       where: whereClause,
-      attributes: ['id', 'full_name', 'username', 'email', 'role', 'unit_section']
+      attributes: ['id', 'full_name', 'username', 'email', 'role', 'report_to', 'designation']
     });
     
     console.log(`DEBUG: Found ${users.length} ${targetRole}s matching criteria`);
-    console.log(`DEBUG: Users:`, users.map(u => ({ name: u.full_name, username: u.username, role: u.role, unit: u.unit_section })));
+    console.log(`DEBUG: Users:`, users.map(u => ({ name: u.full_name, username: u.username, role: u.role, report_to: u.report_to, designation: u.designation })));
+    
+    // Additional debugging: Show all attendees with their report_to values for comparison
+    if (users.length === 0) {
+      console.log(`DEBUG: No users found with current filter. Let's check what report_to values exist:`);
+      const allAttendees = await User.findAll({
+        where: { role: targetRole },
+        attributes: ['id', 'full_name', 'report_to', 'designation']
+      });
+      console.log(`DEBUG: All ${targetRole}s in database:`, allAttendees.map(u => ({ 
+        name: u.full_name, 
+        report_to: u.report_to, 
+        designation: u.designation 
+      })));
+    }
     
     res.status(200).json({ 
       attendees: users, // Keep the same response structure for compatibility
       currentUserUnit: currentUser.unit_section || 'No unit assigned',
+      currentUserReportTo: currentUser.report_to || 'No report_to assigned',
+      currentUserDesignation: currentUser.designation || 'No designation assigned',
       currentUserRole: currentUser.role,
       targetRole: targetRole, // Add this to show what role was actually fetched
       debug: {
         filteredByUnit: !!currentUser.unit_section,
+        filteredByReportTo: !!currentUser.report_to,
+        filteredByDesignation: !!currentUser.designation,
         userCount: users.length,
         isDirectorateUnit: currentUser.unit_section && currentUser.unit_section.toLowerCase().includes("directorate")
       }
