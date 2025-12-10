@@ -61,6 +61,7 @@ app.use(
       "http://127.0.0.1:5070",
       "http://192.168.1.170:5070",
       "http://192.168.21.70:5070",
+      "https://192.168.21.70",
       "https://10.52.0.19",
       "https://demoportal.wcf.go.tz",
       "https://portal.wcf.go.tz",
