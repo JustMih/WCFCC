@@ -1,5 +1,5 @@
 const { DataTypes } = require('sequelize');
-const sequelize = require('../config_wcf/mysql_connection.js');
+const sequelize = require('../config/mysql_connection.js');
 
 const Section = sequelize.define('Section', {
   id: { 

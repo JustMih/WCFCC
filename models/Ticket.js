@@ -1,5 +1,5 @@
 const { DataTypes } = require('sequelize');
-const sequelize = require('../config_wcf/mysql_connection');
+const sequelize = require('../config/mysql_connection');
 const Employer = require('./Employer'); // Import the Employer model
 
 const Ticket = sequelize.define(
