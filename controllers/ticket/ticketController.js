@@ -431,9 +431,34 @@ const getTicketCounts = async (req, res) => {
   }
 };
 
-const generateTicketId = () => {
-  const random = Math.floor(100000 + Math.random() * 900000);
-  return `WCF-CC-${random}`;
+const generateTicketId = async () => {
+  const date = new Date();
+  const dateStr = date.toISOString().split('T')[0].replace(/-/g, ''); // Format: YYYYMMDD
+  const prefix = `WCF-CC-${dateStr}-`;
+  
+  // Find the most recent ticket regardless of date to get the continuous counter
+  const lastTicket = await Ticket.findOne({
+    where: {
+      ticket_id: {
+        [Op.like]: 'WCF-CC-%'
+      }
+    },
+    attributes: ['ticket_id'],
+    order: [['ticket_id', 'DESC']]
+  });
+  
+  let counter = 1;
+  if (lastTicket && lastTicket.ticket_id) {
+    // Extract the counter from the last ticket ID
+    const lastCounter = parseInt(lastTicket.ticket_id.split('-').pop(), 10);
+    if (!isNaN(lastCounter)) {
+      counter = lastCounter + 1;
+    }
+  }
+  
+  // Format counter as 001, 002, etc.
+  const counterStr = counter.toString().padStart(3, '0');
+  return `${prefix}${counterStr}`;
 };
 
 // Function to map function_data IDs to function IDs
@@ -853,7 +878,7 @@ const createTicket = async (req, res) => {
     }
 
     // --- Ticket Data Preparation ---
-    const ticketId = generateTicketId();
+    const ticketId = await generateTicketId();
     const responsibleUnit = await Function.findOne({
       where: { id: mappedResponsibleUnitId },
       include: [{ model: Section, as: "section" }],
