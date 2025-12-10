@@ -436,28 +436,30 @@ const generateTicketId = async () => {
   const dateStr = date.toISOString().split('T')[0].replace(/-/g, ''); // Format: YYYYMMDD
   const prefix = `WCF-CC-${dateStr}-`;
   
-  // Find the most recent ticket regardless of date to get the continuous counter
+  // Find the most recent ticket for today's date to get the counter for today
+  const todayPrefix = `WCF-CC-${dateStr}-`;
   const lastTicket = await Ticket.findOne({
     where: {
       ticket_id: {
-        [Op.like]: 'WCF-CC-%'
+        [Op.like]: `${todayPrefix}%`
       }
     },
-    attributes: ['ticket_id'],
-    order: [['ticket_id', 'DESC']]
+    attributes: ['ticket_id', 'created_at'],
+    order: [['created_at', 'DESC']] // Order by creation date, not ticket_id string
   });
   
   let counter = 1;
   if (lastTicket && lastTicket.ticket_id) {
     // Extract the counter from the last ticket ID
-    const lastCounter = parseInt(lastTicket.ticket_id.split('-').pop(), 10);
+    const parts = lastTicket.ticket_id.split('-');
+    const lastCounter = parseInt(parts[parts.length - 1], 10);
     if (!isNaN(lastCounter)) {
       counter = lastCounter + 1;
     }
   }
   
-  // Format counter as 001, 002, etc.
-  const counterStr = counter.toString().padStart(3, '0');
+  // Format counter with leading zeros (e.g., 001, 002, ..., 999)
+  const counterStr = counter.toString().padStart(6, '0'); // Use 6 digits to allow more tickets per day
   return `${prefix}${counterStr}`;
 };
 
