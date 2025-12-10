@@ -2,8 +2,6 @@ const User = require("../../models/User");
 const AgentLoginLog = require("../../models/agent_activity_logs");
 const ChatMassage = require("../../models/chart_message");
 const Pjsip_Endpoints = require("../../models/pjsip_endpoints");
-const PjsipAors = require("../../models/pjsip_aors");
-const PjsipAuths = require("../../models/pjsip_auths");
 const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
@@ -17,15 +15,14 @@ const createUser = async (req, res) => {
     
     const {
       full_name,
-      report_to_id,
-      designation_id,
+      report_to,
+      designation,
       email,
       password,
       extension,
       role,
       isActive,
-      unit_section_id,
-      roleIds, // Array of role IDs for multiple roles
+      unit_section,
     } = req.body;
 
     console.log("🔍 Extracted data:");
@@ -47,7 +44,6 @@ const createUser = async (req, res) => {
     }
 
     if (
-      role &&
       ![
         "admin",
         "supervisor",
@@ -76,8 +72,8 @@ const createUser = async (req, res) => {
     console.log("💾 Creating user in database...");
     const userData = {
       full_name,
-      report_to_id,
-      designation_id,
+      report_to,
+      designation,
       email,
       password: hashedPassword,
       extension: extension ? parseInt(extension) : null, // Convert to integer
@@ -302,31 +298,7 @@ const createUser = async (req, res) => {
 
 const getAllUsers = async (req, res) => {
   try {
-    const users = await User.findAll({
-      include: [
-        {
-          model: require("../../models/ReportTo"),
-          as: "reportTo",
-          attributes: ["id", "name", "description"],
-        },
-        {
-          model: require("../../models/Designation"),
-          as: "designation",
-          attributes: ["id", "name", "description"],
-        },
-        {
-          model: require("../../models/UnitSection"),
-          as: "unitSection",
-          attributes: ["id", "name", "description"],
-        },
-        {
-          model: require("../../models/NewRole"),
-          as: "roles",
-          through: { attributes: [] },
-          attributes: ["id", "name", "description"],
-        },
-      ],
-    });
+    const users = await User.findAll();
     res.status(200).json(users);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -411,14 +383,7 @@ const getMessage = async (req, res) => {
         ],
       },
       order: [["createdAt", "ASC"]], // Sort messages by time
-      attributes: [
-        "id",
-        "senderId",
-        "receiverId",
-        "message",
-        "isRead",
-        "createdAt",
-      ], // Include isRead field
+      attributes: ["senderId", "receiverId", "message", "createdAt"], // Only select necessary fields
       include: [
         {
           model: User,
@@ -1096,72 +1061,40 @@ const updateUser = async (req, res) => {
     if (isActive) user.isActive = isActive;
     if (unit_section !== undefined) user.unit_section = unit_section;
 
-    // If role is 'agent' or 'supervisor', handle extension logic
-    if ((role === "agent" || role === "supervisor") && extension) {
-      console.log(
-        "Extension logic triggered for role:",
-        role,
-        "extension:",
-        extension
-      );
-      // Temporarily disabled extension creation to debug the dtls_verify error
-      /*
-      try {
-        // Check if extension exists in the pjsip_endpoints table
-        const existingEndpoint = await Pjsip_Endpoints.findByPk(extension);
-
-        if (!existingEndpoint) {
-          // Check if aors record exists
-          const existingAors = await PjsipAors.findByPk(extension);
-          if (!existingAors) {
-            // Create pjsip_aors record first
-            await PjsipAors.create({
-              id: extension,
-              max_contacts: 1,
-              qualify_frequency: 60,
-              contact: null,
-              userId: userId,
-            });
-          }
-
-          // Check if auth record exists
-          const existingAuth = await PjsipAuths.findByPk(extension);
-          if (!existingAuth) {
-            // Create pjsip_auths record
-            await PjsipAuths.create({
-              id: extension,
-              auth_type: "userpass",
-              username: `ext${extension}`,
-              password: `ext${extension}pass`,
-              userId: userId,
-            });
-          }
-
-          // Create pjsip_endpoints record
-          await Pjsip_Endpoints.create({
-            id: extension,
-            transport: "transport-wss",
-            aors: extension,
-            auth: extension,
-            context: "internal",
-            disallow: "all",
-            allow: "ulaw",
-            direct_media: "no",
-            from_domain: null,
-            qualify_frequency: 60,
-            media_address: "10.7.8.194",
-            dtmf_mode: "auto",
-            force_rport: "yes",
-            comedia: "yes",
-            rtp_symmetric: "yes",
-            userId: userId,
-          });
+    // If role is 'agent', handle extension logic
+    if (role === "agent" && extension) {
+      // Check if extension exists in the pjsip_endpoints table
+      const [existingEndpoint] = await sequelize.query(
+        `SELECT * FROM pjsip_endpoints WHERE id = :extension`,
+        {
+          replacements: { extension },
+          type: Sequelize.QueryTypes.SELECT,
         }
-      } catch (error) {
-        console.error("Error creating extension records:", error);
-        // Continue with user update even if extension creation fails
+      );
+
+      if (!existingEndpoint) {
+        // Insert new record in pjsip_endpoints if extension does not exist
+        await sequelize.query(
+          `INSERT INTO pjsip_endpoints (
+            id, transport, aors, auth, context, disallow, allow, direct_media, 
+            from_domain, qualify_frequency, media_address, dtmf_mode, force_rport, 
+            comedia, rtp_symmetric, createdAt, updatedAt, trust_id_inbound, 
+            ignore_183_without_sdp, inband_progress, early_media, rewrite_contact, 
+            insecure, \`match\`, trust_id_outbound, media_encryption, 
+            dtls_auto_generate_cert, webrtc, ice_support, force_avp, rtcp_mux, 
+            user_id, mailboxes
+          ) VALUES (
+            :extension, "transport-wss", :extension, :extension, "internal", "all", "ulaw", 
+            "no", NULL, 60, "10.7.8.194", "auto", "yes", "yes", "yes", NOW(), NOW(), 
+            NULL, NULL, NULL, NULL, "yes", Null, NULL, NULL, "yes", "dtls", "yes", "yes", "yes", "yes", 
+            :userId, NULL
+          )`,
+          {
+            replacements: { extension, userId },
+            type: Sequelize.QueryTypes.INSERT,
+          }
+        );
       }
-      */
     }
 
     // Save updated user to the database
