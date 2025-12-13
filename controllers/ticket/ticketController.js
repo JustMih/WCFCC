@@ -1863,6 +1863,8 @@ const getInprogressTickets = async (req, res) => {
               "Returned",
               "Forwarded",
               "In Progress",
+              "Attended and Recommended",
+              "Reversed",
             ],
           },
         },
@@ -1891,7 +1893,8 @@ const getInprogressTickets = async (req, res) => {
         order: [["created_at", "DESC"]],
       });
     } else {
-      // Agent: Fetch only OPEN tickets assigned to this agent
+      // Agent and other roles: Fetch OPEN tickets assigned to this user
+      // Include "Attended and Recommended" as these are in-progress tickets
       tickets = await Ticket.findAll({
         where: {
           assigned_to_id: userId,
@@ -1902,6 +1905,8 @@ const getInprogressTickets = async (req, res) => {
               "Returned",
               "Forwarded",
               "In Progress",
+              "Attended and Recommended",
+              "Reversed",
             ],
           },
         },
@@ -3452,7 +3457,7 @@ const getAllAttendee = async (req, res) => {
     
     // If current user is Head of Unit or Director and their unit section contains "directorate", show managers
     if ((currentUser.role === "head-of-unit" || currentUser.role === "director") && 
-        currentUser.unit_section && 
+        // currentUser.unit_section && 
         currentUser.unit_section.toLowerCase().includes("directorate")) {
       targetRole = "manager";
       console.log(`DEBUG: Head of Unit with directorate unit, showing managers instead of attendees`);
@@ -5171,7 +5176,13 @@ const forwardToDirectorGeneral = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    // Check if this is a major complaint assigned to reviewer OR a reversed ticket assigned to reviewer
+    // Get current user to check role
+    const currentUser = await User.findByPk(userId);
+    if (!currentUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if this is a major complaint assigned to reviewer/director OR a reversed/recommended ticket assigned to reviewer/director
     const isMajorComplaint = ticket.category === "Complaint" && 
                             ticket.complaint_type === "Major" && 
                             ticket.assigned_to_id === userId;
@@ -5179,9 +5190,17 @@ const forwardToDirectorGeneral = async (req, res) => {
     const isReversedTicket = ticket.status === "Reversed" && 
                             ticket.assigned_to_id === userId;
     
-    if (!isMajorComplaint && !isReversedTicket) {
+    // Check if Director is forwarding from Manager in Major Complaint Directorate
+    const isDirectorateWorkflow = ticket.category === "Complaint" && 
+                                  ticket.complaint_type === "Major" &&
+                                  ticket.responsible_unit_name?.toLowerCase().includes("directorate") &&
+                                  currentUser.role === "director" &&
+                                  ticket.assigned_to_id === userId &&
+                                  (ticket.status === "Attended and Recommended" || ticket.status === "Reversed");
+    
+    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow) {
       return res.status(400).json({ 
-        message: "This ticket is not a major complaint or reversed ticket assigned to you" 
+        message: "This ticket is not a major complaint or reversed/recommended ticket assigned to you" 
       });
     }
 
@@ -5589,16 +5608,102 @@ const reverseComplaint = async (req, res) => {
       order: [["created_at", "DESC"]]
     });
 
-    // If there are at least 2 assignments, use the second most recent
-    if (assignments.length >= 2) {
-      const prevAssignment = assignments[1];
-      targetUserId = prevAssignment.assigned_to_id;
-      targetUserRole = prevAssignment.assigned_to_role;
+    // Special handling for Manager receiving from Attendee in Major Complaint Directorate
+    // Manager should forward to the Director who originally assigned the ticket to the Manager
+    const isMajorComplaintDirectorate = ticket.category === "Complaint" && 
+                                        ticket.complaint_type === "Major" &&
+                                        ticket.responsible_unit_name && 
+                                        ticket.responsible_unit_name.toLowerCase().includes("directorate");
+    
+    if (isMajorComplaintDirectorate && currentUser.role === "manager" && assignments.length > 0) {
+      // Find the Director who assigned this ticket to the Manager
+      // Skip the most recent assignment (index 0) which is likely Attendee -> Manager
+      // Look for the original Director -> Manager assignment
+      console.log(`Manager forwarding: Looking for Director. Total assignments: ${assignments.length}`);
+      
+      // First, try to find Director from assignment history (skip most recent)
+      for (let i = 1; i < assignments.length; i++) {
+        const assignment = assignments[i];
+        if (assignment.assigned_to_role === "manager" && assignment.assigned_by_id) {
+          // Check if the person who assigned (assigned_by_id) is a director
+          const assigner = await User.findByPk(assignment.assigned_by_id);
+          if (assigner && assigner.role === "director") {
+            // Found the Director who assigned to Manager - use that Director
+            targetUserId = assigner.id;
+            targetUserRole = assigner.role;
+            console.log(`✓ Manager forwarding to Director who assigned: ${assigner.full_name} (ID: ${assigner.id})`);
+            break; // Found the director, exit loop
+          }
+        }
+      }
+      
+      // If still not found, check all assignments (including index 0) but skip "Reversed" actions
+      if (!targetUserId) {
+        console.log(`Director not found in later assignments. Checking all assignments...`);
+        for (const assignment of assignments) {
+          if (assignment.assigned_to_role === "manager" && 
+              assignment.assigned_by_id && 
+              assignment.action !== "Reversed") {
+            const assigner = await User.findByPk(assignment.assigned_by_id);
+            if (assigner && assigner.role === "director") {
+              targetUserId = assigner.id;
+              targetUserRole = assigner.role;
+              console.log(`✓ Found Director from all assignments: ${assigner.full_name} (ID: ${assigner.id})`);
+              break;
+            }
+          }
+        }
+      }
+      
+      // If still not found, try to find Director by unit_section
+      if (!targetUserId) {
+        console.log(`Director not found in assignments. Searching by unit_section: ${ticket.responsible_unit_name}`);
+        const director = await User.findOne({
+          where: {
+            role: "director",
+            unit_section: ticket.responsible_unit_name
+          }
+        });
+        
+        if (director) {
+          targetUserId = director.id;
+          targetUserRole = director.role;
+          console.log(`✓ Found Director by unit_section: ${director.full_name} (ID: ${director.id})`);
+        }
+      }
+      
+      // If still no director found, try to find any director (last resort)
+      if (!targetUserId) {
+        console.warn(`⚠ Director not found in assignments or unit. Searching for any director...`);
+        const anyDirector = await User.findOne({
+          where: {
+            role: "director"
+          }
+        });
+        
+        if (anyDirector) {
+          targetUserId = anyDirector.id;
+          targetUserRole = anyDirector.role;
+          console.log(`⚠ Using any available Director: ${anyDirector.full_name} (ID: ${anyDirector.id})`);
+        } else {
+          // If no director found at all, return error - DO NOT fall back to Attendee
+          return res.status(404).json({ 
+            message: "Cannot forward to Director: No Director found for this ticket. Please contact administrator." 
+          });
+        }
+      }
     } else {
-      // If no previous assignments, reverse to the ticket creator
-      console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
-      targetUserId = ticket.creator.id;
-      targetUserRole = ticket.creator.role;
+      // Standard logic: If there are at least 2 assignments, use the second most recent
+      if (assignments.length >= 2) {
+        const prevAssignment = assignments[1];
+        targetUserId = prevAssignment.assigned_to_id;
+        targetUserRole = prevAssignment.assigned_to_role;
+      } else {
+        // If no previous assignments, reverse to the ticket creator
+        console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
+        targetUserId = ticket.creator.id;
+        targetUserRole = ticket.creator.role;
+      }
     }
     
     // Fetch previous user details - try assignment first, then fall back to creator
@@ -5627,11 +5732,32 @@ const reverseComplaint = async (req, res) => {
     
     targetUserName = prevUser.full_name;
 
+    // For Major Complaint – Directorate, ensure ticket is never closed during workflow transitions
+    // When returning from Attendee to Manager or Manager to Director, keep ticket open
+    // Note: isMajorComplaintDirectorate is already declared above (line 5606)
+    
+    // Determine appropriate status based on workflow
+    let newStatus = "Reversed";
+    
+    // For Major Complaint Directorate workflow transitions, use appropriate status
+    if (isMajorComplaintDirectorate) {
+      // When Manager recommends to Director, use "Attended and Recommended"
+      if (currentUser.role === "manager" && targetUserRole === "director") {
+        newStatus = "Attended and Recommended";
+        console.log(`✓ Status set to "Attended and Recommended" for Manager -> Director`);
+      } else {
+        // For reverse actions or other cases, use "Reversed"
+        newStatus = "Reversed";
+        console.log(`Status set to "Reversed" for ${currentUser.role} -> ${targetUserRole}`);
+      }
+    }
+
     // Update the ticket to assign to the target user
+    // IMPORTANT: Never close Major Complaint Directorate tickets during workflow transitions
     await ticket.update({
       assigned_to_id: targetUserId,
       assigned_to_role: targetUserRole,
-      status: "Reversed",
+      status: newStatus,
       attachment_path: attachmentPath, // Save attachment path to ticket
       attended_by_id: userId
     });
@@ -5716,9 +5842,31 @@ const reverseComplaint = async (req, res) => {
       sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
     }
 
+    // Determine action message based on workflow
+    let actionMessage = "Complaint reversed with recommendation successfully.";
+    if (isMajorComplaintDirectorate && currentUser.role === "manager" && targetUserRole === "director") {
+      actionMessage = "Complaint recommended to Director successfully.";
+    } else if (isMajorComplaintDirectorate && currentUser.role === "attendee" && targetUserRole === "manager") {
+      actionMessage = "Complaint recommended to Manager successfully.";
+    }
+
     res
       .status(200)
-      .json({ message: "Complaint reversed with recommendation successfully." });
+      .json({ 
+        message: actionMessage,
+        data: {
+          ticket_id: ticket.ticket_id,
+          assigned_to: {
+            id: targetUserId,
+            name: targetUserName,
+            role: targetUserRole
+          },
+          status: newStatus,
+          action: isMajorComplaintDirectorate && (currentUser.role === "manager" || currentUser.role === "attendee") 
+            ? "recommended" 
+            : "reversed"
+        }
+      });
   } catch (error) {
     console.error("Error in reverseComplaint:", error);
     res.status(500).json({
@@ -6205,9 +6353,21 @@ const managerAttendMajor = async (req, res) => {
     });
 
     // Update ticket to assign to Head of Unit or Director
+    // For Major Complaint – Directorate, ensure ticket is never closed during workflow transitions
+    const isMajorComplaintDirectorate = ticket.complaint_type === "Major" &&
+                                        ticket.responsible_unit_name && 
+                                        ticket.responsible_unit_name.toLowerCase().includes("directorate");
+    
+    // Determine appropriate status - never close Major Complaint Directorate tickets here
+    let newStatus = "Assigned";
+    if (isMajorComplaintDirectorate && headOfUnit.role === "director") {
+      // When Manager recommends to Director in Major Complaint Directorate workflow
+      newStatus = "Attended and Recommended";
+    }
+    
     ticket.assigned_to_id = headOfUnit.id;
     ticket.assigned_to_role = headOfUnit.role;
-    ticket.status = "Assigned";
+    ticket.status = newStatus;
     ticket.responsible_unit_name = targetUnitSection;
     await ticket.save();
 
@@ -6452,7 +6612,205 @@ const updateReversedTicketDetails = async (req, res) => {
   }
 };
 
+// Manager send to Director when receiving from Attendee (Major Complaint Directorate)
+const managerSendToDirector = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { userId, recommendation } = req.body;
 
+    if (!ticketId || !userId || !recommendation) {
+      return res.status(400).json({ 
+        message: "Ticket ID, User ID, and recommendation are required" 
+      });
+    }
+
+    // Get the current user
+    const manager = await User.findByPk(userId);
+    if (!manager || manager.role !== "manager") {
+      return res.status(403).json({ message: "Only managers can perform this action" });
+    }
+
+    // Find the ticket
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "full_name", "email", "role"]
+        }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    // Verify ticket is assigned to this manager
+    if (ticket.assigned_to_id !== userId) {
+      return res.status(403).json({ message: "Ticket is not assigned to you" });
+    }
+
+    // Check if this is Major Complaint Directorate
+    const isMajorComplaintDirectorate = ticket.category === "Complaint" && 
+                                        ticket.complaint_type === "Major" &&
+                                        ticket.responsible_unit_name && 
+                                        ticket.responsible_unit_name.toLowerCase().includes("directorate");
+
+    if (!isMajorComplaintDirectorate) {
+      return res.status(400).json({ 
+        message: "This action is only for Major Complaint Directorate tickets" 
+      });
+    }
+
+    // Check if ticket came from Attendee (most recent assignment)
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [["created_at", "DESC"]],
+      limit: 1
+    });
+
+    let cameFromAttendee = false;
+    if (assignments.length > 0) {
+      const mostRecentAssignment = assignments[0];
+      if (mostRecentAssignment.assigned_to_role === "manager" && mostRecentAssignment.assigned_by_id) {
+        const previousUser = await User.findByPk(mostRecentAssignment.assigned_by_id);
+        if (previousUser && previousUser.role === "attendee") {
+          cameFromAttendee = true;
+        }
+      }
+    }
+
+    // Handle file upload if present
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`;
+      console.log("Attachment uploaded:", attachmentPath);
+    }
+
+    // Find Director - try multiple methods
+    let director = null;
+
+    // Method 1: Find Director by unit_section
+    if (ticket.responsible_unit_name) {
+      director = await User.findOne({
+        where: {
+          role: "director",
+          unit_section: ticket.responsible_unit_name
+        }
+      });
+    }
+
+    // Method 2: Find Director from assignment history (who assigned to Manager)
+    if (!director) {
+      const allAssignments = await TicketAssignment.findAll({
+        where: { ticket_id: ticketId },
+        order: [["created_at", "DESC"]]
+      });
+
+      for (const assignment of allAssignments) {
+        if (assignment.assigned_to_role === "manager" && assignment.assigned_by_id) {
+          const assigner = await User.findByPk(assignment.assigned_by_id);
+          if (assigner && assigner.role === "director") {
+            director = assigner;
+            break;
+          }
+        }
+      }
+    }
+
+    // Method 3: Find any Director (last resort)
+    if (!director) {
+      director = await User.findOne({
+        where: {
+          role: "director"
+        }
+      });
+    }
+
+    if (!director) {
+      return res.status(404).json({ 
+        message: "Cannot send to Director: No Director found for this ticket. Please contact administrator." 
+      });
+    }
+
+    // Update ticket to assign to Director
+    await ticket.update({
+      assigned_to_id: director.id,
+      assigned_to_role: director.role,
+      status: "Attended and Recommended",
+      attachment_path: attachmentPath,
+      attended_by_id: userId
+    });
+
+    // Create assignment record
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: director.id,
+      assigned_to_role: director.role,
+      action: "Forwarded",
+      reason: recommendation || "Manager recommended to Director",
+      attachment_path: attachmentPath,
+      created_at: new Date()
+    });
+
+    // Create notification for Director
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: director.id,
+      message: `Ticket recommended to you by Manager: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+      channel: "In-System",
+      status: "unread",
+      category: ticket.category,
+    });
+
+    // Send email to Director
+    if (director.email) {
+      const subject = `Ticket Recommended: ${ticket.ticket_id || ticketId}`;
+      const bodyHtml = `
+        <p>Hello ${director.full_name || ""},</p>
+        <p>A ticket has been recommended to you by a Manager. Details:</p>
+      `;
+      const detailsHtml = `
+        <ul>
+          <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
+          <li><b>Subject:</b> ${ticket.subject}</li>
+          <li><b>Category:</b> ${ticket.category}</li>
+          <li><b>Requester:</b> ${getRequesterDisplayName(ticket)}</li>
+          <li><b>Status:</b> Attended and Recommended</li>
+          <li><b>Manager's Recommendation:</b> ${recommendation}</li>
+          ${attachmentPath ? `<li><b>Attachment:</b> Included</li>` : ''}
+        </ul>
+        <p>Please log into the system to review and take action.</p>
+      `;
+      const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
+      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+    }
+
+    res.status(200).json({
+      message: "Ticket recommended to Director successfully.",
+      data: {
+        ticket_id: ticket.ticket_id,
+        assigned_to: {
+          id: director.id,
+          name: director.full_name,
+          role: director.role
+        },
+        status: "Attended and Recommended",
+        action: "recommended"
+      }
+    });
+  } catch (error) {
+    console.error("Error in managerSendToDirector:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to send ticket to Director",
+      error: error.message
+    });
+  }
+};
 
 module.exports = {
   getTicketCounts,
@@ -6505,6 +6863,7 @@ module.exports = {
   getTicketWorkflowInfo,
   getTicketWorkflowAuditTrail,
   managerAttendMajor,
+  managerSendToDirector,
   escalateAndUpdateTicketOnSlaBreach,
   updateReversedTicketDetails,
   findSupervisorForSection
