@@ -72,19 +72,46 @@ module.exports = {
       }
     });
 
-    // Add indexes
-    await queryInterface.addIndex('TicketUpdates', ['ticket_id'], {
-      name: 'idx_ticket_update_ticket_id'
-    });
-    await queryInterface.addIndex('TicketUpdates', ['user_id'], {
-      name: 'idx_ticket_update_user_id'
-    });
-    await queryInterface.addIndex('TicketUpdates', ['update_date'], {
-      name: 'idx_ticket_update_date'
-    });
-    await queryInterface.addIndex('TicketUpdates', ['is_active'], {
-      name: 'idx_ticket_update_active'
-    });
+    // Add indexes (check if they exist first)
+    try {
+      await queryInterface.addIndex('TicketUpdates', ['ticket_id'], {
+        name: 'idx_ticket_update_ticket_id'
+      });
+    } catch (error) {
+      if (!error.message.includes('Duplicate key name')) {
+        throw error;
+      }
+    }
+    
+    try {
+      await queryInterface.addIndex('TicketUpdates', ['user_id'], {
+        name: 'idx_ticket_update_user_id'
+      });
+    } catch (error) {
+      if (!error.message.includes('Duplicate key name')) {
+        throw error;
+      }
+    }
+    
+    try {
+      await queryInterface.addIndex('TicketUpdates', ['update_date'], {
+        name: 'idx_ticket_update_date'
+      });
+    } catch (error) {
+      if (!error.message.includes('Duplicate key name')) {
+        throw error;
+      }
+    }
+    
+    try {
+      await queryInterface.addIndex('TicketUpdates', ['is_active'], {
+        name: 'idx_ticket_update_active'
+      });
+    } catch (error) {
+      if (!error.message.includes('Duplicate key name')) {
+        throw error;
+      }
+    }
   },
 
   down: async (queryInterface, Sequelize) => {

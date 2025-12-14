@@ -48,6 +48,7 @@ const User = sequelize.define(
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
+      field: "isActive", // Explicitly map to camelCase column name in database
     },
     status: {
       type: DataTypes.STRING,
@@ -90,6 +91,8 @@ const User = sequelize.define(
   {
     timestamps: true,
     tableName: "Users", // Optional but helps if your table name is explicitly Users (plural)
+    underscored: false, // Disable underscored for User model (has mixed naming: camelCase and snake_case)
+    // createdAt and updatedAt will use camelCase (createdAt, updatedAt) instead of snake_case
   }
 );
 
@@ -110,34 +113,32 @@ User.associate = (models) => {
     foreignKey: "assigned_to_id",
   });
 
-  // New associations for the lookup tables
-  User.belongsTo(models.ReportTo, {
-    foreignKey: "report_to_id",
-    as: "reportTo",
-  });
-
-  User.belongsTo(models.Designation, {
-    foreignKey: "designation_id",
-    as: "designation",
-  });
-
-  User.belongsTo(models.UnitSection, {
-    foreignKey: "unit_section_id",
-    as: "unitSection",
-  });
-
-  // Many-to-many relationship with roles
-  User.belongsToMany(models.NewRole, {
-    through: models.UserRole,
-    foreignKey: "userId",
-    otherKey: "roleId",
-    as: "roles",
-  });
-
   User.hasMany(models.TicketUpdate, {
     as: "ticketUpdates",
     foreignKey: "user_id",
   });
+
+  // Foreign key associations
+  if (models.ReportTo) {
+    User.belongsTo(models.ReportTo, {
+      foreignKey: "report_to_id",
+      as: "reportTo",
+    });
+  }
+
+  if (models.Designation) {
+    User.belongsTo(models.Designation, {
+      foreignKey: "designation_id",
+      as: "designation",
+    });
+  }
+
+  if (models.UnitSection) {
+    User.belongsTo(models.UnitSection, {
+      foreignKey: "unit_section_id",
+      as: "unitSection",
+    });
+  }
 };
 
 module.exports = User;

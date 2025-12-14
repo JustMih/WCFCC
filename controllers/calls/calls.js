@@ -1,6 +1,6 @@
-const sequelize = require('../../config/database');
-const { Op } = require('sequelize');
-const CDR = require('../../models/CDR');
+const sequelize = require("../../config/database");
+const { Op } = require("sequelize");
+const CDR = require("../../models/CDR");
 
 // Controller to get data for different time frames (Total, Monthly, Weekly, Daily)
 const getCdrCounts = async (req, res) => {
@@ -46,7 +46,8 @@ const getAgentCdrStats = async (req, res) => {
 
   try {
     // Inbound: agent was destination, only today's calls
-    const inboundCalls = await sequelize.query(`
+    const inboundCalls = await sequelize.query(
+      `
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
@@ -55,13 +56,16 @@ const getAgentCdrStats = async (req, res) => {
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
-    `, {
-      replacements: { dstPattern },
-      type: sequelize.QueryTypes.SELECT,
-    });
+    `,
+      {
+        replacements: { dstPattern },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
 
     // Outbound: agent was source, only today's calls
-    const outboundCalls = await sequelize.query(`
+    const outboundCalls = await sequelize.query(
+      `
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
@@ -70,10 +74,12 @@ const getAgentCdrStats = async (req, res) => {
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
-    `, {
-      replacements: { dstPattern },
-      type: sequelize.QueryTypes.SELECT,
-    });
+    `,
+      {
+        replacements: { dstPattern },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
 
     res.json({
       inbound: inboundCalls[0],
@@ -92,7 +98,8 @@ const getAgentCdrStatsToday = async (req, res) => {
 
   try {
     // Inbound: agent was destination, only today's calls
-    const inboundCalls = await sequelize.query(`
+    const inboundCalls = await sequelize.query(
+      `
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
@@ -101,13 +108,16 @@ const getAgentCdrStatsToday = async (req, res) => {
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
-    `, {
-      replacements: { dstPattern },
-      type: sequelize.QueryTypes.SELECT,
-    });
+    `,
+      {
+        replacements: { dstPattern },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
 
     // Outbound: agent was source, only today's calls
-    const outboundCalls = await sequelize.query(`
+    const outboundCalls = await sequelize.query(
+      `
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
@@ -116,10 +126,12 @@ const getAgentCdrStatsToday = async (req, res) => {
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
-    `, {
-      replacements: { dstPattern },
-      type: sequelize.QueryTypes.SELECT,
-    });
+    `,
+      {
+        replacements: { dstPattern },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
 
     res.json({
       inbound: inboundCalls[0],
@@ -131,9 +143,39 @@ const getAgentCdrStatsToday = async (req, res) => {
   }
 };
 
+// Get lost calls for today with phone numbers
+const getLostCallsToday = async (req, res) => {
+  try {
+    const lostCalls = await sequelize.query(
+      `SELECT 
+        clid AS caller,
+        cdrstarttime AS call_time,
+        disposition,
+        duration,
+        src AS agent_extension
+      FROM cdr 
+      WHERE DATE(cdrstarttime) = CURDATE() 
+        AND (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
+        AND clid IS NOT NULL
+        AND clid != ''
+      ORDER BY cdrstarttime DESC
+      LIMIT 500`,
+      {
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    res.json(lostCalls);
+  } catch (err) {
+    console.error("Error retrieving lost calls:", err.message);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
 // ✅ Correct combined export
 module.exports = {
   getCdrCounts,
   getAgentCdrStats,
   dailyAgentCallStatus: getAgentCdrStatsToday,
+  getLostCallsToday,
 };
