@@ -48,12 +48,23 @@ const Designation = require("./Designation");
 const UnitSection = require("./UnitSection");
 const NewRole = require("./NewRole");
 const UserRole = require("./UserRole");
+const Relation = require("./Relation");
+const Directorate = require("./Directorate");
+const Unit = require("./Unit");
+const Subject = require("./Subject");
 
 db.ReportTo = ReportTo;
 db.Designation = Designation;
 db.UnitSection = UnitSection;
 db.NewRole = NewRole;
 db.UserRole = UserRole;
+db.Relation = Relation;
+db.Directorate = Directorate;
+db.Unit = Unit;
+db.Subject = Subject;
+
+// Note: Associations for Unit, Subject, and Directorate are defined in their respective model files
+// via the associate() function, which is automatically called above (lines 23-27)
 
 console.log("Loaded models:", Object.keys(db)); // Debugging models
 

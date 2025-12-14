@@ -99,11 +99,15 @@ const login = async (req, res) => {
       });
 
       if (!user) {
-        return res.status(400).json({ message: "Authentication failed. User not found." });
+        return res
+          .status(400)
+          .json({ message: "Authentication failed. User not found." });
       }
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
-        return res.status(400).json({ message: "Authentication failed. Invalid password." });
+        return res
+          .status(400)
+          .json({ message: "Authentication failed. Invalid password." });
       }
       if (user.isActive === false) {
         return res.status(400).json({
@@ -148,6 +152,17 @@ const login = async (req, res) => {
     user.status = "online";
     await user.save();
 
+    // Update or create AgentStatus entry for agents
+    if (user.role === "agent") {
+      await AgentStatus.upsert({
+        userId: user.id,
+        status: "online",
+        loginTime: new Date(),
+        logoutTime: null,
+        totalOnlineTime: 0,
+      });
+    }
+
     // Step 5: Generate JWT token
     const token = jwt.sign(
       { userId: user.id, role: user.role },
@@ -156,20 +171,20 @@ const login = async (req, res) => {
     );
 
     // Log agent login in AgentLoginLog
-    if (user.role === "agent") {
-      await AgentLoginLog.create({
-        userId: user.id,
-        role: "agent",
-        loginTime: new Date(),
-        logoutTime: null, // Will be updated on logout
-        totalOnlineTime: 0, // Will be calculated later
-      });
-      console.log(`Agent ${user.full_name} logged in.`);
-    }
+    // if (user.role === "agent") {
+    //   await AgentLoginLog.create({
+    //     userId: user.id,
+    //     role: "agent",
+    //     loginTime: new Date(),
+    //     logoutTime: null, // Will be updated on logout
+    //     totalOnlineTime: 0, // Will be calculated later
+    //   });
+    //   console.log(`Agent ${user.full_name} logged in.`);
+    // }
 
     // Get effective roles based on user's base role and unit section
     // const effectiveRoles = getEffectiveRoles(user.role, user.unit_section);
-    
+
     res.json({
       message: "Login successful",
       token,
@@ -179,17 +194,17 @@ const login = async (req, res) => {
         role: user.role, // Base role
         // effectiveRoles: effectiveRoles, // All effective roles including mapped ones
         id: user.id,
-        report_to: user.report_to,
-        designation: user.designation,
+        report_to_id: user.report_to_id,
+        designation_id: user.designation_id,
         extension: user.extension,
-        unit_section: user.unit_section,
+        unit_section_id: user.unit_section_id,
       },
       credentials: {
         username: username,
-        password: password
-      }
+        password: password,
+      },
     });
-    
+
     // Debug log to verify credentials are being sent
     console.log("Login response includes credentials for user:", username);
   } catch (error) {
@@ -210,6 +225,19 @@ const logout = async (req, res) => {
   // Update user status to "offline"
   user.status = "offline";
   await user.save();
+
+  // Update AgentStatus for agents
+  if (user.role === "agent") {
+    await AgentStatus.update(
+      {
+        status: "offline",
+        logoutTime: new Date(),
+      },
+      {
+        where: { userId: user.id, status: "online" },
+      }
+    );
+  }
 
   // Find the latest login entry where logoutTime is NULL
   // if (user.role === "agent") {
@@ -305,14 +333,20 @@ const getAgentOnlineTime = async (req, res) => {
 
 const getTotalAgentStatus = async (req, res) => {
   try {
-    // Count agents with status "online"
-    const onlineCount = await AgentStatus.count({
-      where: { status: "online" },
+    // Count agents with status "online" from User table (where role is "agent")
+    const onlineCount = await User.count({
+      where: {
+        status: "online",
+        role: "agent",
+      },
     });
 
-    // Count agents with status "offline"
-    const offlineCount = await AgentStatus.count({
-      where: { status: "offline" },
+    // Count agents with status "offline" or null from User table (where role is "agent")
+    const offlineCount = await User.count({
+      where: {
+        role: "agent",
+        [Op.or]: [{ status: "offline" }, { status: null }],
+      },
     });
 
     res.status(200).json({
@@ -323,8 +357,6 @@ const getTotalAgentStatus = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
-
 
 // function encryptWithOpenSSL(payload) {
 //   const keyString = 'yN!VkiK9#-GoUwB@eUD8l~zoY@3ccVmx'; // 32-char plain-text key
@@ -348,21 +380,23 @@ const getTotalAgentStatus = async (req, res) => {
 //   return finalToken;
 // }
 
-
 function encryptWithOpenSSL(payload) {
-  const keyString = process.env.ENCRYPTION_KEY || 'yN!VkiK9#-GoUwB@eUD8l~zoY@3ccVmx'; // Use env var or fallback
-  const key = Buffer.from(keyString, 'utf8');
+  const keyString =
+    process.env.ENCRYPTION_KEY || "yN!VkiK9#-GoUwB@eUD8l~zoY@3ccVmx"; // Use env var or fallback
+  const key = Buffer.from(keyString, "utf8");
 
   if (key.length !== 32) {
-    throw new Error(`ENCRYPTION_KEY must be exactly 32 bytes. Got ${key.length} bytes.`);
+    throw new Error(
+      `ENCRYPTION_KEY must be exactly 32 bytes. Got ${key.length} bytes.`
+    );
   }
 
   // Ensure payload is a plain, JSON-safe object
-  const safePayload = {}
+  const safePayload = {};
   for (const [k, v] of Object.entries(payload || {})) {
     if (v === null || v === undefined) {
-      safePayload[k] = '';
-    } else if (typeof v === 'object') {
+      safePayload[k] = "";
+    } else if (typeof v === "object") {
       // Avoid circular/non-serializable values by stringifying primitives only
       safePayload[k] = String(v);
     } else {
@@ -373,80 +407,83 @@ function encryptWithOpenSSL(payload) {
   const plainText = JSON.stringify(safePayload);
   const iv = crypto.randomBytes(16);
 
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-  let encrypted = cipher.update(plainText, 'utf8', 'base64');
-  encrypted += cipher.final('base64');
+  const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
+  let encrypted = cipher.update(plainText, "utf8", "base64");
+  encrypted += cipher.final("base64");
 
-  const ivBase64 = iv.toString('base64');
+  const ivBase64 = iv.toString("base64");
   const combined = `${encrypted}::${ivBase64}`;
-  return Buffer.from(combined, 'utf8').toString('base64');
+  return Buffer.from(combined, "utf8").toString("base64");
 }
 
 // Re-enable the loginRedirect endpoint
 const loginRedirect = async (req, res) => {
   try {
     // 1. Authenticate via JWT
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const token = req.headers.authorization?.replace("Bearer ", "");
     if (!token) {
-      return res.status(401).json({ message: 'Authentication required' });
+      return res.status(401).json({ message: "Authentication required" });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findByPk(decoded.userId);
 
     if (!user) {
-      return res.status(401).json({ message: 'User not found' });
+      return res.status(401).json({ message: "User not found" });
     }
 
     // 2. Prepare data payload for encryption (sanitize inputs)
     const idRaw = req.body?.notification_report_id;
     const employerRaw = req.body?.employer_id;
-    
+
     // Debug logging to see what values are coming from frontend
-    console.log('🔍 Backend received values:', {
+    console.log("🔍 Backend received values:", {
       idRaw: idRaw,
       idRawType: typeof idRaw,
       employerRaw: employerRaw,
       employerRawType: typeof employerRaw,
-      fullBody: req.body
+      fullBody: req.body,
     });
-    
+
     const auth_data = {
-      username:'mmsaki-admin',
-      notification_report_id: idRaw || '',
-      employer_id: employerRaw !== undefined && employerRaw !== null ? employerRaw : ''
+      username: "mmsaki-admin",
+      notification_report_id: idRaw || "",
+      employer_id:
+        employerRaw !== undefined && employerRaw !== null ? employerRaw : "",
     };
-    
+
     // Debug logging to see what's being sent to encryption
-    console.log('🔍 Backend auth_data:', auth_data);
+    console.log("🔍 Backend auth_data:", auth_data);
 
     // 3. Encrypt token
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
     // 4. Build MAC App URL
-    const macAppUrl = process.env.MAC_APP_URL || 'https://demomac.wcf.go.tz/';
-    const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(encryptedToken)}`;
+    const macAppUrl = process.env.MAC_APP_URL || "https://demomac.wcf.go.tz/";
+    const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
+      encryptedToken
+    )}`;
 
     // 5. Respond appropriately
-    const acceptsJson = req.headers.accept?.includes('application/json') ||
-                        req.headers['content-type']?.includes('application/json');
+    const acceptsJson =
+      req.headers.accept?.includes("application/json") ||
+      req.headers["content-type"]?.includes("application/json");
 
     if (acceptsJson) {
       return res.json({
         success: {
-          message: 'Continue on MAC!',
+          message: "Continue on MAC!",
           url: url,
         },
       });
     }
 
     return res.redirect(url);
-
   } catch (error) {
-    console.error('Login redirect error:', error);
-    return res.status(500).json({ 
-      message: 'Internal server error',
-      error: error.message 
+    console.error("Login redirect error:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -459,5 +496,5 @@ module.exports = {
   getTotalAgentStatus,
   getAgentLoginTime,
   loginRedirect,
-  encryptWithOpenSSL
+  encryptWithOpenSSL,
 };

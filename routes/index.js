@@ -28,6 +28,8 @@ const router = express.Router();
 // const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
 const queueStatusRoutes = require("./queueStatusRoutes");
+const livestreamRoutes = require("./livestreamRoutes");
+const publicDashboardRoutes = require("./publicDashboardRoutes");
 
 router.use("/users", userRoutes);
 router.use("/auth", authRoutes);
@@ -50,6 +52,8 @@ router.use("/mac-system", macRoutes);
 router.use("/missed-calls", missedCallRoutes);
 router.use("/performance", performanceRoutes);
 router.use("/queue-status", queueStatusRoutes);
+router.use("/livestream", livestreamRoutes);
+router.use("/public", publicDashboardRoutes);
 router.use("/workflow", workflowRoutes);
 router.use("/external", externalRoutes);
 router.use("/ticket-updates", ticketUpdateRoutes);

@@ -48,6 +48,7 @@ const User = sequelize.define(
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
+      field: "isActive", // Explicitly map to camelCase column name in database
     },
     status: {
       type: DataTypes.STRING,
@@ -62,25 +63,37 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: true,
     },
-    report_to: {
-      type: DataTypes.STRING(100),
+    report_to_id: {
+      type: DataTypes.INTEGER,
       allowNull: true,
+      references: {
+        model: "ReportTo",
+        key: "id",
+      },
     },
-    designation: {
-      type: DataTypes.STRING(100),
+    designation_id: {
+      type: DataTypes.INTEGER,
       allowNull: true,
+      references: {
+        model: "Designation",
+        key: "id",
+      },
     },
-    unit_section: {
-      type: DataTypes.STRING(100),
+    unit_section_id: {
+      type: DataTypes.INTEGER,
       allowNull: true,
-      comment: "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')"
-    }
+      references: {
+        model: "UnitSection",
+        key: "id",
+      },
+    },
   },
   {
     timestamps: true,
     tableName: "Users", // Optional but helps if your table name is explicitly Users (plural)
+    underscored: false, // Disable underscored for User model (has mixed naming: camelCase and snake_case)
+    // createdAt and updatedAt will use camelCase (createdAt, updatedAt) instead of snake_case
   }
-  
 );
 
 // Associations
@@ -104,6 +117,28 @@ User.associate = (models) => {
     as: "ticketUpdates",
     foreignKey: "user_id",
   });
+
+  // Foreign key associations
+  if (models.ReportTo) {
+    User.belongsTo(models.ReportTo, {
+      foreignKey: "report_to_id",
+      as: "reportTo",
+    });
+  }
+
+  if (models.Designation) {
+    User.belongsTo(models.Designation, {
+      foreignKey: "designation_id",
+      as: "designation",
+    });
+  }
+
+  if (models.UnitSection) {
+    User.belongsTo(models.UnitSection, {
+      foreignKey: "unit_section_id",
+      as: "unitSection",
+    });
+  }
 };
 
 module.exports = User;

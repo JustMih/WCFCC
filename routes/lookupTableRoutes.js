@@ -44,6 +44,38 @@ const {
   getAllUsersWithRoles,
 } = require("../controllers/lookup-tables/userRoleController");
 
+const {
+  getAllRelations,
+  getRelationById,
+  createRelation,
+  updateRelation,
+  deleteRelation,
+} = require("../controllers/lookup-tables/relationController");
+
+const {
+  getAllDirectorates,
+  getDirectorateById,
+  createDirectorate,
+  updateDirectorate,
+  deleteDirectorate,
+} = require("../controllers/lookup-tables/directorateController");
+
+const {
+  getAllUnits,
+  getUnitById,
+  createUnit,
+  updateUnit,
+  deleteUnit,
+} = require("../controllers/lookup-tables/unitController");
+
+const {
+  getAllSubjects,
+  getSubjectById,
+  createSubject,
+  updateSubject,
+  deleteSubject,
+} = require("../controllers/lookup-tables/subjectController");
+
 const router = express.Router();
 
 // Validation middleware
@@ -71,6 +103,19 @@ const validateRoleId = [
   body("roleId")
     .isInt({ min: 1 })
     .withMessage("roleId must be a positive integer"),
+];
+
+const validateUnitId = [
+  body("unit_id")
+    .isInt({ min: 1 })
+    .withMessage("unit_id must be a positive integer"),
+];
+
+const validateDirectorateId = [
+  body("directorate_id")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("directorate_id must be a positive integer"),
 ];
 
 // Report To routes
@@ -191,6 +236,102 @@ router.delete(
   authMiddleware,
   roleMiddleware(["admin", "super-admin"]),
   removeRoleFromUser
+);
+
+// Relation routes
+router.get("/relations", authMiddleware, getAllRelations);
+router.get("/relations/:id", authMiddleware, getRelationById);
+router.post(
+  "/relations",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  validateNameAndDescription,
+  createRelation
+);
+router.put(
+  "/relations/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  validateNameAndDescription,
+  updateRelation
+);
+router.delete(
+  "/relations/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  deleteRelation
+);
+
+// Directorate routes
+router.get("/directorates", authMiddleware, getAllDirectorates);
+router.get("/directorates/:id", authMiddleware, getDirectorateById);
+router.post(
+  "/directorates",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  validateNameAndDescription,
+  createDirectorate
+);
+router.put(
+  "/directorates/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  validateNameAndDescription,
+  updateDirectorate
+);
+router.delete(
+  "/directorates/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  deleteDirectorate
+);
+
+// Unit routes
+router.get("/units", authMiddleware, getAllUnits);
+router.get("/units/:id", authMiddleware, getUnitById);
+router.post(
+  "/units",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  [...validateNameAndDescription, ...validateDirectorateId],
+  createUnit
+);
+router.put(
+  "/units/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  [...validateNameAndDescription, ...validateDirectorateId],
+  updateUnit
+);
+router.delete(
+  "/units/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  deleteUnit
+);
+
+// Subject routes
+router.get("/subjects", authMiddleware, getAllSubjects);
+router.get("/subjects/:id", authMiddleware, getSubjectById);
+router.post(
+  "/subjects",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  [...validateNameAndDescription, ...validateUnitId],
+  createSubject
+);
+router.put(
+  "/subjects/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  [...validateNameAndDescription, validateUnitId[0].optional()],
+  updateSubject
+);
+router.delete(
+  "/subjects/:id",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  deleteSubject
 );
 
 module.exports = router;
