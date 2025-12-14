@@ -10,7 +10,7 @@ const {
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, updateReversedTicketDetails
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, managerSendToDirector, updateReversedTicketDetails
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -238,11 +238,11 @@ router.post(
   reverseComplaint
 );
 
-// Route for reviewer to forward major complaint to Director General
+// Route for reviewer/director to forward major complaint to Director General
 router.post(
   '/:ticketId/forward-to-dg',
   authMiddleware,
-  roleMiddleware(['reviewer']),
+  roleMiddleware(['reviewer', 'director']),
   forwardToDirectorGeneral
 );
 
@@ -283,6 +283,16 @@ router.post(
   authMiddleware,
   roleMiddleware(['manager']),
   managerAttendMajor
+);
+
+// Route for manager to send to Director when receiving from Attendee (Major Complaint Directorate)
+router.post(
+  '/:ticketId/manager-send-to-director',
+  authMiddleware,
+  roleMiddleware(['manager']),
+  uploadSingle,
+  handleMulterError,
+  managerSendToDirector
 );
 
 // General close ticket route for all roles (except reviewers who have their own route)
