@@ -194,7 +194,7 @@ const login = async (req, res) => {
         role: user.role, // Base role
         // effectiveRoles: effectiveRoles, // All effective roles including mapped ones
         id: user.id,
-        report_to_id: user.report_to_id,
+        report_to: user.report_to,
         designation_id: user.designation_id,
         extension: user.extension,
         unit_section_id: user.unit_section_id,
