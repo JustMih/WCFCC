@@ -3440,7 +3440,10 @@ const getAllAttendee = async (req, res) => {
     const currentUserId = req.user.userId;
     
     // Get the current user's unit/section
-    const currentUser = await User.findByPk(currentUserId);
+    // Explicitly specify attributes to avoid issues with report_to_id column
+    const currentUser = await User.findByPk(currentUserId, {
+      attributes: ['id', 'full_name', 'username', 'email', 'role', 'report_to', 'designation', 'unit_section', 'isActive', 'status', 'extension']
+    });
     if (!currentUser) {
       return res.status(404).json({ message: "Current user not found" });
     }
@@ -3457,10 +3460,16 @@ const getAllAttendee = async (req, res) => {
     
     // If current user is Head of Unit or Director and their unit section contains "directorate", show managers
     if ((currentUser.role === "head-of-unit" || currentUser.role === "director") && 
-        // currentUser.unit_section && 
+        currentUser.unit_section && 
         currentUser.unit_section.toLowerCase().includes("directorate")) {
       targetRole = "manager";
       console.log(`DEBUG: Head of Unit with directorate unit, showing managers instead of attendees`);
+    } else if (currentUser.role === "head-of-unit" && 
+               currentUser.unit_section && 
+               currentUser.unit_section.toLowerCase().includes("unit") ) {
+      // If head-of-unit's unit_section contains "unit" (not "directorate"), show attendees
+      targetRole = "attendee";
+      console.log(`DEBUG: Head of Unit with unit (not directorate), showing attendees`);
     }
     
     // Special handling for focal persons - they should see attendees from their unit
@@ -3483,23 +3492,32 @@ const getAllAttendee = async (req, res) => {
         console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have a report_to set!`);
       }
     } else if (currentUser.role === "head-of-unit") {
-      // For head-of-unit, filter by designation-based report_to mapping
-      const designationMapping = {
-        'HICT': 'Head of ICT Unit',
-        'HIAU': 'Head of Internal Audit Unit', 
-        'HASSRMU': 'Actuarial Services Statistics and Risk Management Unit',
-        'HHRMAU': 'Head of Human Resource Management and Administration',
-        'HLSU': 'Head of Legal Services Unit',
-        'HPMU': 'Head of Public Relation Unit'
-      };
-      
-      if (currentUser.designation && designationMapping[currentUser.designation]) {
-        const targetReportTo = designationMapping[currentUser.designation];
-        whereClause.report_to = targetReportTo;
-        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+      // For head-of-unit, filter by unit_section AND role = "attendee" (unless directorate shows managers)
+      if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
+        whereClause.unit_section = currentUser.unit_section;
+        // Ensure we're filtering by attendee role (unless directorate which shows managers)
+        whereClause.role = targetRole; // This is already set above, but ensure it's correct
+        console.log(`DEBUG: Head of Unit filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
+        console.log(`DEBUG: Where clause for head-of-unit:`, JSON.stringify(whereClause, null, 2));
       } else {
-        console.log(`DEBUG: No valid designation mapping found for head-of-unit, showing all ${targetRole}s`);
-        console.log(`DEBUG: Current user designation: "${currentUser.designation}"`);
+        // Fallback to designation-based report_to mapping if no unit_section
+        const designationMapping = {
+          'HICT': 'Head of ICT Unit',
+          'HIAU': 'Head of Internal Audit Unit', 
+          'HASSRMU': 'Actuarial Services Statistics and Risk Management Unit',
+          'HHRMAU': 'Head of Human Resource Management and Administration',
+          'HLSU': 'Head of Legal Services Unit',
+          'HPMU': 'Head of Public Relation Unit'
+        };
+        
+        if (currentUser.designation && designationMapping[currentUser.designation]) {
+          const targetReportTo = designationMapping[currentUser.designation];
+          whereClause.report_to = targetReportTo;
+          console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+        } else {
+          console.log(`DEBUG: No unit_section or valid designation mapping found for head-of-unit, showing all ${targetRole}s`);
+          console.log(`DEBUG: Current user designation: "${currentUser.designation}", unit_section: "${currentUser.unit_section}"`);
+        }
       }
     } else if (currentUser.role === "manager") {
       // For manager, filter by designation-based report_to mapping
@@ -3541,18 +3559,35 @@ const getAllAttendee = async (req, res) => {
     console.log(`DEBUG: Found ${users.length} ${targetRole}s matching criteria`);
     console.log(`DEBUG: Users:`, users.map(u => ({ name: u.full_name, username: u.username, role: u.role, report_to: u.report_to, designation: u.designation })));
     
-    // Additional debugging: Show all attendees with their report_to values for comparison
+    // Additional debugging: Show all attendees with their unit_section values for comparison
     if (users.length === 0) {
-      console.log(`DEBUG: No users found with current filter. Let's check what report_to values exist:`);
+      console.log(`DEBUG: No users found with current filter. Let's check what values exist:`);
+      console.log(`DEBUG: Where clause used:`, JSON.stringify(whereClause, null, 2));
+      
+      // Check all attendees with their unit_section
       const allAttendees = await User.findAll({
         where: { role: targetRole },
-        attributes: ['id', 'full_name', 'report_to', 'designation']
+        attributes: ['id', 'full_name', 'unit_section', 'report_to', 'designation']
       });
       console.log(`DEBUG: All ${targetRole}s in database:`, allAttendees.map(u => ({ 
         name: u.full_name, 
+        unit_section: u.unit_section,
         report_to: u.report_to, 
         designation: u.designation 
       })));
+      
+      // Also check if there are any users with the same unit_section
+      if (currentUser.unit_section) {
+        const sameUnitUsers = await User.findAll({
+          where: { unit_section: currentUser.unit_section },
+          attributes: ['id', 'full_name', 'role', 'unit_section']
+        });
+        console.log(`DEBUG: All users with unit_section "${currentUser.unit_section}":`, sameUnitUsers.map(u => ({ 
+          name: u.full_name, 
+          role: u.role,
+          unit_section: u.unit_section
+        })));
+      }
     }
     
     res.status(200).json({ 

@@ -42,11 +42,11 @@ router.post(
   createUser
 );
 
-// Get all users
+// Get all users (admin/super-admin see all, head-of-unit sees only their staff)
 router.get(
   "/",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin"]),
+  // roleMiddleware(["admin", "super-admin", "head-of-unit", ]),
   getAllUsers
 );
 

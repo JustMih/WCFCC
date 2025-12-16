@@ -1,6 +1,7 @@
 const TicketUpdate = require('../../models/TicketUpdate');
 const Ticket = require('../../models/Ticket');
 const User = require('../../models/User');
+const TicketUpdateRead = require('../../models/TicketUpdateRead');
 const { Op } = require('sequelize');
 
 // Helper function to check if user can add updates to a ticket
@@ -139,11 +140,35 @@ const getTicketUpdates = async (req, res) => {
       ]
     });
 
+    // Get read status for current user
+    const readRecords = await TicketUpdateRead.findAll({
+      where: {
+        user_id: userId,
+        ticket_update_id: {
+          [Op.in]: updates.map(u => u.id)
+        }
+      },
+      attributes: ['ticket_update_id', 'read_at']
+    });
+
+    const readMap = {};
+    readRecords.forEach(record => {
+      readMap[record.ticket_update_id] = record.read_at;
+    });
+
+    // Add read status to each update
+    const updatesWithReadStatus = updates.map(update => {
+      const updateData = update.toJSON();
+      updateData.is_read = !!readMap[update.id];
+      updateData.read_at = readMap[update.id] || null;
+      return updateData;
+    });
+
     console.log('✅ [TicketUpdates] Found', updates.length, 'updates for ticket:', ticket_id);
 
     res.status(200).json({
       success: true,
-      data: updates
+      data: updatesWithReadStatus
     });
 
   } catch (error) {
@@ -371,6 +396,202 @@ const deactivateUserUpdates = async (ticket_id, user_id) => {
   }
 };
 
+// Mark an update as read by a user
+const markUpdateAsRead = async (req, res) => {
+  try {
+    const { update_id } = req.params;
+    const userId = req.user.userId;
+
+    console.log('📖 [TicketUpdates] Marking update as read - Update ID:', update_id, 'User ID:', userId);
+
+    // Check if update exists
+    const update = await TicketUpdate.findByPk(update_id);
+    if (!update) {
+      console.log('❌ [TicketUpdates] Update not found:', update_id);
+      return res.status(404).json({
+        success: false,
+        message: 'Update not found'
+      });
+    }
+
+    // Check if already read
+    const existingRead = await TicketUpdateRead.findOne({
+      where: {
+        ticket_update_id: update_id,
+        user_id: userId
+      }
+    });
+
+    if (existingRead) {
+      console.log('✅ [TicketUpdates] Update already marked as read');
+      return res.status(200).json({
+        success: true,
+        message: 'Update already marked as read',
+        data: existingRead
+      });
+    }
+
+    // Create read record
+    const readRecord = await TicketUpdateRead.create({
+      ticket_update_id: update_id,
+      user_id: userId,
+      read_at: new Date()
+    });
+
+    console.log('✅ [TicketUpdates] Update marked as read successfully');
+
+    res.status(200).json({
+      success: true,
+      message: 'Update marked as read',
+      data: readRecord
+    });
+
+  } catch (error) {
+    console.error('❌ [TicketUpdates] Error marking update as read:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Mark all updates for a ticket as read by a user
+const markAllUpdatesAsRead = async (req, res) => {
+  try {
+    const { ticket_id } = req.params;
+    const userId = req.user.userId;
+
+    console.log('📖 [TicketUpdates] Marking all updates as read - Ticket ID:', ticket_id, 'User ID:', userId);
+
+    // Check if ticket exists
+    const ticket = await Ticket.findByPk(ticket_id);
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket not found'
+      });
+    }
+
+    // Get all updates for this ticket that are not from current user
+    const updates = await TicketUpdate.findAll({
+      where: {
+        ticket_id,
+        user_id: {
+          [Op.ne]: userId
+        }
+      },
+      attributes: ['id']
+    });
+
+    const updateIds = updates.map(u => u.id);
+
+    if (updateIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No updates to mark as read',
+        data: { count: 0 }
+      });
+    }
+
+    // Get already read updates
+    const existingReads = await TicketUpdateRead.findAll({
+      where: {
+        user_id: userId,
+        ticket_update_id: {
+          [Op.in]: updateIds
+        }
+      },
+      attributes: ['ticket_update_id']
+    });
+
+    const alreadyReadIds = existingReads.map(r => r.ticket_update_id);
+    const unreadIds = updateIds.filter(id => !alreadyReadIds.includes(id));
+
+    // Mark unread updates as read
+    if (unreadIds.length > 0) {
+      const readRecords = unreadIds.map(updateId => ({
+        ticket_update_id: updateId,
+        user_id: userId,
+        read_at: new Date()
+      }));
+
+      await TicketUpdateRead.bulkCreate(readRecords);
+    }
+
+    console.log('✅ [TicketUpdates] Marked', unreadIds.length, 'updates as read');
+
+    res.status(200).json({
+      success: true,
+      message: 'All updates marked as read',
+      data: { count: unreadIds.length }
+    });
+
+  } catch (error) {
+    console.error('❌ [TicketUpdates] Error marking all updates as read:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Get unread updates count for a ticket
+const getUnreadUpdatesCount = async (req, res) => {
+  try {
+    const { ticket_id } = req.params;
+    const userId = req.user.userId;
+
+    // Get all updates for this ticket that are not from current user
+    const updates = await TicketUpdate.findAll({
+      where: {
+        ticket_id,
+        user_id: {
+          [Op.ne]: userId
+        }
+      },
+      attributes: ['id']
+    });
+
+    const updateIds = updates.map(u => u.id);
+
+    if (updateIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: { unreadCount: 0 }
+      });
+    }
+
+    // Get read updates
+    const readRecords = await TicketUpdateRead.findAll({
+      where: {
+        user_id: userId,
+        ticket_update_id: {
+          [Op.in]: updateIds
+        }
+      },
+      attributes: ['ticket_update_id']
+    });
+
+    const readIds = readRecords.map(r => r.ticket_update_id);
+    const unreadCount = updateIds.length - readIds.length;
+
+    res.status(200).json({
+      success: true,
+      data: { unreadCount }
+    });
+
+  } catch (error) {
+    console.error('❌ [TicketUpdates] Error getting unread count:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   addTicketUpdate,
   getTicketUpdates,
@@ -379,5 +600,8 @@ module.exports = {
   deleteTicketUpdate,
   deactivateUserUpdates,
   canUserAddUpdate,
-  checkUserCanAddUpdate
+  checkUserCanAddUpdate,
+  markUpdateAsRead,
+  markAllUpdatesAsRead,
+  getUnreadUpdatesCount
 };
