@@ -28,6 +28,10 @@ const { registerSuperAdmin } = require("./controllers/auth/authController");
 const {
   setupSocket,
 } = require("./controllers/livestream/livestreamController");
+const {
+  setSocketInstance,
+  startPeriodicUpdates,
+} = require("./controllers/publicDashboard/publicDashboardController");
 
 /* ------------------------------ ROUTES ------------------------------ */
 const routes = require("./routes");
@@ -283,6 +287,7 @@ io.on("connection", (socket) => {
 });
 
 /* ------------------------------ SERVER START ------------------------------ */
+// Sync database - handle errors gracefully for models managed by migrations
 sequelize
   .sync({ force: false, alter: false })
   .then(() => {
@@ -337,6 +342,7 @@ sequelize
       // Setup socket for HTTPS
       global._ioHttps = httpsIo;
       setupSocket(httpsIo);
+      setSocketInstance(httpsIo);
     } else {
       console.log("⚠️ SSL certificates not found. HTTPS server not started.");
       console.log(
@@ -345,6 +351,68 @@ sequelize
     }
   })
   .catch((error) => {
-    console.error("❌ Database sync failed:", error);
-    process.exit(1);
+    // Handle duplicate constraint errors gracefully (constraints already exist from migrations)
+    if (
+      error.name === "SequelizeDatabaseError" &&
+      (error.original?.code === "ER_FK_DUP_NAME" ||
+        error.message?.includes("Duplicate foreign key constraint"))
+    ) {
+      console.warn(
+        "⚠️ Foreign key constraint already exists (likely from migration). Continuing..."
+      );
+      console.log("✅ Database connection established");
+      registerSuperAdmin();
+
+      const PORT = process.env.PORT || 5070;
+      const HTTPS_PORT = process.env.HTTPS_PORT || 5071;
+
+      server.listen(PORT, () => {
+        console.log(`🚀 HTTP Server running on port ${PORT}`);
+      });
+
+      // Setup HTTPS if certificates exist
+      const sslOptions = {
+        key: fs.existsSync("./ssl/private.key")
+          ? fs.readFileSync("./ssl/private.key")
+          : null,
+        cert: fs.existsSync("./ssl/certificate.crt")
+          ? fs.readFileSync("./ssl/certificate.crt")
+          : null,
+      };
+
+      if (sslOptions.key && sslOptions.cert) {
+        const httpsServer = https.createServer(sslOptions, app);
+        const httpsIo = new Server(httpsServer, {
+          cors: {
+            origin: [
+              "http://localhost:3000",
+              "http://10.52.0.19:3000",
+              "http://localhost:5070",
+              "http://10.52.0.19:5070",
+              "http://127.0.0.1:5070",
+              "http://192.168.1.170:5070",
+              "http://192.168.21.70:5070",
+              "https://10.52.0.19",
+              "https://demoportal.wcf.go.tz",
+              "https://portal.wcf.go.tz",
+              "https://essp.wcf.go.tz",
+              process.env.NODE_ENV === "development" ? true : false,
+            ].filter(Boolean),
+            methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+            credentials: true,
+          },
+        });
+
+        httpsServer.listen(HTTPS_PORT, () => {
+          console.log(`🔒 HTTPS Server running on port ${HTTPS_PORT}`);
+        });
+
+        global._ioHttps = httpsIo;
+        setupSocket(httpsIo);
+        setSocketInstance(httpsIo);
+      }
+    } else {
+      console.error("❌ Database sync failed:", error);
+      process.exit(1);
+    }
   });

@@ -25,10 +25,7 @@ const Extension = sequelize.define(
     userId: {
       type: DataTypes.UUID,
       allowNull: false,
-      references: {
-        model: User,
-        key: "id",
-      },
+      field: "userId",
       unique: true,
     },
     isActive: {
@@ -37,10 +34,21 @@ const Extension = sequelize.define(
       defaultValue: false, // Default is inactive
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    underscored: true,
+    tableName: "Extensions",
+    freezeTableName: true,
+  }
 );
 
-User.hasOne(Extension, { foreignKey: "userId", onDelete: "CASCADE" });
-Extension.belongsTo(User, { foreignKey: "userId", onDelete: "CASCADE" });
+// Define associations - disable constraint creation since it's managed by migrations
+// The foreign key constraint already exists from migration, so we just define the relationship
+Extension.belongsTo(User, {
+  foreignKey: "userId",
+  targetKey: "id",
+  onDelete: "CASCADE",
+  constraints: false, // Don't create constraint during sync - it already exists from migration
+});
 
 module.exports = Extension;
