@@ -2902,7 +2902,11 @@ const closeTicket = async (req, res) => {
         {
           model: User,
           as: "creator",
-          attributes: ["id", "full_name"],
+          attributes: ["id", "full_name", "email"],
+        },
+        {
+          model: RequesterDetails,
+          as: "RequesterDetail",
         },
       ],
     });
@@ -3006,42 +3010,105 @@ const closeTicket = async (req, res) => {
       console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
     }
 
-    // Notify the creator (agent) by email if available
-    if (ticket.creator && ticket.creator.email) {
-      const emailSubject = `Ticket Closed: ${ticket.subject}`;
-      const emailBody = `
-        <p>Dear ${ticket.creator.full_name},</p>
-        <p>Your ticket has been closed successfully. Here are the details:</p>
-      `;
+    // Notify the creator/requester by SMS, email, and in-system notification
+    if (ticket.creator) {
+      // Create in-system notification for creator
+      const creatorNotificationMsg = `Your ticket ${ticket.ticket_id} has been closed and resolved. ${resolution_details ? `Resolution: ${resolution_details}` : ''}`;
       
-      const detailsHtml = `
-        <ul>
-          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${ticket.subject}</li>
-          <li><strong>Category:</strong> ${ticket.category}</li>
-          <li><strong>Description:</strong> ${ticket.description}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-          <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
-          <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
-          <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
-          <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
-        </ul>
-      `;
+      try {
+        await Notification.create({
+          ticket_id: ticketId,
+          sender_id: userId,
+          recipient_id: ticket.creator.id,
+          message: creatorNotificationMsg,
+          channel: "In-System",
+          status: "unread",
+          category: ticket.category || "Ticket Closure",
+        });
+        console.log(`✅ In-system notification sent to creator (${ticket.creator.full_name}) for ticket ${ticket.ticket_id}`);
+      } catch (notificationError) {
+        console.error("Error creating notification for creator:", notificationError.message);
+        // Continue even if notification fails
+      }
+
+      // Send SMS notification to ticket requester (if phone number is available)
+      // Get phone number from ticket - could be phone_number, phoneNumber, or from requester details
+      let ticketPhoneNumber = ticket.phone_number || ticket.phoneNumber || null;
       
-      const { renderEmailCard } = require('../../services/emailService');
-      const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
+      // If phone number not in ticket directly, try to get from requester details
+      if (!ticketPhoneNumber && ticket.RequesterDetail) {
+        ticketPhoneNumber = ticket.RequesterDetail.phone_number || ticket.RequesterDetail.phoneNumber || null;
+      }
       
-      sendEmail({
-        // to: ticket.creator.email,
-        to: "rehema.said3@ttcl.co.tz",
-        subject: emailSubject,
-        htmlBody: htmlBody,
-      }).catch((emailError) => {
-        console.error(
-          "Error sending closure email to creator:",
-          emailError.message
-        );
-      });
+      // Format phone number for SMS: ensure it starts with 255 and is followed by 9 digits
+      if (ticketPhoneNumber) {
+        let smsRecipient = String(ticketPhoneNumber)
+          .replace(/^\+/, "")
+          .replace(/^0/, "255");
+        const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+        
+        // Get requester name for SMS
+        const requesterFullName = getRequesterDisplayName(ticket);
+        
+        if (isValidTzPhone(smsRecipient)) {
+          // Truncate resolution details if too long for SMS (SMS limit is usually 160 characters)
+          const resolutionText = resolution_details ? 
+            (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
+            '';
+          const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${ticket.ticket_id}) has been closed and resolved. ${resolutionText ? `Resolution: ${resolutionText}` : ''}`;
+          
+          // Send SMS asynchronously to avoid blocking the response
+          sendQuickSms({ message: smsMessage, recipient: smsRecipient })
+            .then(() => {
+              console.log(`✅ SMS sent successfully to ${smsRecipient} for ticket ${ticket.ticket_id} closure`);
+            })
+            .catch((smsError) => {
+              console.error("Error sending closure SMS:", smsError.message);
+            });
+        } else {
+          console.log(`⚠️ Not sending closure SMS, invalid phone: ${smsRecipient}`);
+        }
+      } else {
+        console.log(`⚠️ No phone number found for ticket ${ticket.ticket_id}, skipping SMS notification`);
+      }
+
+      // Send email notification if email is available
+      if (ticket.creator.email) {
+        const emailSubject = `Ticket Closed: ${ticket.subject}`;
+        const emailBody = `
+          <p>Dear ${ticket.creator.full_name},</p>
+          <p>Your ticket has been closed successfully. Here are the details:</p>
+        `;
+        
+        const detailsHtml = `
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${ticket.subject}</li>
+            <li><strong>Category:</strong> ${ticket.category}</li>
+            <li><strong>Description:</strong> ${ticket.description}</li>
+            <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+            <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+            <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+            <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+            <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+          </ul>
+        `;
+        
+        const { renderEmailCard } = require('../../services/emailService');
+        const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
+        
+        sendEmail({
+          // to: ticket.creator.email,
+          to: "rehema.said3@ttcl.co.tz",
+          subject: emailSubject,
+          htmlBody: htmlBody,
+        }).catch((emailError) => {
+          console.error(
+            "Error sending closure email to creator:",
+            emailError.message
+          );
+        });
+      }
     }
 
     // Record the closing action in TicketAssignment
@@ -3501,20 +3568,20 @@ const getAllAttendee = async (req, res) => {
         console.log(`DEBUG: Where clause for head-of-unit:`, JSON.stringify(whereClause, null, 2));
       } else {
         // Fallback to designation-based report_to mapping if no unit_section
-        const designationMapping = {
-          'HICT': 'Head of ICT Unit',
-          'HIAU': 'Head of Internal Audit Unit', 
-          'HASSRMU': 'Actuarial Services Statistics and Risk Management Unit',
-          'HHRMAU': 'Head of Human Resource Management and Administration',
-          'HLSU': 'Head of Legal Services Unit',
-          'HPMU': 'Head of Public Relation Unit'
-        };
-        
-        if (currentUser.designation && designationMapping[currentUser.designation]) {
-          const targetReportTo = designationMapping[currentUser.designation];
-          whereClause.report_to = targetReportTo;
-          console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
-        } else {
+      const designationMapping = {
+        'HICT': 'Head of ICT Unit',
+        'HIAU': 'Head of Internal Audit Unit', 
+        'HASSRMU': 'Actuarial Services Statistics and Risk Management Unit',
+        'HHRMAU': 'Head of Human Resource Management and Administration',
+        'HLSU': 'Head of Legal Services Unit',
+        'HPMU': 'Head of Public Relation Unit'
+      };
+      
+      if (currentUser.designation && designationMapping[currentUser.designation]) {
+        const targetReportTo = designationMapping[currentUser.designation];
+        whereClause.report_to = targetReportTo;
+        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+      } else {
           console.log(`DEBUG: No unit_section or valid designation mapping found for head-of-unit, showing all ${targetRole}s`);
           console.log(`DEBUG: Current user designation: "${currentUser.designation}", unit_section: "${currentUser.unit_section}"`);
         }
@@ -3586,7 +3653,7 @@ const getAllAttendee = async (req, res) => {
           name: u.full_name, 
           role: u.role,
           unit_section: u.unit_section
-        })));
+      })));
       }
     }
     
@@ -5729,15 +5796,15 @@ const reverseComplaint = async (req, res) => {
       }
     } else {
       // Standard logic: If there are at least 2 assignments, use the second most recent
-      if (assignments.length >= 2) {
-        const prevAssignment = assignments[1];
-        targetUserId = prevAssignment.assigned_to_id;
-        targetUserRole = prevAssignment.assigned_to_role;
-      } else {
-        // If no previous assignments, reverse to the ticket creator
-        console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
-        targetUserId = ticket.creator.id;
-        targetUserRole = ticket.creator.role;
+    if (assignments.length >= 2) {
+      const prevAssignment = assignments[1];
+      targetUserId = prevAssignment.assigned_to_id;
+      targetUserRole = prevAssignment.assigned_to_role;
+    } else {
+      // If no previous assignments, reverse to the ticket creator
+      console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
+      targetUserId = ticket.creator.id;
+      targetUserRole = ticket.creator.role;
       }
     }
     
