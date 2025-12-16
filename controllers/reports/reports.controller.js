@@ -47,19 +47,64 @@
 //   }
 // };
 
-const VoiceNote = require("../../models/voice_notes.model");
-const CDR = require("../../models/cdr.model");
-const IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
-const { IVRAction, IVRVoice } = require("../../models");
+// Safely require models with error handling
+let VoiceNote, CDR, IVRDTMFMapping, IVRAction, IVRVoice;
+try {
+  console.log("Loading VoiceNote model...");
+  VoiceNote = require("../../models/voice_notes.model");
+  console.log("Loading CDR model...");
+  CDR = require("../../models/cdr.model");
+  console.log("Loading IVRDTMFMapping model...");
+  IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
+  console.log("Loading models index...");
+  let models;
+  try {
+    models = require("../../models");
+    console.log("Models loaded, available keys:", Object.keys(models || {}));
+    // Safely get IVRAction and IVRVoice with fallback
+    if (models) {
+      IVRAction = models.IVRAction;
+      IVRVoice = models.IVRVoice;
+    }
+  } catch (modelsError) {
+    console.error("Error loading models index, trying direct require:", modelsError.message);
+  }
+  
+  // Fallback: try direct require if models index failed
+  if (!IVRAction) {
+    try {
+      IVRAction = require("../../models/IVRAction");
+    } catch (e) {
+      console.error("Failed to load IVRAction:", e.message);
+    }
+  }
+  if (!IVRVoice) {
+    try {
+      IVRVoice = require("../../models/IVRVoice");
+    } catch (e) {
+      console.error("Failed to load IVRVoice:", e.message);
+    }
+  }
+  console.log("Model loading complete");
+} catch (error) {
+  console.error("Error loading models in reports controller:", error);
+  console.error("Error stack:", error.stack);
+  // Models will be undefined, but we'll handle this in the functions
+}
+
 const path = require("path");
 const fs = require("fs");
 const sequelize = require("../../config/mysql_connection"); // Adjust the path as necessary
 
 exports.getVoiceNotes = async (req, res) => {
   try {
+    if (!VoiceNote) {
+      throw new Error("VoiceNote model is not available");
+    }
     const voiceNotes = await VoiceNote.findAll();
     res.json(voiceNotes);
   } catch (error) {
+    console.error("Error in getVoiceNotes:", error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -88,17 +133,24 @@ exports.streamVoiceNote = async (req, res) => {
 
 exports.getCDRReports = async (req, res) => {
   try {
+    if (!CDR) {
+      throw new Error("CDR model is not available");
+    }
     const cdrReports = await CDR.findAll({
       order: [["cdrstarttime", "DESC"]], // Replace 'calldate' with your actual datetime column name
     });
     res.json(cdrReports);
   } catch (error) {
+    console.error("Error in getCDRReports:", error);
     res.status(500).json({ error: error.message });
   }
 };
 
 exports.getIVRInteractions = async (req, res) => {
   try {
+    if (!IVRDTMFMapping || !IVRAction || !IVRVoice) {
+      throw new Error("IVR models are not available");
+    }
     const ivrInteractions = await IVRDTMFMapping.findAll({
       include: [
         { model: IVRAction, attributes: ["name"], as: "action" },
@@ -107,6 +159,7 @@ exports.getIVRInteractions = async (req, res) => {
     });
     res.json(ivrInteractions);
   } catch (error) {
+    console.error("Error in getIVRInteractions:", error);
     res.status(500).json({ error: error.message });
   }
 };

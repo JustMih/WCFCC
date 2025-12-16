@@ -27,7 +27,14 @@ Object.keys(db).forEach((modelName) => {
 });
 
 // Setup associations centrally
-const { IVRDTMFMapping, IVRVoice, IVRAction } = db; // Ensure model names are singular and match exports
+// Ensure IVRAction and IVRVoice are available in db before destructuring
+const IVRDTMFMapping = db.IVRDTMFMapping;
+const IVRVoice = db.IVRVoice || require("./IVRVoice");
+const IVRAction = db.IVRAction || require("./IVRAction");
+
+// Make sure they're in db for exports
+if (!db.IVRVoice) db.IVRVoice = IVRVoice;
+if (!db.IVRAction) db.IVRAction = IVRAction;
 const EmergencyNumber = require("./emergency_number")(sequelize, DataTypes);
 db.EmergencyNumber = EmergencyNumber;
 
