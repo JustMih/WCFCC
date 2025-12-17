@@ -1095,9 +1095,10 @@ const createTicket = async (req, res) => {
     console.log("- !shouldClose value:", !shouldClose);
 
     // Only send SMS if ticket is NOT closed at creation
+    // Include all requester types: Employee, Employer, Pensioners, Stakeholders, Representative, Spouse, Parent, Child, Sibling
     if (
       !shouldClose &&
-      (requester === "Employee" || requester === "Employer" || requester === "Pensioners" || requester === "Stakeholders" || requester === "Representative") &&
+      (requester === "Employee" || requester === "Employer" || requester === "Pensioners" || requester === "Stakeholders" || requester === "Representative" || requester === "Spouse" || requester === "Parent" || requester === "Child" || requester === "Sibling") &&
       isValidTzPhone(smsRecipient)
     ) {
       const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
