@@ -30,6 +30,7 @@ const missedCallRoutes = require("./missedCallRoutes");
 const queueStatusRoutes = require("./queueStatusRoutes");
 const livestreamRoutes = require("./livestreamRoutes");
 const publicDashboardRoutes = require("./publicDashboardRoutes");
+const reportsRoutes = require("./reports.routes");
 
 router.use("/users", userRoutes);
 router.use("/auth", authRoutes);
@@ -62,6 +63,7 @@ router.use("/notifications", notificationRoutes);
 router.use("/complaints", complaintWorkflowRoutes);
 router.use("/focal-person", focalPersonRoutes);
 router.use("/lookup-tables", lookupTableRoutes);
+router.use("/reports", reportsRoutes);
 router.use("/", instagramComments);
 
 module.exports = router;

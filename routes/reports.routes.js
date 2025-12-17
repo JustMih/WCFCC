@@ -17,4 +17,22 @@ router.get(
   reportsController.getCDRReport
 );
 
+// Ticket CRM Report
+router.get(
+  "/ticket-report/:startDate/:endDate/:status",
+  reportsController.getTicketReport
+);
+
+// Agent Performance Report
+router.get(
+  "/agent-performance/:startDate/:endDate/:agentId",
+  reportsController.getAgentPerformanceReport
+);
+
+// Call Summary Report
+router.get(
+  "/call-summary/:startDate/:endDate",
+  reportsController.getCallSummaryReport
+);
+
 module.exports = router;
