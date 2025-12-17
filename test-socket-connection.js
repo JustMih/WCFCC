@@ -2,9 +2,9 @@ const io = require("socket.io-client");
 
 async function testSocketConnection() {
   try {
-    console.log("Testing socket connection to http://127.0.0.1:5070...");
+    console.log("Testing socket connection to http://192.168.21.70:5070...");
 
-    const socket = io("http://127.0.0.1:5070");
+    const socket = io("http://192.168.21.70:5070");
 
     socket.on("connect", () => {
       console.log("✅ Socket connected successfully!");

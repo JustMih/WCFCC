@@ -20,10 +20,8 @@
 
 // module.exports = sequelize;
 
-
 // const { Sequelize } = require("sequelize");
 // require("dotenv").config();
-
 
 // const sequelize = new Sequelize(
 //   process.env.DB_NAME || "asterisk",
@@ -44,7 +42,6 @@
 //   .catch((err) => console.error("MySQL Connection Error:", err));
 
 // module.exports = sequelize;
-
 
 const { Sequelize } = require("sequelize");
 require("dotenv").config();
@@ -68,4 +65,3 @@ sequelize
   .catch((err) => console.error("MySQL Connection Error:", err));
 
 module.exports = sequelize;
-

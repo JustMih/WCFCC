@@ -62,17 +62,17 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: true,
     },
-    report_to: {
+    report_to_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
       // Explicitly prevent Sequelize from looking for report_to_id foreign key
-      field: 'report_to', // Explicitly map to the database column name
+      field: 'report_to_id', // Explicitly map to the database column name
     },
-    designation: {
+    designation_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
     },
-    unit_section: {
+    unit_section_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
       comment: "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')"
