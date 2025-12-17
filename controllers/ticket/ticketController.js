@@ -900,7 +900,8 @@ const createTicket = async (req, res) => {
     console.log("- Is empty string:", phoneNumber === "");
     console.log("- Trimmed length:", phoneNumber ? phoneNumber.toString().trim().length : 0);
     
-    let ticketPhoneNumber = phoneNumber || "N/A"; // Provide fallback value
+    // Use null instead of "N/A" for phone number to avoid issues with SMS sending
+    let ticketPhoneNumber = phoneNumber || null;
     console.log("- Final ticketPhoneNumber:", ticketPhoneNumber);
     console.log("- Final type:", typeof ticketPhoneNumber);
     let ticketInstitution = institution;
@@ -931,15 +932,15 @@ const createTicket = async (req, res) => {
         });
       }
       ticketEmployerId = employer.id;
-      ticketPhoneNumber = employerPhone || phoneNumber || "N/A"; // Fallback to original phoneNumber if employerPhone is null
+      ticketPhoneNumber = employerPhone || phoneNumber || null; // Use null instead of "N/A"
       ticketInstitution = employerName;
       requesterFullName = employerName;
     } else if (requester === "Representative") {
-      ticketPhoneNumber = requesterPhoneNumber || phoneNumber || "N/A"; // Fallback to original phoneNumber if requesterPhoneNumber is null
+      ticketPhoneNumber = requesterPhoneNumber || phoneNumber || null; // Use null instead of "N/A"
       requesterFullName = requesterName;
     } else {
       // For regular tickets (Employee), use the original phoneNumber
-      // ticketPhoneNumber is already set to phoneNumber || "N/A" above
+      // ticketPhoneNumber is already set to phoneNumber || null above
       requesterFullName = `${firstName} ${lastName || ""}`;
     }
     
@@ -1181,6 +1182,41 @@ const createTicket = async (req, res) => {
     } else {
       console.log(`⚠️ No supervisors found for section: ${newTicket.section}`);
     }
+
+    // --- Email to Creator (Agent) when ticket is created ---
+    if (userId && !shouldClose) {
+      const creatorUser = await User.findOne({
+        where: { id: userId },
+        attributes: ["id", "full_name", "email"],
+      });
+
+      if (creatorUser && creatorUser.email) {
+        const creatorEmailSubject = `Ticket Created: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+        const creatorBodyHtml = `<p>Dear ${creatorUser.full_name},</p><p>You have successfully created a new ticket.</p>`;
+        const creatorDetailsHtml = `
+          <ul>
+            <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${newTicket.subject}</li>
+            <li><strong>Category:</strong> ${newTicket.category}</li>
+            <li><strong>Description:</strong> ${newTicket.description}</li>
+            <li><strong>Requester:</strong> ${requesterFullName}</li>
+            <li><strong>Assigned To:</strong> ${assignedUser.full_name} (${assignedUser.role})</li>
+            <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
+            <li><strong>Channel:</strong> ${newTicket.channel}</li>
+            <li><strong>Status:</strong> Open</li>
+          </ul>`;
+        const creatorEmailHtmlBody = renderEmailCard(creatorEmailSubject, creatorBodyHtml, creatorDetailsHtml);
+        
+        // Send email in background to avoid blocking
+        sendEmailNonBlocking({
+          to: "rehema.said3@ttcl.co.tz", // For testing, replace with creatorUser.email in production
+          subject: creatorEmailSubject,
+          htmlBody: creatorEmailHtmlBody,
+        });
+        console.log(`✅ Email queued for creator (${creatorUser.full_name}) for ticket ${newTicket.ticket_id}`);
+      }
+    }
+
     // --- Email to Head of Unit if Closed on Creation (background) ---
     if (shouldClose) {
       // Find head-of-unit or director for the ticket's section/unit
@@ -1232,6 +1268,166 @@ const createTicket = async (req, res) => {
             emailError.message
           );
         });
+      }
+
+      // --- Send SMS and Email to Creator/Requester when ticket is closed at creation (same as closeTicket) ---
+      // Get creator user
+      const creatorUser = await User.findOne({
+        where: { id: userId },
+        attributes: ["id", "full_name", "email"],
+      });
+
+      if (creatorUser) {
+        // Create in-system notification for creator
+        const creatorNotificationMsg = `Your ticket ${newTicket.ticket_id} has been closed and resolved. ${resolution_details ? `Resolution: ${resolution_details}` : ''}`;
+        
+        try {
+          await Notification.create({
+            ticket_id: newTicket.id,
+            sender_id: userId,
+            recipient_id: creatorUser.id,
+            message: creatorNotificationMsg,
+            channel: "In-System",
+            status: "unread",
+            category: newTicket.category || "Ticket Closure",
+          });
+          console.log(`✅ In-system notification sent to creator (${creatorUser.full_name}) for ticket ${newTicket.ticket_id}`);
+        } catch (notificationError) {
+          console.error("Error creating notification for creator:", notificationError.message);
+        }
+
+        // Send SMS notification to ticket requester (if phone number is available)
+        // Use the same logic as when creating ticket to extract phone number
+        let ticketPhoneNumberForSMS = null;
+        
+        // Extract phone number based on requester type (same logic as create ticket)
+        if (requester === "Employer") {
+          // For Employer: get phone from employerPhone or ticketPhoneNumber
+          ticketPhoneNumberForSMS = employerPhone || ticketPhoneNumber || null;
+        } else if (requester === "Representative") {
+          // For Representative: get phone from requesterPhoneNumber or ticketPhoneNumber
+          ticketPhoneNumberForSMS = requesterPhoneNumber || ticketPhoneNumber || null;
+        } else {
+          // For Employee, Pensioners, Stakeholders: use ticketPhoneNumber
+          ticketPhoneNumberForSMS = ticketPhoneNumber || null;
+        }
+        
+        console.log(`🔍 Phone number extraction for closed-at-creation ticket ${newTicket.ticket_id}:`, {
+          requester_type: requester,
+          ticket_phone_number: ticketPhoneNumber,
+          employer_phone: employerPhone,
+          requester_phone: requesterPhoneNumber,
+          final_phone: ticketPhoneNumberForSMS
+        });
+        
+        // Format phone number for SMS: use same format as create ticket
+        if (ticketPhoneNumberForSMS && 
+            ticketPhoneNumberForSMS !== "N/A" && 
+            ticketPhoneNumberForSMS !== "n/a" && 
+            ticketPhoneNumberForSMS !== "" && 
+            ticketPhoneNumberForSMS !== null && 
+            ticketPhoneNumberForSMS !== undefined) {
+          
+          let smsRecipient = String(ticketPhoneNumberForSMS || "")
+            .replace(/^\+/, "")
+            .replace(/^0/, "255");
+          const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
+          
+          if (isValidTzPhone(smsRecipient)) {
+            // Truncate resolution details if too long for SMS
+            const resolutionText = resolution_details ? 
+              (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
+              '';
+            const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved. ${resolutionText ? `Resolution: ${resolutionText}` : ''}`;
+            
+            // Send SMS asynchronously to avoid blocking the response
+            sendQuickSms({ message: smsMessage, recipient: smsRecipient })
+              .then(() => {
+                console.log(`✅ SMS sent successfully to ${smsRecipient} for ticket ${newTicket.ticket_id} closed at creation`);
+              })
+              .catch((smsError) => {
+                console.error("Error sending closure SMS:", smsError.message);
+              });
+          } else {
+            console.log(`⚠️ Not sending closure SMS, invalid phone format: ${smsRecipient} (original: ${ticketPhoneNumberForSMS})`);
+          }
+        } else {
+          console.log(`⚠️ No valid phone number found for ticket ${newTicket.ticket_id} closed at creation, skipping SMS notification`);
+        }
+
+        // Send email notification to creator if email is available
+        if (creatorUser.email) {
+          const emailSubject = `Ticket Closed: ${newTicket.subject}`;
+          const emailBody = `
+            <p>Dear ${creatorUser.full_name},</p>
+            <p>Your ticket has been closed successfully. Here are the details:</p>
+          `;
+          
+          const detailsHtml = `
+            <ul>
+              <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+              <li><strong>Subject:</strong> ${newTicket.subject}</li>
+              <li><strong>Category:</strong> ${newTicket.category}</li>
+              <li><strong>Description:</strong> ${newTicket.description}</li>
+              <li><strong>Requester:</strong> ${requesterFullName}</li>
+              <li><strong>Closed By:</strong> ${creatorUser.full_name} (${creatorUser.role || "Agent"})</li>
+              <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+              <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+              <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+            </ul>
+          `;
+          
+          const { renderEmailCard } = require('../../services/emailService');
+          const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
+          
+          sendEmail({
+            // to: creatorUser.email,
+            to: "rehema.said3@ttcl.co.tz",
+            subject: emailSubject,
+            htmlBody: htmlBody,
+          }).catch((emailError) => {
+            console.error(
+              "Error sending closure email to creator:",
+              emailError.message
+            );
+          });
+        }
+
+        // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) for ticket closure ---
+        const supervisors = await findSupervisorForSection(newTicket.section);
+        if (supervisors && supervisors.length > 0) {
+          const supervisorEmailSubject = `Ticket Closed: ${newTicket.subject} (ID: ${newTicket.ticket_id})`;
+          
+          // Send email to each supervisor
+          for (const supervisor of supervisors) {
+            const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A ticket has been closed in your unit/section.</p>`;
+            const supervisorDetailsHtml = `
+              <ul>
+                <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+                <li><strong>Subject:</strong> ${newTicket.subject}</li>
+                <li><strong>Category:</strong> ${newTicket.category}</li>
+                <li><strong>Description:</strong> ${newTicket.description}</li>
+                <li><strong>Requester:</strong> ${requesterFullName}</li>
+                <li><strong>Assigned To:</strong> ${assignedUser.full_name || "Unknown"}</li>
+                <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
+                <li><strong>Closed By:</strong> ${creatorUser.full_name || "Unknown"} (${creatorUser.role || "Unknown Role"})</li>
+                <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+                <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+                <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+              </ul>`;
+            const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+            
+            // Send email in background to avoid blocking
+            sendEmailNonBlocking({
+              to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+              subject: supervisorEmailSubject,
+              htmlBody: supervisorEmailHtmlBody,
+            });
+            console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${newTicket.ticket_id}`);
+          }
+        } else {
+          console.log(`⚠️ No supervisors found for section: ${newTicket.section || newTicket.responsible_unit_name}`);
+        }
       }
     }
     // --- Respond to client immediately ---
@@ -2908,6 +3104,10 @@ const closeTicket = async (req, res) => {
           model: RequesterDetails,
           as: "RequesterDetail",
         },
+        {
+          model: Employer,
+          as: "employer",
+        },
       ],
     });
 
@@ -3032,17 +3232,55 @@ const closeTicket = async (req, res) => {
       }
 
       // Send SMS notification to ticket requester (if phone number is available)
-      // Get phone number from ticket - could be phone_number, phoneNumber, or from requester details
-      let ticketPhoneNumber = ticket.phone_number || ticket.phoneNumber || null;
+      // Use the same logic as when creating ticket to extract phone number
+      let ticketPhoneNumber = null;
       
-      // If phone number not in ticket directly, try to get from requester details
-      if (!ticketPhoneNumber && ticket.RequesterDetail) {
-        ticketPhoneNumber = ticket.RequesterDetail.phone_number || ticket.RequesterDetail.phoneNumber || null;
+      // Extract phone number based on requester type (same logic as create ticket)
+      if (ticket.requester === "Employer") {
+        // For Employer: get phone from employer.phone or ticket.phone_number
+        if (ticket.employer && ticket.employer.phone) {
+          ticketPhoneNumber = ticket.employer.phone;
+        } else {
+          ticketPhoneNumber = ticket.phone_number || null;
+        }
+      } else if (ticket.requester === "Representative") {
+        // For Representative: get phone from RequesterDetail or ticket.phone_number
+        if (ticket.RequesterDetail && ticket.RequesterDetail.phone_number) {
+          ticketPhoneNumber = ticket.RequesterDetail.phone_number;
+        } else {
+          ticketPhoneNumber = ticket.phone_number || null;
+        }
+      } else {
+        // For Employee, Pensioners, Stakeholders: use ticket.phone_number
+        ticketPhoneNumber = ticket.phone_number || null;
       }
       
-      // Format phone number for SMS: ensure it starts with 255 and is followed by 9 digits
-      if (ticketPhoneNumber) {
-        let smsRecipient = String(ticketPhoneNumber)
+      // Fallback: try other fields if still null
+      if (!ticketPhoneNumber) {
+        ticketPhoneNumber = ticket.phoneNumber || ticket.phone || null;
+        if (!ticketPhoneNumber && ticket.RequesterDetail) {
+          ticketPhoneNumber = ticket.RequesterDetail.phone_number || ticket.RequesterDetail.phoneNumber || null;
+        }
+      }
+      
+      console.log(`🔍 Phone number extraction for ticket ${ticket.ticket_id}:`, {
+        requester_type: ticket.requester,
+        ticket_phone_number: ticket.phone_number,
+        employer_phone: ticket.employer?.phone,
+        requester_detail_phone: ticket.RequesterDetail?.phone_number,
+        final_phone: ticketPhoneNumber
+      });
+      
+      // Format phone number for SMS: use same format as create ticket
+      // Ensure it starts with 255 and is followed by 9 digits
+      if (ticketPhoneNumber && 
+          ticketPhoneNumber !== "N/A" && 
+          ticketPhoneNumber !== "n/a" && 
+          ticketPhoneNumber !== "" && 
+          ticketPhoneNumber !== null && 
+          ticketPhoneNumber !== undefined) {
+        
+        let smsRecipient = String(ticketPhoneNumber || "")
           .replace(/^\+/, "")
           .replace(/^0/, "255");
         const isValidTzPhone = (num) => /^255\d{9}$/.test(num);
@@ -3050,6 +3288,7 @@ const closeTicket = async (req, res) => {
         // Get requester name for SMS
         const requesterFullName = getRequesterDisplayName(ticket);
         
+        // Only send SMS if phone is valid (same condition as create ticket)
         if (isValidTzPhone(smsRecipient)) {
           // Truncate resolution details if too long for SMS (SMS limit is usually 160 characters)
           const resolutionText = resolution_details ? 
@@ -3066,10 +3305,10 @@ const closeTicket = async (req, res) => {
               console.error("Error sending closure SMS:", smsError.message);
             });
         } else {
-          console.log(`⚠️ Not sending closure SMS, invalid phone: ${smsRecipient}`);
+          console.log(`⚠️ Not sending closure SMS, invalid phone format: ${smsRecipient} (original: ${ticketPhoneNumber})`);
         }
       } else {
-        console.log(`⚠️ No phone number found for ticket ${ticket.ticket_id}, skipping SMS notification`);
+        console.log(`⚠️ No valid phone number found for ticket ${ticket.ticket_id} (value: ${ticketPhoneNumber}), skipping SMS notification`);
       }
 
       // Send email notification if email is available
