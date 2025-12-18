@@ -172,10 +172,204 @@ const getLostCallsToday = async (req, res) => {
   }
 };
 
+// Get all received calls (ANSWERED calls)
+const getReceivedCalls = async (req, res) => {
+  try {
+    const { limit = 500, offset = 0 } = req.query;
+    const receivedCalls = await sequelize.query(
+      `SELECT 
+        clid AS caller,
+        cdrstarttime AS call_time,
+        disposition,
+        duration,
+        src AS agent_extension,
+        dst AS destination,
+        dstchannel AS destination_channel
+      FROM cdr 
+      WHERE disposition = 'ANSWERED'
+        AND clid IS NOT NULL
+        AND clid != ''
+      ORDER BY cdrstarttime DESC
+      LIMIT :limit OFFSET :offset`,
+      {
+        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const totalCount = await sequelize.query(
+      `SELECT COUNT(*) AS total
+       FROM cdr 
+       WHERE disposition = 'ANSWERED'
+         AND clid IS NOT NULL
+         AND clid != ''`,
+      {
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    res.json({
+      calls: receivedCalls,
+      total: totalCount[0]?.total || 0,
+    });
+  } catch (err) {
+    console.error("Error retrieving received calls:", err.message);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+// Get all lost calls (NO ANSWER calls that were in queue)
+const getLostCalls = async (req, res) => {
+  try {
+    const { limit = 500, offset = 0 } = req.query;
+    const lostCalls = await sequelize.query(
+      `SELECT 
+        clid AS caller,
+        cdrstarttime AS call_time,
+        disposition,
+        duration,
+        src AS agent_extension,
+        dst AS destination,
+        lastapp
+      FROM cdr 
+      WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
+        AND lastapp = 'Queue'
+        AND clid IS NOT NULL
+        AND clid != ''
+      ORDER BY cdrstarttime DESC
+      LIMIT :limit OFFSET :offset`,
+      {
+        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const totalCount = await sequelize.query(
+      `SELECT COUNT(*) AS total
+       FROM cdr 
+       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
+         AND lastapp = 'Queue'
+         AND clid IS NOT NULL
+         AND clid != ''`,
+      {
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    res.json({
+      calls: lostCalls,
+      total: totalCount[0]?.total || 0,
+    });
+  } catch (err) {
+    console.error("Error retrieving lost calls:", err.message);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+// Get all dropped calls (calls that hung up without answer and were NOT in queue)
+const getDroppedCalls = async (req, res) => {
+  try {
+    const { limit = 500, offset = 0 } = req.query;
+    const droppedCalls = await sequelize.query(
+      `SELECT 
+        clid AS caller,
+        cdrstarttime AS call_time,
+        disposition,
+        duration,
+        src AS agent_extension,
+        dst AS destination,
+        lastapp
+      FROM cdr 
+      WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
+        AND (lastapp IS NULL OR lastapp != 'Queue')
+        AND clid IS NOT NULL
+        AND clid != ''
+      ORDER BY cdrstarttime DESC
+      LIMIT :limit OFFSET :offset`,
+      {
+        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const totalCount = await sequelize.query(
+      `SELECT COUNT(*) AS total
+       FROM cdr 
+       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
+         AND (lastapp IS NULL OR lastapp != 'Queue')
+         AND clid IS NOT NULL
+         AND clid != ''`,
+      {
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    res.json({
+      calls: droppedCalls,
+      total: totalCount[0]?.total || 0,
+    });
+  } catch (err) {
+    console.error("Error retrieving dropped calls:", err.message);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+// Mark lost call as answered (called back)
+const markLostCallAsAnswered = async (req, res) => {
+  try {
+    const { caller, call_time } = req.body;
+
+    if (!caller || !call_time) {
+      return res.status(400).json({
+        error: "Missing required fields: caller and call_time",
+      });
+    }
+
+    // Update the CDR record to change disposition from NO ANSWER to ANSWERED
+    const result = await sequelize.query(
+      `UPDATE cdr 
+       SET disposition = 'ANSWERED'
+       WHERE clid = :caller 
+         AND DATE(cdrstarttime) = DATE(:call_time)
+         AND (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
+         AND lastapp = 'Queue'`,
+      {
+        replacements: {
+          caller: caller,
+          call_time: call_time,
+        },
+        type: sequelize.QueryTypes.UPDATE,
+      }
+    );
+
+    // For MySQL, result is an array where first element contains metadata with affectedRows
+    const affectedRows = result?.[0]?.affectedRows || 0;
+
+    if (affectedRows === 0) {
+      return res.status(404).json({
+        error: "Lost call not found or already updated",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Lost call marked as answered",
+      updatedRows: affectedRows,
+    });
+  } catch (err) {
+    console.error("Error marking lost call as answered:", err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
 // ✅ Correct combined export
 module.exports = {
   getCdrCounts,
   getAgentCdrStats,
   dailyAgentCallStatus: getAgentCdrStatsToday,
   getLostCallsToday,
+  getReceivedCalls,
+  getLostCalls,
+  getDroppedCalls,
+  markLostCallAsAnswered,
 };
