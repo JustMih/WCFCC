@@ -24,6 +24,7 @@ const workflowRoutes = require("./workflowRoutes");
 const externalRoutes = require("./externalRoutes");
 const lookupTableRoutes = require("./lookupTableRoutes");
 const ticketUpdateRoutes = require("./ticketUpdateRoutes");
+const ticketChartRoutes = require("./ticketChartRoutes");
 const router = express.Router();
 // const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
@@ -58,6 +59,7 @@ router.use("/public", publicDashboardRoutes);
 router.use("/workflow", workflowRoutes);
 router.use("/external", externalRoutes);
 router.use("/ticket-updates", ticketUpdateRoutes);
+router.use("/ticket-charts", ticketChartRoutes);
 
 router.use("/notifications", notificationRoutes);
 router.use("/complaints", complaintWorkflowRoutes);

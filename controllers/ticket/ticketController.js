@@ -4761,7 +4761,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
   try {
     // Notify all reviewers and supervisors
     const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-    const portalUrl = `https://10.52.0.19/`;
+    const portalUrl = `https://192.168.21.70/`;
     const notifyDetailsHtml = `
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>

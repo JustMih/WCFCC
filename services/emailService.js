@@ -8,7 +8,7 @@ const nodemailer = require('nodemailer');
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = "https://10.52.0.19/";
+  const portalUrl = "https://192.168.21.70/";
   
   return `<!doctype html>
     <html>
