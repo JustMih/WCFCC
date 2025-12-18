@@ -463,111 +463,40 @@ const generateTicketId = async () => {
   return `${prefix}${counterStr}`;
 };
 
-// Function to map function_data IDs to function IDs
-const mapFunctionDataToFunctionId = (functionDataId) => {
-  const mapping = {
-    // Claims Administration Section function_data IDs
-    "aa6e4251-5fa9-4c80-8cec-f9558bd5aa0a":
-      "660e8400-e29b-41d4-a716-446655440001", // Pension Payment
-    "c530d96c-f715-4ad8-9c9f-1265d7603570":
-      "660e8400-e29b-41d4-a716-446655440001", // Compensation Payment
-    "6016c1c0-7832-49ec-a129-4825df540606":
-      "660e8400-e29b-41d4-a716-446655440001", // Approval of Medical Aid
-    "f1599d1f-9515-4241-949d-44bcf69523c6":
-      "660e8400-e29b-41d4-a716-446655440001", // Formal Hearing
-    "9998439c-2dbc-4fd6-a032-07e06e7a8ce4":
-      "660e8400-e29b-41d4-a716-446655440001", // HCP & HSP Matters
+// Function to get function_id from function_data_id using database relationship
+const getFunctionIdFromFunctionDataId = async (functionDataId) => {
+  if (!functionDataId) {
+    return null;
+  }
 
-    // Compliance Section function_data IDs
-    "f1599d1f-9515-4241-949d-44bcf69523ca":
-      "660e8400-e29b-41d4-a716-446655440002", // Contribution
-    "9998439c-2dbc-4fd6-a032-07e06e7a8ced":
-      "660e8400-e29b-41d4-a716-446655440002", // Registration
-    "9998439c-2dbc-4fd6-a032-07e06e7a8ce2":
-      "660e8400-e29b-41d4-a716-446655440002", // Annual Return
-    "9998439c-2dbc-4fd6-a032-07e06e7a8ce1":
-      "660e8400-e29b-41d4-a716-446655440002", // Inspection
-    "9998439c-2dbc-4fd6-a032-07e06e7a8cea":
-      "660e8400-e29b-41d4-a716-446655440002", // Generation of Control Number
-    "9998439c-2dbc-4fd6-a032-07e06e7a8cec":
-      "660e8400-e29b-41d4-a716-446655440002", // Add/Remove Employee on Payroll
+  try {
+    // First, check if it's already a function_id by trying to find it in Function table
+    const functionRecord = await Function.findOne({
+      where: { id: functionDataId }
+    });
 
-    // Records Section function_data IDs
-    "8f9d02a4-b62a-4aeb-97cf-56a46e3b6603":
-      "660e8400-e29b-41d4-a716-446655440003", // Correspondences
+    if (functionRecord) {
+      // It's already a function_id, return it
+      return functionDataId;
+    }
 
-    // Claims Assessment Section function_data IDs
-    "b5483c58-6915-49e3-92cc-d6a07bc9390f":
-      "660e8400-e29b-41d4-a716-446655440004", // Medical Advice Panel (MAP)
-    "bc43ec3f-d785-4a93-b7a1-70d80d44c89b":
-      "660e8400-e29b-41d4-a716-446655440004", // Impairment Assessment
-    "b0091d2a-3f79-4e79-8e5b-8fc301857e3b":
-      "660e8400-e29b-41d4-a716-446655440004", // Assessment Matters
-    "bc43ec3f-d785-4a93-b7a1-70d80d44c89a":
-      "660e8400-e29b-41d4-a716-446655440004", // HCP & HSP Matters
+    // If not found in Function table, try to find it in FunctionData table
+    const functionData = await FunctionData.findOne({
+      where: { id: functionDataId },
+      include: [{ model: Function, as: "function" }],
+    });
 
-    // Workplace Risk Assessment Section function_data IDs
-    "7ef33e1f-9485-4d38-8d78-58d90e10df3f":
-      "660e8400-e29b-41d4-a716-446655440005", // Workplace Risk Assessment Matters
+    if (functionData && functionData.function_id) {
+      // Return the function_id from the relationship
+      return functionData.function_id;
+    }
 
-    // Planning and Research function_data IDs
-    "fb8c9f9a-17ec-4fd6-a214-b1f69183f937":
-      "660e8400-e29b-41d4-a716-446655440006", // Planning and Research Matters
-
-    // Finance Section function_data IDs
-    "2650de56-7294-4483-85f2-c79f770b7cb5":
-      "660e8400-e29b-41d4-a716-446655440007", // Payments
-
-    // Investment function_data IDs
-    "6f4f72df-0b0e-4ba2-b233-97c4b29dfbb3":
-      "660e8400-e29b-41d4-a716-446655440008", // Investment Matters
-
-    // Legal Unit function_data IDs
-    "1af12ab6-14ee-4aa6-9b8b-0f8bb2ad60bc":
-      "660e8400-e29b-41d4-a716-446655440009", // Legal Matters
-    "e3cdb476-6459-4e8c-8eb0-ff1e364b37b0":
-      "660e8400-e29b-41d4-a716-446655440009", // Review Decision
-
-    // ICT Unit function_data IDs
-    "1037d524-d7a3-4f15-b470-0380bb50f7c3":
-      "660e8400-e29b-41d4-a716-446655440010", // ICT Technical Support
-
-    // Actuarial Statistics and Risk Management function_data IDs
-    "4d49728c-367c-4b12-9352-42d53d858f52":
-      "660e8400-e29b-41d4-a716-446655440011", // Actuarial Services and Risk Management Matters
-    "17226401-7543-49fd-949c-552f9c6d1866":
-      "660e8400-e29b-41d4-a716-446655440011", // Statistics Matters
-
-    // Public Relation Unit function_data IDs
-    "d1a44228-05a2-4c4a-a8c6-3a0aa33a5ab4":
-      "660e8400-e29b-41d4-a716-446655440012", // Awareness
-    "e1cd3376-e5e4-40f2-9f6a-9db741245eb5":
-      "660e8400-e29b-41d4-a716-446655440012", // Donation/ Sponsorship Matters
-    "f065982f-fbab-4e7f-a0a0-d3b4e17907fd":
-      "660e8400-e29b-41d4-a716-446655440012", // Exhibition Matters
-    "f887ef83-52c4-49f6-b1a3-2743ae34f35b":
-      "660e8400-e29b-41d4-a716-446655440012", // Advertisement Matters
-
-    // Procurement Management Unit function_data IDs
-    "c41e8752-07c1-4b3b-a58b-d0cbfe3f1cc0":
-      "660e8400-e29b-41d4-a716-446655440013", // Procurement Matters
-
-    // HR/Admin Unit function_data IDs
-    "2858ff9b-0c44-4c8d-80df-0f40187e1309":
-      "660e8400-e29b-41d4-a716-446655440014", // Recruitment Matters
-    "56f92083-d168-4aa2-a4a9-3d58e59b55e2":
-      "660e8400-e29b-41d4-a716-446655440014", // Human Resource Matters
-    "d663c582-d7e7-4b80-b5df-64879fa08d62":
-      "660e8400-e29b-41d4-a716-446655440014", // Leave Management & Intern Attachments
-    "56f92083-d168-4aa2-a4a9-3d58e59b55e3":
-      "660e8400-e29b-41d4-a716-446655440014", // DG's Office Matters
-
-    // Internal Audit Unit function_data IDs
-    "f0015b29-bab2-4b9b-9d10-380f88b6b03e":
-      "660e8400-e29b-41d4-a716-446655440015", // Audit Matters
-  };
-
-  return mapping[functionDataId] || functionDataId; // Return original if not found in mapping
+    // If not found, return null
+    return null;
+  } catch (error) {
+    console.error("Error getting function_id from function_data_id:", error);
+    return null;
+  }
 };
 
 // Helper function to find head of unit or manager for a section
@@ -765,10 +694,47 @@ const createTicket = async (req, res) => {
         .json({ message: "User ID is required to create a ticket." });
     }
 
-    // Map function_data ID to function ID if needed
-    const mappedResponsibleUnitId = mapFunctionDataToFunctionId(
-      responsible_unit_id || functionId
-    );
+    // Get function_id from function_data_id using database relationship
+    const inputId = responsible_unit_id || functionId;
+    const mappedResponsibleUnitId = await getFunctionIdFromFunctionDataId(inputId);
+    
+    // Get the function_data with its function and section relationships
+    let functionDataWithRelations = null;
+    if (inputId) {
+      try {
+        // First check if inputId is a function_data_id
+        functionDataWithRelations = await FunctionData.findOne({
+          where: { id: inputId },
+          include: [
+            {
+              model: Function,
+              as: "function",
+              include: [
+                {
+                  model: Section,
+                  as: "section"
+                }
+              ]
+            }
+          ],
+        });
+      } catch (error) {
+        console.error("Error fetching function_data with relations:", error);
+      }
+    }
+    
+    // Get responsibleUnit (Function) with section relationship early for focal-person assignment
+    let responsibleUnit = null;
+    if (mappedResponsibleUnitId) {
+      try {
+        responsibleUnit = await Function.findOne({
+          where: { id: mappedResponsibleUnitId },
+          include: [{ model: Section, as: "section" }],
+        });
+      } catch (error) {
+        console.error("Error fetching responsibleUnit:", error);
+      }
+    }
 
     // Get the function name to use as subject if subject is not provided
     let finalSubject = subject;
@@ -833,20 +799,70 @@ const createTicket = async (req, res) => {
 
       // If no allocated user from search response, assign to focal-person with matching section
       if (!assignedUser) {
-        // Get the section from ticket data - use section directly
-        const ticketSection = section;
+        // Helper function to determine if section is directorate or unit
+        const getSectionType = (sectionName) => {
+          if (!sectionName) return null;
+          const name = sectionName.toLowerCase();
+          if (name.includes('directorate')) {
+            return 'directorate';
+          } else if (name.includes('unit')) {
+            return 'unit';
+          }
+          return null;
+        };
+
+        // Get section and sub-section from function_data relationship (most accurate)
+        let sectionName = null;
+        let subSectionName = null;
+        
+        // First, try to get from function_data relationship
+        if (functionDataWithRelations?.function?.section?.name) {
+          sectionName = functionDataWithRelations.function.section.name;
+          subSectionName = functionDataWithRelations.function.name;
+          console.log("Using section/sub-section from function_data relationship:", sectionName, "/", subSectionName);
+        } 
+        // If not available, try to get from responsibleUnit
+        else if (responsibleUnit?.section?.name) {
+          sectionName = responsibleUnit.section.name;
+          subSectionName = responsibleUnit.name;
+          console.log("Using section/sub-section from responsibleUnit:", sectionName, "/", subSectionName);
+        }
+        // Fallback to section from request body
+        else if (section && section.trim() !== "") {
+          sectionName = section;
+          subSectionName = finalSection || responsible_unit_name;
+          console.log("Using section/sub-section from request body:", sectionName, "/", subSectionName);
+        }
+
+        // Determine section type (directorate or unit)
+        const sectionType = getSectionType(sectionName);
+        let ticketSectionForFocalPerson = null;
+
+        if (sectionType === 'directorate') {
+          // For directorate: use section name
+          ticketSectionForFocalPerson = sectionName;
+          console.log("Section is directorate, using section name for focal-person:", ticketSectionForFocalPerson);
+        } else if (sectionType === 'unit') {
+          // For unit: use sub-section (function name)
+          ticketSectionForFocalPerson = subSectionName;
+          console.log("Section is unit, using sub-section (function name) for focal-person:", ticketSectionForFocalPerson);
+        } else {
+          // Fallback: use section name if available, otherwise sub-section
+          ticketSectionForFocalPerson = sectionName || subSectionName;
+          console.log("Section type unknown, using fallback for focal-person:", ticketSectionForFocalPerson);
+        }
 
         console.log(
           "TicketSection for focal-person assignment:",
-          ticketSection
+          ticketSectionForFocalPerson
         );
 
-        // Only query if ticketSection is defined and not empty
-        if (ticketSection && ticketSection.trim() !== "") {
+        // Only query if ticketSectionForFocalPerson is defined and not empty
+        if (ticketSectionForFocalPerson && ticketSectionForFocalPerson.trim() !== "") {
           assignedUser = await User.findOne({
             where: {
               role: "focal-person",
-              unit_section: ticketSection,
+              unit_section: ticketSectionForFocalPerson,
             },
             attributes: ["id", "full_name", "email", "role", "unit_section"],
           });
@@ -881,14 +897,34 @@ const createTicket = async (req, res) => {
 
     // --- Ticket Data Preparation ---
     const ticketId = await generateTicketId();
-    const responsibleUnit = await Function.findOne({
-      where: { id: mappedResponsibleUnitId },
-      include: [{ model: Section, as: "section" }],
-    });
 
     console.log("ResponsibleUnit found:", responsibleUnit);
     console.log("ResponsibleUnit section:", responsibleUnit?.section);
     console.log("Mapped responsible unit ID:", mappedResponsibleUnitId);
+    console.log("FunctionData with relations:", functionDataWithRelations);
+    
+    // Determine section and sub_section from function_data relationship (most accurate)
+    let finalSectionName = null;
+    let finalSubSectionName = null;
+    
+    // Priority 1: Get from function_data relationship
+    if (functionDataWithRelations?.function?.section?.name) {
+      finalSectionName = functionDataWithRelations.function.section.name;
+      finalSubSectionName = functionDataWithRelations.function.name;
+      console.log("Using section/sub-section from function_data relationship:", finalSectionName, "/", finalSubSectionName);
+    }
+    // Priority 2: Get from responsibleUnit
+    else if (responsibleUnit?.section?.name) {
+      finalSectionName = responsibleUnit.section.name;
+      finalSubSectionName = responsibleUnit.name;
+      console.log("Using section/sub-section from responsibleUnit:", finalSectionName, "/", finalSubSectionName);
+    }
+    // Priority 3: Fallback to request body or defaults
+    else {
+      finalSectionName = responsible_unit_name || section || "Unit";
+      finalSubSectionName = responsibleUnit?.name || finalSection || "Unit";
+      console.log("Using section/sub-section from fallback:", finalSectionName, "/", finalSubSectionName);
+    }
 
     const initialStatus = shouldClose ? "Closed" : status || "Open";
     let ticketEmployerId = null;
@@ -968,9 +1004,8 @@ const createTicket = async (req, res) => {
       category,
       responsible_unit_id: mappedResponsibleUnitId,
       responsible_unit_name: responsible_unit_name,
-      section:
-        responsibleUnit?.section?.name || responsible_unit_name || "Unit",
-      sub_section: responsibleUnit?.name || finalSection || "Unit",
+      section: finalSectionName || "Unit",
+      sub_section: finalSubSectionName || "Unit",
       subject: finalSubject || "",
       description,
       status: initialStatus,
@@ -6820,9 +6855,9 @@ const updateReversedTicketDetails = async (req, res) => {
       return res.status(403).json({ message: "You can only update tickets assigned to you" });
     }
 
-    // Map function_data ID to function ID if needed
+    // Get function_id from function_data_id using database relationship
     console.log('🔍 Received responsible_unit_id:', responsible_unit_id);
-    const mappedResponsibleUnitId = mapFunctionDataToFunctionId(responsible_unit_id);
+    const mappedResponsibleUnitId = await getFunctionIdFromFunctionDataId(responsible_unit_id);
     console.log('🔍 Mapped to function ID:', mappedResponsibleUnitId);
 
     // Update the ticket details
@@ -7157,7 +7192,7 @@ const managerSendToDirector = async (req, res) => {
 module.exports = {
   getTicketCounts,
   generateTicketId,
-  mapFunctionDataToFunctionId,
+  getFunctionIdFromFunctionDataId,
   createTicket,
   getTickets,
   getOpenTickets,
