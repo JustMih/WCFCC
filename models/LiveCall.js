@@ -13,7 +13,7 @@
 //       tableName: "live_calls",
 //       timestamps: false,
 //     });
-  
+
 //     return LiveCall;
 //   };
 // models/LiveCall.js
@@ -37,6 +37,7 @@ module.exports = (sequelize, DataTypes) => {
       estimated_wait_time: DataTypes.INTEGER,
       voicemail_path: DataTypes.STRING,
       agent_callback: DataTypes.BOOLEAN,
+      agent: DataTypes.STRING,
     },
     {
       tableName: "live_calls",
@@ -46,5 +47,3 @@ module.exports = (sequelize, DataTypes) => {
 
   return LiveCall;
 };
-
-  

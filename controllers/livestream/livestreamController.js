@@ -1,9 +1,10 @@
-'use strict';
+"use strict";
 
 const sequelize = require("../../config/mysql_connection");
 const { DataTypes, Op } = require("sequelize");
 const moment = require("moment");
 const CEL = require("../../models/CEL")(sequelize, DataTypes);
+const QueueLog = require("../../models/QueueLog")(sequelize, DataTypes);
 
 /* ------------------------------ SOCKET STATE ------------------------------ */
 let ioInstance = null;
@@ -30,7 +31,10 @@ const emitLiveCall = (callData) => {
   }
 
   if (callData.call_start && !callData.call_end) {
-    callData.duration_secs = moment().diff(moment(callData.call_start), "seconds");
+    callData.duration_secs = moment().diff(
+      moment(callData.call_start),
+      "seconds"
+    );
   }
 
   ioInstance.emit("live_call_update", callData);
@@ -77,11 +81,17 @@ const getAllLiveCalls = async (req, res) => {
           queue_entry_time: null,
           estimated_wait_time: null,
           voicemail_path: null,
-          missed: false
+          missed: false,
+          agent: null,
         };
       }
 
       const c = calls[key];
+
+      // Initialize agent field if not present
+      if (!c.agent) {
+        c.agent = null;
+      }
 
       switch (row.eventtype) {
         case "CHAN_START":
@@ -104,9 +114,9 @@ const getAllLiveCalls = async (req, res) => {
         case "BRIDGE_ENTER":
           // If call has not been answered and Bridge Enter event occurs, mark it as answered and active
           // if (!c.call_answered) {
-            // c.call_answered = row.eventtime; // Mark call as answered
-            c.status = "active"; // Set status to active since the call is bridged
-            console.log(`🔗 BRIDGE_ENTER: ${key} at ${row.eventtime}`);
+          // c.call_answered = row.eventtime; // Mark call as answered
+          c.status = "active"; // Set status to active since the call is bridged
+          console.log(`🔗 BRIDGE_ENTER: ${key} at ${row.eventtime}`);
           // }
           break;
 
@@ -138,29 +148,68 @@ const getAllLiveCalls = async (req, res) => {
 
       // Duration & wait time (calculated before formatting)
       if (c.call_start && c.call_end) {
-        c.duration_secs = Math.floor((new Date(c.call_end) - new Date(c.call_start)) / 1000);
+        c.duration_secs = Math.floor(
+          (new Date(c.call_end) - new Date(c.call_start)) / 1000
+        );
       }
       if (c.queue_entry_time && c.call_answered) {
-        c.estimated_wait_time = Math.floor((new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000);
+        c.estimated_wait_time = Math.floor(
+          (new Date(c.call_answered) - new Date(c.queue_entry_time)) / 1000
+        );
       }
 
       // Format timestamps
-      if (c.call_start) c.call_start = moment(c.call_start).format('YYYY-MM-DD HH:mm:ss');
-      if (c.call_answered) c.call_answered = moment(c.call_answered).format('YYYY-MM-DD HH:mm:ss');
-      if (c.call_end) c.call_end = moment(c.call_end).format('YYYY-MM-DD HH:mm:ss');
-      if (c.queue_entry_time) c.queue_entry_time = moment(c.queue_entry_time).format('YYYY-MM-DD HH:mm:ss');
+      if (c.call_start)
+        c.call_start = moment(c.call_start).format("YYYY-MM-DD HH:mm:ss");
+      if (c.call_answered)
+        c.call_answered = moment(c.call_answered).format("YYYY-MM-DD HH:mm:ss");
+      if (c.call_end)
+        c.call_end = moment(c.call_end).format("YYYY-MM-DD HH:mm:ss");
+      if (c.queue_entry_time)
+        c.queue_entry_time = moment(c.queue_entry_time).format(
+          "YYYY-MM-DD HH:mm:ss"
+        );
 
       // Emit only on CHAN_START (start of live call)
-      if (['CHAN_START', 'ANSWER', 'APP_START'].includes(row.eventtype)) {
+      if (["CHAN_START", "ANSWER", "APP_START"].includes(row.eventtype)) {
         emitLiveCall({ ...c });
       }
-      
+    }
+
+    // Fetch agent information from queue_log for all calls
+    const callIds = Object.keys(calls);
+    if (callIds.length > 0) {
+      const agentConnects = await QueueLog.findAll({
+        where: {
+          callid: { [Op.in]: callIds },
+          event: "AGENTCONNECT",
+          agent: { [Op.ne]: null },
+        },
+        order: [["time", "DESC"]],
+        attributes: ["callid", "agent", "time"],
+      });
+
+      // Map agent information to calls (use most recent agent connect per call)
+      const agentMap = {};
+      agentConnects.forEach((connect) => {
+        const callId = connect.callid;
+        if (!agentMap[callId]) {
+          agentMap[callId] = connect.agent;
+        }
+      });
+
+      // Assign agents to calls
+      Object.keys(calls).forEach((callId) => {
+        if (agentMap[callId]) {
+          calls[callId].agent = agentMap[callId];
+        }
+      });
     }
 
     // Sort result
     const result = Object.values(calls).sort((a, b) => {
-      if (a.status === 'active' && b.status !== 'active') return -1;
-      if (b.status === 'active' && a.status !== 'active') return 1;
+      if (a.status === "active" && b.status !== "active") return -1;
+      if (b.status === "active" && a.status !== "active") return 1;
       return new Date(b.call_start || 0) - new Date(a.call_start || 0);
     });
 
@@ -175,5 +224,5 @@ const getAllLiveCalls = async (req, res) => {
 module.exports = {
   setupSocket,
   emitLiveCall,
-  getAllLiveCalls
+  getAllLiveCalls,
 };
