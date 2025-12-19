@@ -299,14 +299,25 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
-      // Find the Section by name
+      // Check if it's a Section (directorate) or Function (unit)
       const section = await Section.findOne({
         where: { name: responsible_unit_name },
         transaction
       });
+
+      let functionUnit = null;
+      
+      // If not found as Section, check if it's a Function (unit like "ICT Units")
       if (!section) {
-        await safeRollback(transaction);
-        return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+        functionUnit = await FunctionModel.findOne({
+          where: { name: responsible_unit_name },
+          transaction
+        });
+        
+        if (!functionUnit) {
+          await safeRollback(transaction);
+          return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+        }
       }
 
       // Only update responsible_unit_name, do not require section/function/unit head
@@ -331,35 +342,114 @@ const convertOrForwardTicket = async (req, res) => {
       // Find a user with the target role in the selected unit
       let unitUser = null;
       if (targetRole) {
+        console.log(`DEBUG: Looking for ${targetRole} in unit: "${responsible_unit_name}"`);
+        
+        // Try exact match first
         unitUser = await User.findOne({
           where: { 
-            unit_section: responsible_unit_name, // Exact match, no lowercase conversion
+            unit_section: responsible_unit_name,
             role: targetRole 
           },
           transaction
         });
+        
+        // If not found, try case-insensitive match
+        if (!unitUser) {
+          console.log(`DEBUG: Exact match not found, trying case-insensitive match`);
+          unitUser = await User.findOne({
+            where: {
+              [Op.and]: [
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                  Sequelize.fn('LOWER', responsible_unit_name)
+                ),
+                { role: targetRole }
+              ]
+            },
+            transaction
+          });
+        }
+        
+        // If still not found, list all users with that role to see what unit_section values exist
+        if (!unitUser) {
+          console.log(`DEBUG: No ${targetRole} found for unit "${responsible_unit_name}"`);
+          const allUsersWithRole = await User.findAll({
+            where: { role: targetRole },
+            attributes: ['id', 'full_name', 'unit_section', 'role'],
+            transaction
+          });
+          console.log(`DEBUG: All users with role ${targetRole}:`, allUsersWithRole.map(u => ({ 
+            id: u.id, 
+            name: u.full_name, 
+            unit_section: u.unit_section 
+          })));
+        } else {
+          console.log(`DEBUG: Found ${targetRole}: ${unitUser.full_name} (${unitUser.id}) with unit_section: "${unitUser.unit_section}"`);
+        }
       }
 
       // If no user found with target role, find any user in that unit
       let anyUnitUser = null;
       if (!unitUser) {
+        console.log(`DEBUG: Looking for any user in unit: "${responsible_unit_name}"`);
+        
+        // Try exact match first
         anyUnitUser = await User.findOne({
-          where: { unit_section: responsible_unit_name }, // Exact match, no lowercase conversion
+          where: { unit_section: responsible_unit_name },
           transaction
         });
+        
+        // If not found, try case-insensitive match
+        if (!anyUnitUser) {
+          console.log(`DEBUG: Exact match not found, trying case-insensitive match`);
+          anyUnitUser = await User.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+              Sequelize.fn('LOWER', responsible_unit_name)
+            ),
+            transaction
+          });
+        }
+        
+        // If still not found, list all users to see what unit_section values exist
+        if (!anyUnitUser) {
+          console.log(`DEBUG: No user found for unit "${responsible_unit_name}"`);
+          const allUsersInSimilarUnits = await User.findAll({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+              { [Op.like]: `%${responsible_unit_name.toLowerCase()}%` }
+            ),
+            attributes: ['id', 'full_name', 'unit_section', 'role'],
+            limit: 10,
+            transaction
+          });
+          console.log(`DEBUG: Users with similar unit_section:`, allUsersInSimilarUnits.map(u => ({ 
+            id: u.id, 
+            name: u.full_name, 
+            unit_section: u.unit_section,
+            role: u.role
+          })));
+        } else {
+          console.log(`DEBUG: Found any user: ${anyUnitUser.full_name} (${anyUnitUser.id}) with unit_section: "${anyUnitUser.unit_section}" and role: ${anyUnitUser.role}`);
+        }
       }
 
       // Assign the ticket
       if (unitUser) {
         ticket.assigned_to_role = unitUser.role;
         ticket.assigned_to_id = unitUser.id; // Assign to the target role user
+        console.log(`DEBUG: Assigned to ${targetRole}: ${unitUser.full_name} (${unitUser.id})`);
       } else if (anyUnitUser) {
         ticket.assigned_to_role = anyUnitUser.role;
         ticket.assigned_to_id = anyUnitUser.id; // Assign to any user in the unit
+        console.log(`DEBUG: Assigned to any user in unit: ${anyUnitUser.full_name} (${anyUnitUser.id}) with role: ${anyUnitUser.role}`);
       } else {
-        // If no user found in the unit, keep with reviewer as fallback
-        ticket.assigned_to_role = 'reviewer';
-        ticket.assigned_to_id = userId;
+        // If no user found in the unit, this is an error - don't assign back to reviewer
+        await safeRollback(transaction);
+        console.error(`ERROR: No user found for unit "${responsible_unit_name}". Cannot forward ticket.`);
+        return res.status(404).json({ 
+          message: `No user found in unit '${responsible_unit_name}'. Please ensure there is a head of unit or any user assigned to this unit.` 
+        });
       }
 
       ticket.forwarded_by_id = userId;

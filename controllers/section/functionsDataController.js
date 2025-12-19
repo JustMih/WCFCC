@@ -8,14 +8,84 @@ const { Op } = require("sequelize");
 
 const getAllFunction = async (req, res) => {
   try {
-    const data = await Section.findAll({
+    // Get all sections (directorates and units)
+    const allSections = await Section.findAll({
       order: [['name', 'ASC']]
     });
 
+    // Find the "Units" section (note: it's "Units" plural, not "Unit")
+    const unitSection = await Section.findOne({
+      where: { name: 'Units' }
+    });
+
+    console.log('DEBUG: Unit section found:', unitSection ? unitSection.name : 'Not found');
+
+    let sectionsList = [...allSections];
+
+    // If "Units" section exists, get all functions that belong to it
+    if (unitSection) {
+      const unitFunctions = await Function.findAll({
+        where: { section_id: unitSection.id },
+        order: [['name', 'ASC']],
+        attributes: ['id', 'name', 'section_id', 'created_at', 'updated_at']
+      });
+
+      console.log('DEBUG: Unit functions found:', unitFunctions.length, unitFunctions.map(f => f.name));
+
+      // Add functions as sections (so "ICT Unit" appears as a section)
+      unitFunctions.forEach(func => {
+        sectionsList.push({
+          id: func.id,
+          name: func.name, // e.g., "ICT Unit"
+          section_id: func.section_id,
+          created_at: func.created_at,
+          updated_at: func.updated_at
+        });
+      });
+    } else {
+      console.log('DEBUG: Unit section not found, trying case-insensitive search...');
+      // Try case-insensitive search - get all sections and find one with "unit" in name
+      const allSectionsForSearch = await Section.findAll();
+      const unitSectionFound = allSectionsForSearch.find(s => 
+        s.name.toLowerCase().includes('unit')
+      );
+      
+      if (unitSectionFound) {
+        console.log('DEBUG: Found unit section with case-insensitive:', unitSectionFound.name);
+        const unitFunctions = await Function.findAll({
+          where: { section_id: unitSectionFound.id },
+          order: [['name', 'ASC']],
+          attributes: ['id', 'name', 'section_id', 'created_at', 'updated_at']
+        });
+
+        console.log('DEBUG: Unit functions found:', unitFunctions.length, unitFunctions.map(f => f.name));
+
+        unitFunctions.forEach(func => {
+          sectionsList.push({
+            id: func.id,
+            name: func.name,
+            section_id: func.section_id,
+            created_at: func.created_at,
+            updated_at: func.updated_at
+          });
+        });
+      } else {
+        console.log('DEBUG: No unit section found at all');
+      }
+    }
+
+    // Remove the generic "Units" section from the list (we only want specific units like "ICT Unit")
+    sectionsList = sectionsList.filter(section => 
+      section.name !== 'Unit' && section.name !== 'Units'
+    );
+
+    // Sort by name
+    sectionsList.sort((a, b) => a.name.localeCompare(b.name));
+
     res.status(200).json({
       message: 'Units data fetched successfully',
-      totalFunction: data.length,   // ✅ use data.length, not Function.length
-      data: data                        // ✅ use the result of your query
+      totalFunction: sectionsList.length,
+      data: sectionsList
     });
   } catch (err) {
     console.error(err);

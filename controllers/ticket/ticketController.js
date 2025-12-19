@@ -15,6 +15,7 @@ const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
+const TicketUpdate = require("../../models/TicketUpdate");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 const workflowService = require("../../services/workflowCommunicationService");
 
@@ -2738,6 +2739,20 @@ const getAllTickets = async (req, res) => {
             model: RequesterDetails,
             as: "RequesterDetail",
           },
+          {
+            model: TicketUpdate,
+            as: "updates",
+            attributes: ["id", "ticket_id", "user_id", "user_name", "user_role", "update_text", "update_date", "is_active", "assignment_id", "created_at", "updated_at"],
+            separate: true,
+            order: [["update_date", "DESC"]],
+            include: [
+              {
+                model: User,
+                as: "user",
+                attributes: ["id", "full_name", "email", "role"],
+              }
+            ]
+          },
         ],
         order: [["created_at", "DESC"]],
       });
@@ -2789,6 +2804,20 @@ const getAllTickets = async (req, res) => {
           {
             model: RequesterDetails,
             as: "RequesterDetail",
+          },
+          {
+            model: TicketUpdate,
+            as: "updates",
+            attributes: ["id", "ticket_id", "user_id", "user_name", "user_role", "update_text", "update_date", "is_active", "assignment_id", "created_at", "updated_at"],
+            separate: true,
+            order: [["update_date", "DESC"]],
+            include: [
+              {
+                model: User,
+                as: "user",
+                attributes: ["id", "full_name", "email", "role"],
+              }
+            ]
           },
         ],
         order: [["created_at", "DESC"]],
@@ -4874,11 +4903,53 @@ const reverseTicket = async (req, res) => {
     let targetUserId = null;
     let targetUserRole = null;
 
+    // Check if this is a Minor complaint from head of unit
+    const isMinorComplaint = ticket.category === "Complaint" && ticket.complaint_type === "Minor";
+    const isFromHeadOfUnit = ticket.responsible_unit_name && 
+                             !ticket.responsible_unit_name.toLowerCase().includes("directorate");
+    const isAttendeeReversing = req.user && req.user.role === "attendee";
+
     // If there are at least 2 assignments, use the second most recent
     if (assignments.length >= 2) {
       prevAssignment = assignments[1];
       targetUserId = prevAssignment.assigned_to_id;
       targetUserRole = prevAssignment.assigned_to_role;
+      
+      // For Minor complaints from head of unit reversed by attendee, skip reviewer and go to head of unit
+      if (isMinorComplaint && isFromHeadOfUnit && isAttendeeReversing && targetUserRole === "reviewer") {
+        // Find the head of unit assignment in history
+        const headOfUnitAssignment = assignments.find(assignment => 
+          assignment.assigned_to_role === "head-of-unit" || 
+          assignment.assigned_by_role === "head-of-unit"
+        );
+        
+        if (headOfUnitAssignment) {
+          // If head of unit was assigned to, use that
+          if (headOfUnitAssignment.assigned_to_role === "head-of-unit") {
+            prevAssignment = headOfUnitAssignment;
+            targetUserId = headOfUnitAssignment.assigned_to_id;
+            targetUserRole = headOfUnitAssignment.assigned_to_role;
+            console.log(`DEBUG: Minor complaint from head of unit - skipping reviewer, returning to head of unit: ${targetUserId}`);
+          } else if (headOfUnitAssignment.assigned_by_role === "head-of-unit") {
+            // If head of unit forwarded it, find the head of unit user
+            const headOfUnitUser = await User.findOne({
+              where: { 
+                role: "head-of-unit",
+                unit_section: ticket.responsible_unit_name
+              }
+            });
+            if (headOfUnitUser) {
+              prevAssignment = {
+                assigned_to_id: headOfUnitUser.id,
+                assigned_to_role: "head-of-unit"
+              };
+              targetUserId = headOfUnitUser.id;
+              targetUserRole = "head-of-unit";
+              console.log(`DEBUG: Minor complaint from head of unit - skipping reviewer, returning to head of unit: ${targetUserId}`);
+            }
+          }
+        }
+      }
     } else {
       // If no previous assignments, reverse to the ticket creator
       console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
@@ -6989,7 +7060,7 @@ const updateReversedTicketDetails = async (req, res) => {
   }
 };
 
-// Manager send to Director when receiving from Attendee (Major Complaint Directorate)
+// Manager send to Director when receiving from Attendee (Complaint Directorate - Major or Minor)
 const managerSendToDirector = async (req, res) => {
   try {
     const { ticketId } = req.params;
@@ -7028,17 +7099,40 @@ const managerSendToDirector = async (req, res) => {
       return res.status(403).json({ message: "Ticket is not assigned to you" });
     }
 
-    // Check if this is Major Complaint Directorate
-    const isMajorComplaintDirectorate = ticket.category === "Complaint" && 
-                                        ticket.complaint_type === "Major" &&
-                                        ticket.responsible_unit_name && 
-                                        ticket.responsible_unit_name.toLowerCase().includes("directorate");
+    // Check if this is a Complaint (Major or Minor)
+    // Normalize complaint_type for case-insensitive comparison
+    const complaintType = ticket.complaint_type ? ticket.complaint_type.trim().toLowerCase() : "";
+    const isComplaint = ticket.category === "Complaint";
+    const isMajorOrMinor = complaintType === "major" || complaintType === "minor";
+    
+    console.log("DEBUG managerSendToDirector:", {
+      category: ticket.category,
+      complaint_type: ticket.complaint_type,
+      complaintType_normalized: complaintType,
+      responsible_unit_name: ticket.responsible_unit_name,
+      isComplaint,
+      isMajorOrMinor
+    });
 
-    if (!isMajorComplaintDirectorate) {
+    // Allow any Complaint (Major or Minor) - no directorate requirement
+    if (!isComplaint) {
       return res.status(400).json({ 
-        message: "This action is only for Major Complaint Directorate tickets" 
+        message: `This action is only for Complaint tickets. Current category: ${ticket.category}` 
       });
     }
+    
+    if (!isMajorOrMinor) {
+      return res.status(400).json({ 
+        message: `This action is only for Major or Minor complaints. Current type: ${ticket.complaint_type || 'N/A'}` 
+      });
+    }
+    
+    // Log success for debugging
+    console.log("✅ managerSendToDirector check passed - allowing:", {
+      category: ticket.category,
+      complaint_type: ticket.complaint_type,
+      responsible_unit_name: ticket.responsible_unit_name
+    });
 
     // Check if ticket came from Attendee (most recent assignment)
     const assignments = await TicketAssignment.findAll({
