@@ -21,6 +21,9 @@ router.post('/ticket/:ticketId/attend', attendTicket);
 // Recommend ticket to next step
 router.post('/ticket/:ticketId/recommend', recommendTicket);
 
+// Attend and recommend in one action (for attendee with Minor/Major complaints from head of unit)
+router.post('/ticket/:ticketId/attend-and-recommend', require('../controllers/workflow/workflowController').attendAndRecommend);
+
 // Reverse ticket to previous step
 router.post('/ticket/:ticketId/reverse', reverseTicket);
 

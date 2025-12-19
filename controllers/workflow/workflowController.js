@@ -209,6 +209,106 @@ const recommendTicket = async (req, res) => {
   }
 };
 
+// Attend and recommend in one action (for attendee with Minor/Major complaints from head of unit)
+const attendAndRecommend = async (req, res) => {
+  const transaction = await Ticket.sequelize.transaction();
+  
+  try {
+    const { ticketId } = req.params;
+    const { recommendation, evidence_url } = req.body;
+    const userId = req.user.userId;
+
+    if (!recommendation) {
+      await safeRollback(transaction);
+      return res.status(400).json({ message: 'Recommendation is required' });
+    }
+
+    const ticket = await Ticket.findByPk(ticketId, { transaction });
+    if (!ticket) {
+      await safeRollback(transaction);
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+
+    // Check if user is attendee and ticket is Minor/Major complaint from head of unit
+    if (req.user.role !== 'attendee') {
+      await safeRollback(transaction);
+      return res.status(403).json({ message: 'Only attendees can use this endpoint' });
+    }
+
+    if (ticket.category !== 'Complaint' || !['Minor', 'Major'].includes(ticket.complaint_type)) {
+      await safeRollback(transaction);
+      return res.status(400).json({ message: 'This endpoint is only for Minor/Major complaints' });
+    }
+
+    const isFromHeadOfUnit = ticket.responsible_unit_name && 
+                             !ticket.responsible_unit_name.toLowerCase().includes('directorate');
+    
+    if (!isFromHeadOfUnit) {
+      await safeRollback(transaction);
+      return res.status(400).json({ message: 'This endpoint is only for tickets from head of unit' });
+    }
+
+    // Find head of unit for this unit
+    const headOfUnit = await User.findOne({
+      where: {
+        role: 'head-of-unit',
+        unit_section: ticket.responsible_unit_name
+      },
+      transaction
+    });
+
+    if (!headOfUnit) {
+      await safeRollback(transaction);
+      return res.status(404).json({ message: `Head of unit not found for unit: ${ticket.responsible_unit_name}` });
+    }
+
+    // Update ticket with recommendation and assign to head of unit
+    await ticket.update({
+      recommendation: recommendation,
+      recommendation_details: recommendation,
+      recommended_by_id: userId,
+      recommended_at: new Date(),
+      assigned_to_id: headOfUnit.id,
+      assigned_to_role: 'head-of-unit',
+      status: 'Attended and Recommended',
+      evidence_url: evidence_url || ticket.evidence_url
+    }, { transaction });
+
+    // Create assignment record
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id: userId,
+      assigned_to_id: headOfUnit.id,
+      assigned_to_role: 'head-of-unit',
+      action: 'Attended and Recommended',
+      reason: `Recommendation: ${recommendation}`,
+      created_at: new Date()
+    }, { transaction });
+
+    // Deactivate all updates for this user on this ticket
+    await deactivateUserUpdates(ticket.id, userId);
+
+    await transaction.commit();
+
+    return res.json({
+      success: true,
+      message: 'Recommendation submitted! Ticket sent to Head of Unit for review.',
+      data: {
+        ticket,
+        assignedTo: {
+          id: headOfUnit.id,
+          name: headOfUnit.full_name || headOfUnit.first_name + ' ' + headOfUnit.last_name,
+          role: headOfUnit.role
+        }
+      }
+    });
+  } catch (error) {
+    await safeRollback(transaction);
+    console.error('Attend and recommend error:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 // Reverse ticket to previous step
 const reverseTicket = async (req, res) => {
   const transaction = await Ticket.sequelize.transaction();
@@ -426,6 +526,7 @@ module.exports = {
   getWorkflowDetails,
   attendTicket,
   recommendTicket,
+  attendAndRecommend,
   reverseTicket,
   closeTicket
 }; 

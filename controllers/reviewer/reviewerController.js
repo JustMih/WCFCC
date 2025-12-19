@@ -163,7 +163,7 @@ async function safeRollback(transaction) {
 }
 
 const convertOrForwardTicket = async (req, res) => {
-  const { userId, category, responsible_unit_name, complaintType } = req.body;
+  const { userId, category, responsible_unit_name, complaintType, ratingComment } = req.body;
   const { id: ticketId } = req.params;
 
   // Start a transaction
@@ -199,6 +199,14 @@ const convertOrForwardTicket = async (req, res) => {
       await safeRollback(transaction);
       return res.status(400).json({
         message: "Forwarding is required. Please select a unit to forward the ticket to."
+      });
+    }
+
+    // Validate that comment/description is provided when rating and forwarding
+    if (complaintType && responsible_unit_name && (!ratingComment || !ratingComment.trim())) {
+      await safeRollback(transaction);
+      return res.status(400).json({
+        message: "Comment/Description is required when rating and forwarding a complaint. Please provide a comment before forwarding."
       });
     }
 
@@ -457,14 +465,18 @@ const convertOrForwardTicket = async (req, res) => {
       ticket.status = "Forwarded";
       forwardingDone = true;
 
-      // Create ticket assignment record
+      // Create ticket assignment record with comment/description
+      const forwardReason = ratingComment && ratingComment.trim() 
+        ? `Ticket forwarded to ${responsible_unit_name} by reviewer. Comment: ${ratingComment.trim()}`
+        : `Ticket forwarded to ${responsible_unit_name} by reviewer`;
+      
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
         assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId), // Use reviewer ID as fallback
         assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'reviewer'),
         action: "Forwarded",
-        reason: `Ticket forwarded to ${responsible_unit_name} by reviewer`,
+        reason: forwardReason,
         created_at: new Date()
       }, { transaction });
 
@@ -488,13 +500,17 @@ const convertOrForwardTicket = async (req, res) => {
 
     // Create TicketAssignment records for rating and conversion actions
     if (ratingDone) {
+      const ratingReason = ratingComment && ratingComment.trim()
+        ? `Ticket rated as ${complaintType} by reviewer. Comment: ${ratingComment.trim()}`
+        : `Ticket rated as ${complaintType} by reviewer`;
+      
       await TicketAssignment.create({
         ticket_id: ticket.id,
         assigned_by_id: userId,
         assigned_to_id: userId, // Reviewer rates the ticket
         assigned_to_role: 'reviewer',
         action: "Rated",
-        reason: `Ticket rated as ${complaintType} by reviewer`,
+        reason: ratingReason,
         created_at: new Date()
       }, { transaction });
     }
