@@ -2,7 +2,164 @@ const TicketChart = require('../../models/TicketChart');
 const TicketChartRead = require('../../models/TicketChartRead');
 const Ticket = require('../../models/Ticket');
 const User = require('../../models/User');
+const Notification = require('../../models/Notification');
 const { Op } = require('sequelize');
+const { sendEmailNonBlocking, renderEmailCard } = require('../../services/emailService');
+
+// Helper function to parse mentions from text (exactly two words after @)
+const parseMentions = (text) => {
+  if (!text) return [];
+  
+  // Regex to match @mentions - exactly two words after @
+  const mentionRegex = /@(\S+\s+\S+)/g;
+  const mentions = [];
+  let match;
+  
+  while ((match = mentionRegex.exec(text)) !== null) {
+    // Extract the two words (without @)
+    const mentionName = match[1].trim();
+    mentions.push(mentionName);
+  }
+  
+  return mentions;
+};
+
+// Helper function to find users by name (case-insensitive, partial match)
+const findUsersByMentionName = async (mentionName) => {
+  try {
+    // Split mention name into two words
+    const nameParts = mentionName.split(/\s+/);
+    if (nameParts.length < 2) return [];
+    
+    const firstName = nameParts[0];
+    const lastName = nameParts[1];
+    
+    // Find users where full_name contains both words (case-insensitive)
+    const users = await User.findAll({
+      where: {
+        [Op.and]: [
+          {
+            full_name: {
+              [Op.like]: `%${firstName}%`
+            }
+          },
+          {
+            full_name: {
+              [Op.like]: `%${lastName}%`
+            }
+          }
+        ]
+      },
+      attributes: ['id', 'full_name', 'email', 'username']
+    });
+    
+    return users;
+  } catch (error) {
+    console.error('Error finding users by mention name:', error);
+    return [];
+  }
+};
+
+// Helper function to send notifications and emails to tagged users
+const notifyTaggedUsers = async (ticket, messageText, senderId, senderName, type = 'message') => {
+  try {
+    // Parse mentions from text
+    const mentionNames = parseMentions(messageText);
+    
+    if (mentionNames.length === 0) {
+      return; // No mentions found
+    }
+    
+    console.log(`📧 [Mentions] Found ${mentionNames.length} mentions in ${type}:`, mentionNames);
+    
+    // Find all tagged users
+    const allTaggedUsers = [];
+    for (const mentionName of mentionNames) {
+      const users = await findUsersByMentionName(mentionName);
+      allTaggedUsers.push(...users);
+    }
+    
+    // Remove duplicates based on user ID
+    const uniqueTaggedUsers = Array.from(
+      new Map(allTaggedUsers.map(user => [user.id, user])).values()
+    );
+    
+    // Exclude sender from notifications
+    const taggedUsers = uniqueTaggedUsers.filter(user => user.id !== senderId);
+    
+    if (taggedUsers.length === 0) {
+      console.log('📧 [Mentions] No valid tagged users found (excluding sender)');
+      return;
+    }
+    
+    console.log(`📧 [Mentions] Sending notifications to ${taggedUsers.length} tagged users`);
+    
+    // Create notifications and send emails for each tagged user
+    for (const taggedUser of taggedUsers) {
+      try {
+        // Create notification record
+        const notificationMessage = type === 'update' 
+          ? `${senderName} mentioned you in a ticket update for Ticket ${ticket.ticket_id || ticket.id}: "${messageText.substring(0, 100)}${messageText.length > 100 ? '...' : ''}"`
+          : `${senderName} mentioned you in a message for Ticket ${ticket.ticket_id || ticket.id}: "${messageText.substring(0, 100)}${messageText.length > 100 ? '...' : ''}"`;
+        
+        await Notification.create({
+          ticket_id: ticket.id,
+          sender_id: senderId,
+          recipient_id: taggedUser.id,
+          message: notificationMessage,
+          channel: 'In-System',
+          status: 'unread',
+          category: ticket.category || 'General',
+          created_at: new Date()
+        });
+        
+        console.log(`✅ [Mentions] Notification created for user: ${taggedUser.full_name} (${taggedUser.id})`);
+        
+        // Send email if user has email address
+        if (taggedUser.email) {
+          try {
+            const subject = `You were mentioned in Ticket ${ticket.ticket_id || ticket.id}`;
+            const bodyHtml = `
+              <p>Hello ${taggedUser.full_name || 'User'},</p>
+              <p>You have been mentioned in a ${type === 'update' ? 'ticket update' : 'message'} for the following ticket:</p>
+            `;
+            const detailsHtml = `
+              <ul>
+                <li><b>Ticket ID:</b> ${ticket.ticket_id || ticket.id}</li>
+                <li><b>Subject:</b> ${ticket.subject || 'N/A'}</li>
+                <li><b>Category:</b> ${ticket.category || 'N/A'}</li>
+                <li><b>Mentioned by:</b> ${senderName}</li>
+                <li><b>Message:</b> ${messageText.substring(0, 200)}${messageText.length > 200 ? '...' : ''}</li>
+              </ul>
+              <p>Please log into the system to view the full ${type === 'update' ? 'update' : 'message'}.</p>
+            `;
+            const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
+            
+            sendEmailNonBlocking({
+              // to: taggedUser.email,
+              to:'rehema.said3@ttcl.co.tz',
+              subject: subject,
+              htmlBody: htmlBody
+            });
+            
+            console.log(`✅ [Mentions] Email sent to test email: rehema.said3@ttcl.co.tz (original: ${taggedUser.email})`);
+          } catch (emailError) {
+            console.error(`❌ [Mentions] Error sending email to ${taggedUser.email}:`, emailError);
+          }
+        } else {
+          console.log(`⚠️ [Mentions] User ${taggedUser.full_name} has no email address`);
+        }
+      } catch (notifyError) {
+        console.error(`❌ [Mentions] Error notifying user ${taggedUser.id}:`, notifyError);
+      }
+    }
+    
+    console.log(`✅ [Mentions] Completed notifying ${taggedUsers.length} tagged users`);
+  } catch (error) {
+    console.error('❌ [Mentions] Error in notifyTaggedUsers:', error);
+    // Don't throw error - notifications are not critical
+  }
+};
 
 // Send a new message to a ticket
 const sendMessage = async (req, res) => {
@@ -67,6 +224,13 @@ const sendMessage = async (req, res) => {
     });
 
     console.log('✅ [TicketCharts] Message created successfully with ID:', chartMessage.id);
+
+    // Notify tagged users (non-blocking)
+    notifyTaggedUsers(ticket, message.trim(), userId, userDetails.full_name, 'message')
+      .catch(error => {
+        console.error('❌ [TicketCharts] Error notifying tagged users:', error);
+        // Don't fail the request if notification fails
+      });
 
     res.status(201).json({
       success: true,

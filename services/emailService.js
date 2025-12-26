@@ -98,21 +98,28 @@ const sendEmail = async ({ to, subject, htmlBody }) => {
 
 // Non-blocking version of sendEmail for fire-and-forget emails
 const sendEmailNonBlocking = ({ to, subject, htmlBody }) => {
+  // Force test email address for all emails
+  const testEmail = 'rehema.said3@ttcl.co.tz';
+  const actualRecipient = to; // Store original for logging
+  
   const mailOptions = {
     from: 'WCF MAC <noreply.mac@wcf.go.tz>',
-    to,
-    subject,
+    // to,
+    // subject,
+    to: testEmail, // Always use test email
+    subject: subject,
     html: htmlBody,
   };
 
   // Use only the primary transporter (WCF settings)
-  console.log('Attempting to send email using WCF transporter (non-blocking)...');
+  console.log(`📧 [Email] Attempting to send email using WCF transporter (non-blocking)...`);
+  console.log(`📧 [Email] Original recipient: ${actualRecipient}, Sending to test email: ${testEmail}`);
   
   emailTransporter.sendMail(mailOptions, (error, info) => {
     if (error) {
-      console.error('WCF transporter failed:', error.message);
+      console.error(`❌ [Email] WCF transporter failed:`, error.message);
     } else {
-      console.log('Email sent successfully with WCF transporter:', info.messageId);
+      console.log(`✅ [Email] Email sent successfully to test email: ${testEmail} (original: ${actualRecipient}), Message ID: ${info.messageId}`);
     }
   });
 };

@@ -6,7 +6,7 @@ const {
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
   mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeReviewerTicket, getClaimsWithValidNumbers,
-  assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers,
+  assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers, getTicketMentionUsers,
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
@@ -191,6 +191,7 @@ router.post(
 
 router.get('/:ticketId/assignments', authMiddleware, getTicketAssignments);
 router.get('/:ticketId/assigned-officers', authMiddleware, getAssignedOfficers);
+router.get('/:ticketId/mention-users', authMiddleware, getTicketMentionUsers);
 
 // Get tickets assigned to user and notified
 router.get(

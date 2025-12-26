@@ -4076,6 +4076,89 @@ const getTicketAssignments = async (req, res) => {
   }
 };
 
+// Get all users involved in a ticket (for @ mentions)
+const getTicketMentionUsers = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    // Get ticket to find creator
+    const ticket = await Ticket.findByPk(ticketId, {
+      attributes: ["id", "created_by", "assigned_to_id"]
+    });
+    
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+    
+    // Get all unique user IDs from assignments
+    const assignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      attributes: ["assigned_to_id", "assigned_by_id"],
+      raw: true
+    });
+    
+    // Get all unique user IDs from updates
+    const updates = await TicketUpdate.findAll({
+      where: { ticket_id: ticketId },
+      attributes: ["user_id"],
+      raw: true
+    });
+    
+    // Collect all unique user IDs
+    const userIds = new Set();
+    
+    // Add creator
+    if (ticket.created_by) {
+      userIds.add(ticket.created_by);
+    }
+    
+    // Add current assignee
+    if (ticket.assigned_to_id) {
+      userIds.add(ticket.assigned_to_id);
+    }
+    
+    // Add users from assignments
+    assignments.forEach(assignment => {
+      if (assignment.assigned_to_id) userIds.add(assignment.assigned_to_id);
+      if (assignment.assigned_by_id) userIds.add(assignment.assigned_by_id);
+    });
+    
+    // Add users from updates
+    updates.forEach(update => {
+      if (update.user_id) userIds.add(update.user_id);
+    });
+    
+    // Fetch user details
+    const users = await User.findAll({
+      where: {
+        id: Array.from(userIds)
+      },
+      attributes: ["id", "full_name", "username", "role", "unit_section"],
+      order: [["full_name", "ASC"]]
+    });
+    
+    // Format response
+    const mentionUsers = users.map(user => ({
+      id: user.id,
+      name: user.full_name || user.username || "Unknown",
+      username: user.username || "",
+      role: user.role || "",
+      unit_section: user.unit_section || ""
+    }));
+    
+    res.json({
+      success: true,
+      data: mentionUsers
+    });
+  } catch (error) {
+    console.error("Error in getTicketMentionUsers:", error);
+    res.status(500).json({
+      message: "Failed to fetch mention users",
+      error: error.message
+    });
+  }
+};
+
 // Get all assigned officers for a ticket
 const getAssignedOfficers = async (req, res) => {
   try {
@@ -7307,6 +7390,7 @@ module.exports = {
   getAllAttendee,
   getTicketAssignments,
   getAssignedOfficers,
+  getTicketMentionUsers,
   getAssignedNotifiedTickets,
   getDashboardCounts,
   reassignTicket,
