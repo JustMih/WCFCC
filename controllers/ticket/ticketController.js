@@ -3001,6 +3001,12 @@ const searchByPhoneNumber = async (req, res) => {
           as: "creator",
           attributes: ["id", "full_name", "role"],
         },
+        {
+          model: User,
+          as: "attendedBy",
+          attributes: ["id", "full_name", "role"],
+          required: false,
+        },
       ],
     });
     if (tickets.length === 0) {
@@ -3019,6 +3025,57 @@ const searchByPhoneNumber = async (req, res) => {
     return res
       .status(500)
       .json({ message: "Internal server error", error: error.message });
+  }
+};
+
+const searchByTicketId = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    if (!ticketId) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Ticket ID is required" 
+      });
+    }
+
+    // Search by ticket_id (the formatted ticket number like WCF-CC-20251226-000002)
+    const ticket = await Ticket.findOne({
+      where: { ticket_id: ticketId },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "full_name", "role"],
+        },
+        {
+          model: User,
+          as: "attendedBy",
+          attributes: ["id", "full_name", "role"],
+          required: false,
+        },
+      ],
+    });
+
+    if (!ticket) {
+      return res.status(200).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Ticket found successfully",
+      ticket: ticket,
+    });
+  } catch (error) {
+    console.error("Error searching ticket by ticket_id:", error);
+    return res.status(500).json({ 
+      success: false,
+      message: "Internal server error", 
+      error: error.message 
+    });
   }
 };
 
@@ -7511,6 +7568,7 @@ module.exports = {
   getAllTickets,
   mockComplaintWorkflow,
   searchByPhoneNumber,
+  searchByTicketId,
   getTicketById,
   notifyUsersByRole,
   closeTicket,

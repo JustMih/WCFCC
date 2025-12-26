@@ -5,7 +5,7 @@ const {
   createTicket, getTickets, getTicketCounts, getOpenTickets, getInprogressTickets, getAssignedTickets,
   getCarriedForwardTickets, getClosedTickets, getOverdueTickets, getAllTickets, getAllCustomersTickets, 
   rateComplaint, updateComplaintProgress, reviewComplaint, convertToInquiry, searchComplaints,
-  mockComplaintWorkflow, searchByPhoneNumber, getTicketById, closeReviewerTicket, getClaimsWithValidNumbers,
+  mockComplaintWorkflow, searchByPhoneNumber, searchByTicketId, getTicketById, closeReviewerTicket, getClaimsWithValidNumbers,
   assignTicket, getAllAttendee, closeTicket, getTicketAssignments, getAssignedOfficers, getTicketMentionUsers,
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
@@ -142,6 +142,13 @@ router.get(
   authMiddleware,
   // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   searchByPhoneNumber
+);
+
+// Search ticket by ticket_id (formatted ticket number like WCF-CC-20251226-000002)
+router.get(
+  "/search-by-ticket-id/:ticketId",
+  authMiddleware,
+  searchByTicketId
 );
 
 // Get ticket by ID
