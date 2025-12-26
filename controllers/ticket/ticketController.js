@@ -44,6 +44,21 @@ function getWorkingDays(startDate, endDate, holidays = []) {
   return count;
 }
 
+// Utility: Capitalize first letter of each word
+/**
+ * Capitalizes the first letter of each word in a string.
+ * @param {string} str - The string to capitalize
+ * @returns {string} The capitalized string, or empty string if input is null/undefined/empty
+ */
+function capitalizeWords(str) {
+  if (!str || typeof str !== 'string') return str || '';
+  return str
+    .trim()
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
 // SLA rules mapping
 const SLA_RULES = {
   inquiry: 3, // days
@@ -634,13 +649,13 @@ const createTicket = async (req, res) => {
     console.log("Dependents field received:", req.body.dependents);
 
     const {
-      firstName,
-      middleName,
-      lastName,
+      firstName: rawFirstName,
+      middleName: rawMiddleName,
+      lastName: rawLastName,
       phoneNumber,
       nidaNumber,
       requester,
-      institution,
+      institution: rawInstitution,
       channel,
       region,
       district,
@@ -657,14 +672,14 @@ const createTicket = async (req, res) => {
       shouldClose,
       resolution_details,
       // New fields for representative
-      requesterName,
+      requesterName: rawRequesterName,
       requesterPhoneNumber,
       requesterEmail,
       requesterAddress,
       relationshipToEmployee,
       // New fields for employer (when requester is Employer)
       employerRegistrationNumber,
-      employerName,
+      employerName: rawEmployerName,
       employerTin,
       employerPhone,
       employerEmail,
@@ -673,7 +688,7 @@ const createTicket = async (req, res) => {
       employerAllocatedStaffName,
       employerAllocatedStaffUsername,
       // New fields for representative
-      representative_name,
+      representative_name: rawRepresentativeName,
       representative_phone,
       representative_email,
       representative_address,
@@ -681,6 +696,15 @@ const createTicket = async (req, res) => {
       // New fields for dependents
       dependents,
     } = req.body;
+
+    // Capitalize name fields
+    const firstName = capitalizeWords(rawFirstName);
+    const middleName = capitalizeWords(rawMiddleName);
+    const lastName = capitalizeWords(rawLastName);
+    const institution = capitalizeWords(rawInstitution);
+    const requesterName = capitalizeWords(rawRequesterName);
+    const employerName = capitalizeWords(rawEmployerName);
+    const representative_name = capitalizeWords(rawRepresentativeName);
 
     // Initialize finalSection before any use
     let finalSection = inputSection;
@@ -3853,14 +3877,38 @@ const getAllAttendee = async (req, res) => {
     
     // Filter users based on current user's role and available data
     if (currentUser.role === "focal-person") {
-      // For focal persons, filter by report_to field
-      if (currentUser.report_to && currentUser.report_to.trim() !== '') {
-        whereClause.report_to = currentUser.report_to;
-        console.log(`DEBUG: Filtering ${targetRole}s by report_to: ${currentUser.report_to}`);
+      // Check if ticketId is provided in query parameters
+      const ticketId = req.query.ticketId;
+      
+      if (ticketId) {
+        // Fetch the ticket to get its sub_section
+        const ticket = await Ticket.findByPk(ticketId, {
+          attributes: ['id', 'sub_section', 'section']
+        });
+        
+        if (ticket && ticket.sub_section && ticket.sub_section.trim() !== '') {
+          // Filter attendees by the ticket's sub_section
+          whereClause.unit_section = ticket.sub_section;
+          console.log(`DEBUG: Focal person filtering ${targetRole}s by ticket sub_section: ${ticket.sub_section}`);
+        } else {
+          // Fallback to report_to if ticket doesn't have sub_section
+          if (currentUser.report_to && currentUser.report_to.trim() !== '') {
+            whereClause.report_to = currentUser.report_to;
+            console.log(`DEBUG: Ticket has no sub_section, filtering ${targetRole}s by report_to: ${currentUser.report_to}`);
+          } else {
+            console.log(`DEBUG: No ticket sub_section or report_to found for focal person, showing all ${targetRole}s`);
+          }
+        }
       } else {
-        console.log(`DEBUG: No report_to found for focal person, showing all ${targetRole}s`);
-        console.log(`DEBUG: Current user report_to value: "${currentUser.report_to}" (type: ${typeof currentUser.report_to})`);
-        console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have a report_to set!`);
+        // For focal persons without ticketId, filter by report_to field
+        if (currentUser.report_to && currentUser.report_to.trim() !== '') {
+          whereClause.report_to = currentUser.report_to;
+          console.log(`DEBUG: Filtering ${targetRole}s by report_to: ${currentUser.report_to}`);
+        } else {
+          console.log(`DEBUG: No report_to found for focal person, showing all ${targetRole}s`);
+          console.log(`DEBUG: Current user report_to value: "${currentUser.report_to}" (type: ${typeof currentUser.report_to})`);
+          console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have a report_to set!`);
+        }
       }
     } else if (currentUser.role === "head-of-unit") {
       // For head-of-unit, filter by unit_section AND role = "attendee" (unless directorate shows managers)
@@ -4954,7 +5002,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 const reverseTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, reason, status } = req.body;
+    const { userId, reason, status, description } = req.body;
 
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
@@ -5065,7 +5113,7 @@ const reverseTicket = async (req, res) => {
         "Reversed",
         assignedBy,
         { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
-        reason || "Ticket reversed to previous user",
+        description || reason || "Ticket reversed to previous user",
         null // No transaction needed here
       );
 
@@ -5114,8 +5162,9 @@ const reverseTicket = async (req, res) => {
       }
 
       // Send emails in background (non-blocking)
+      const reversalReason = description || reason;
       setImmediate(() => {
-        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
 
       return res.json({
@@ -5141,7 +5190,7 @@ const reverseTicket = async (req, res) => {
         assigned_to_id: targetUserId,
         assigned_to_role: targetUserRole,
         action: "Reversed",
-        reason: reason || "Ticket reversed to previous user",
+        reason: description || reason || "Ticket reversed to previous user",
         attachment_path: attachmentPath,
         created_at: new Date()
       });
@@ -5184,8 +5233,9 @@ const reverseTicket = async (req, res) => {
       }
 
       // Send emails in background (non-blocking)
+      const reversalReason = description || reason;
       setImmediate(() => {
-        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
 
       return res.json({ message: "Ticket reversed successfully" });
@@ -6089,7 +6139,7 @@ const getTicketStatusExternal = async (req, res) => {
 const reverseComplaint = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, recommendation } = req.body;
+    const { userId, recommendation, description } = req.body;
 
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
@@ -6300,7 +6350,7 @@ const reverseComplaint = async (req, res) => {
       assigned_to_id: targetUserId,
       assigned_to_role: targetUserRole,
       action: "Reversed",
-      reason: recommendation || "Complaint reversed with recommendation",
+      reason: description || recommendation || "Complaint reversed with recommendation",
       attachment_path: attachmentPath, // Use attachment_path for consistency
       created_at: new Date()
     });
@@ -6332,7 +6382,7 @@ const reverseComplaint = async (req, res) => {
         <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
         <li><strong>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
         <li><strong>Reversed To:</strong> ${targetUserName} (${targetUserRole || 'Unknown Role'})</li>
-        <li><strong>Agent Recommendation:</strong> ${recommendation}</li>
+        <li><strong>Agent Recommendation:</strong> ${description || recommendation || 'No recommendation provided'}</li>
         <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
       </ul>
     `;
@@ -6362,7 +6412,7 @@ const reverseComplaint = async (req, res) => {
           <li><b>Requester:</b> ${getRequesterDisplayName(ticket)}</li>
           <li><b>Status:</b> Reversed</li>
           <li><b>Reversed By:</strong> ${attended_by_name || 'Unknown'} (${attended_by_role || 'Unknown Role'})</li>
-          <li><b>Agent Recommendation:</b> ${recommendation}</li>
+          <li><b>Agent Recommendation:</b> ${description || recommendation || 'No recommendation provided'}</li>
           ${attachmentPath ? `<li><b>Attachment:</b> Included</li>` : ''}
         </ul>
         <p>Please log into the system to review and take action.</p>
@@ -6536,7 +6586,7 @@ const approveAndForwardToReviewer = async (req, res) => {
 const reverseAndAssignToReviewer = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, dg_notes } = req.body;
+    const { userId, dg_notes, description } = req.body;
 
     if (!ticketId || !userId) {
       return res.status(400).json({ message: "Ticket ID and user ID are required" });
@@ -6592,7 +6642,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       assigned_to_id: reviewer.id,
       assigned_to_role: reviewer.role,
       action: "Assigned",
-      reason: dg_notes || "Director General reversed and assigned to reviewer for more clarification",
+      reason: description || dg_notes || "Director General reversed and assigned to reviewer for more clarification",
       created_at: new Date()
     });
 
@@ -6619,7 +6669,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
           <li><strong>Subject:</strong> ${ticket.subject || ""}</li>
           <li><strong>Description:</strong> ${ticket.description || ""}</li>
           <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-          <li><strong>DG Notes:</strong> ${dg_notes || "No notes provided"}</li>
+          <li><strong>DG Notes:</strong> ${description || dg_notes || "No notes provided"}</li>
           <li><strong>Attachments:</strong> ${ticket.attachment_path ? "Available" : "None"}</li>
         </ul>
         <p>Please log in to the system to review and handle this ticket.</p>
@@ -7131,7 +7181,7 @@ const updateReversedTicketDetails = async (req, res) => {
         assigned_to_id: assignedUser.id,
         assigned_to_role: assignedRole || assignedUser.role,
         action: actionMessage,
-        reason: `Ticket details updated - Subject: ${subject}, Section: ${section || 'N/A'}, Sub-section: ${sub_section || 'N/A'}, Responsible Unit: ${responsible_unit_name || 'N/A'}`,
+        reason: `Ticket details updated - Subject: ${subject}, Section: ${section || 'N/A'}, Sub-section: ${sub_section || 'N/A'}}`,
         created_at: new Date(),
       });
     }
