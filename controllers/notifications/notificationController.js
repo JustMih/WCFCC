@@ -111,7 +111,7 @@ const createNotification = async (req, res) => {
   }
 };
 
-// List all notifications for a user
+// List all notifications for a user (exclude reversed tickets)
 const listNotifications = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -120,7 +120,7 @@ const listNotifications = async (req, res) => {
         recipient_id: userId,
         [Op.or]: [{ status: "unread" }, { status: " " }],
       },
-
+      attributes: ['id', 'ticket_id', 'sender_id', 'recipient_id', 'message', 'channel', 'status', 'comment', 'created_at', 'updated_at'], // Include comment field
       include: [
         {
           model: Ticket,
@@ -133,6 +133,10 @@ const listNotifications = async (req, res) => {
             "status",
             "description",
           ],
+          where: {
+            status: { [Op.ne]: 'Reversed' } // Exclude reversed tickets
+          },
+          required: true // Inner join to ensure ticket exists
         },
       ],
       order: [["created_at", "DESC"]],
@@ -197,21 +201,87 @@ const markAsRead = async (req, res) => {
   }
 };
 
-// Get unread notification count for a user
+// Get unread notification count for a user (count all unread notifications - exclude reversed tickets)
 const getUnreadCount = async (req, res) => {
   try {
     const { userId } = req.params;
-    const count = await Notification.count({
+    
+    // First get all unread notifications with their tickets
+    const notifications = await Notification.findAll({
       where: {
         recipient_id: userId,
         [Op.or]: [{ status: "unread" }, { status: " " }], // Correctly checking both conditions
       },
+      include: [
+        {
+          model: Ticket,
+          as: "ticket",
+          attributes: ['id', 'status'],
+          required: true // Inner join to ensure ticket exists
+        }
+      ],
     });
+    
+    // Filter out notifications for reversed tickets
+    const validNotifications = notifications.filter(n => {
+      return n.ticket && n.ticket.status !== 'Reversed';
+    });
+    
+    const count = validNotifications.length;
+    
+    console.log(`Unread notification count for user ${userId}: ${count} (all unread notifications, excluding reversed)`);
     return res.status(200).json({ unreadCount: count });
   } catch (error) {
+    console.error("Error fetching unread notification count:", error);
     return res
       .status(500)
       .json({ message: "Error fetching unread count", error: error.message });
+  }
+};
+
+// Get unread tickets count for sidebar (count distinct tickets with unread notifications that have messages - same logic as table, exclude reversed)
+const getUnreadTicketsCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Get all unread notifications with comments (same logic as table) but exclude reversed tickets
+    const notifications = await Notification.findAll({
+      where: {
+        recipient_id: userId,
+        [Op.or]: [{ status: "unread" }, { status: " " }], // Correctly checking both conditions
+      },
+      attributes: ['ticket_id', 'comment'],
+      include: [
+        {
+          model: Ticket,
+          as: "ticket",
+          attributes: ['id', 'status'],
+          required: true // Inner join to ensure ticket exists
+        }
+      ]
+    });
+    
+    // Filter notifications with messages and exclude reversed tickets (same logic as table's getUnreadCountForTicket)
+    const validNotifications = notifications.filter(n => {
+      const ticketId = n.ticket_id;
+      const hasMessage = n.comment && typeof n.comment === 'string' && n.comment.trim() !== '';
+      const isUnread = true; // Already filtered by where clause
+      const isNotReversed = n.ticket && n.ticket.status !== 'Reversed';
+      
+      return ticketId && hasMessage && isUnread && isNotReversed;
+    });
+    
+    // Get unique ticket IDs
+    const uniqueTicketIds = [...new Set(validNotifications.map(n => n.ticket_id).filter(id => id !== null))];
+    const count = uniqueTicketIds.length;
+    
+    console.log(`Unread tickets count for user ${userId}: ${count} (distinct tickets with unread notifications that have messages, excluding reversed)`);
+    return res.status(200).json({ unreadTicketsCount: count });
+  } catch (error) {
+    console.error("Error fetching unread tickets count:", error);
+    return res
+      .status(500)
+      .json({ message: "Error fetching unread tickets count", error: error.message });
   }
 };
 
@@ -332,6 +402,7 @@ module.exports = {
   listNotifications,
   markAsRead,
   getUnreadCount,
+  getUnreadTicketsCount,
   getNotificationById,
   getNotificationsByTicketId,
   getNotifiedTicketsCount,

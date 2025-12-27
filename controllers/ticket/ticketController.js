@@ -1102,16 +1102,6 @@ const createTicket = async (req, res) => {
       //   assigned_at: new Date(),
       //   notes: 'Initial assignment'
       // });
-      // --- Create Notification for Assigned User ---
-      await Notification.create({
-        ticket_id: newTicket.id,
-        sender_id: userId,
-        recipient_id: assignedUser.id,
-        message: `New ${category} ticket assigned to you: ${finalSubject}`,
-        channel: channel,
-        status: "unread",
-        category: category,
-      });
       // --- Create Ticket Assignment Record ---
       await TicketAssignment.create({
         ticket_id: newTicket.id,
@@ -1198,17 +1188,18 @@ const createTicket = async (req, res) => {
         htmlBody: emailHtmlBody,
       });
     }
-    // --- Notification for Assignee ---
-    await Notification.create({
-      ticket_id: newTicket.id,
-      sender_id: userId,
-      recipient_id: assignedUser.id,
-      message: `New ${category} ticket ${
-        shouldClose ? "(Closed)" : ""
-      } assigned to you: ${finalSubject}`,
-      channel: channel,
-      status: "unread",
-    });
+    // --- Create Notification for Assignee (only if ticket is not closed) ---
+    if (!shouldClose) {
+      await Notification.create({
+        ticket_id: newTicket.id,
+        sender_id: userId,
+        recipient_id: assignedUser.id,
+        message: `New ${category} ticket assigned to you: ${finalSubject}`,
+        channel: channel,
+        status: "unread",
+        category: category,
+      });
+    }
 
     // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) ---
     const supervisors = await findSupervisorForSection(newTicket.section);

@@ -5,6 +5,7 @@ const {
   listNotifications, 
   markAsRead, 
   getUnreadCount,
+  getUnreadTicketsCount,
   getNotificationById,
   getNotificationsByTicketId,
   getNotifiedTicketsCount,
@@ -30,10 +31,15 @@ router.patch('/read/:notificationId',
   authMiddleware,
   markAsRead);
 
-// Get unread notification count for a user
+// Get unread notification count for a user (all notifications)
 router.get('/unread-count/:userId', 
   authMiddleware,
   getUnreadCount);
+
+// Get unread tickets count for sidebar (distinct tickets)
+router.get('/unread-tickets-count/:userId', 
+  authMiddleware,
+  getUnreadTicketsCount);
 
 // Get single notification
 router.get('/:notificationId', getNotificationById);
