@@ -314,6 +314,7 @@ const convertOrForwardTicket = async (req, res) => {
       });
 
       let functionUnit = null;
+      const isDirectorate = section !== null;
       
       // If not found as Section, check if it's a Function (unit like "ICT Units")
       if (!section) {
@@ -334,13 +335,13 @@ const convertOrForwardTicket = async (req, res) => {
       // Determine the appropriate role to assign to based on complaint type and unit type
       let targetRole = null;
       if (ticket.complaint_type === 'Minor') {
-        if (responsible_unit_name && (responsible_unit_name.includes('Directorate') || responsible_unit_name.includes('directorate'))) {
+        if (isDirectorate) {
           targetRole = 'director'; // For directorate, go to Director
         } else {
           targetRole = 'head-of-unit'; // For unit, go to Head of Unit
         }
       } else if (ticket.complaint_type === 'Major') {
-        if (responsible_unit_name && (responsible_unit_name.includes('Directorate') || responsible_unit_name.includes('directorate'))) {
+        if (isDirectorate) {
           targetRole = 'director'; // For directorate, go to Director
         } else {
           targetRole = 'head-of-unit'; // For unit, go to Head of Unit first
@@ -350,12 +351,17 @@ const convertOrForwardTicket = async (req, res) => {
       // Find a user with the target role in the selected unit
       let unitUser = null;
       if (targetRole) {
-        console.log(`DEBUG: Looking for ${targetRole} in unit: "${responsible_unit_name}"`);
+        // If it's a unit (not directorate), use ticket.sub_section to find head of unit or focal-person
+        // If it's a directorate, use responsible_unit_name
+        const searchField = isDirectorate ? responsible_unit_name : (ticket.sub_section || responsible_unit_name);
+        
+        console.log(`DEBUG: Looking for ${targetRole} in ${isDirectorate ? 'directorate' : 'unit'}: "${searchField}"`);
+        console.log(`DEBUG: Ticket sub_section: "${ticket.sub_section}", responsible_unit_name: "${responsible_unit_name}"`);
         
         // Try exact match first
         unitUser = await User.findOne({
           where: { 
-            unit_section: responsible_unit_name,
+            unit_section: searchField,
             role: targetRole 
           },
           transaction
@@ -369,13 +375,33 @@ const convertOrForwardTicket = async (req, res) => {
               [Op.and]: [
                 Sequelize.where(
                   Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-                  Sequelize.fn('LOWER', responsible_unit_name)
+                  Sequelize.fn('LOWER', searchField)
                 ),
                 { role: targetRole }
               ]
             },
             transaction
           });
+        }
+        
+        // If still not found for unit, try to find focal-person
+        if (!unitUser && !isDirectorate) {
+          console.log(`DEBUG: No ${targetRole} found, trying focal-person for unit`);
+          unitUser = await User.findOne({
+            where: {
+              [Op.and]: [
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                  Sequelize.fn('LOWER', searchField)
+                ),
+                { role: 'focal-person' }
+              ]
+            },
+            transaction
+          });
+          if (unitUser) {
+            console.log(`DEBUG: Found focal-person instead: ${unitUser.full_name}`);
+          }
         }
         
         // If still not found, list all users with that role to see what unit_section values exist
@@ -399,11 +425,15 @@ const convertOrForwardTicket = async (req, res) => {
       // If no user found with target role, find any user in that unit
       let anyUnitUser = null;
       if (!unitUser) {
-        console.log(`DEBUG: Looking for any user in unit: "${responsible_unit_name}"`);
+        // If it's a unit (not directorate), use ticket.sub_section to find any user
+        // If it's a directorate, use responsible_unit_name
+        const searchField = isDirectorate ? responsible_unit_name : (ticket.sub_section || responsible_unit_name);
+        
+        console.log(`DEBUG: Looking for any user in ${isDirectorate ? 'directorate' : 'unit'}: "${searchField}"`);
         
         // Try exact match first
         anyUnitUser = await User.findOne({
-          where: { unit_section: responsible_unit_name },
+          where: { unit_section: searchField },
           transaction
         });
         
@@ -413,7 +443,7 @@ const convertOrForwardTicket = async (req, res) => {
           anyUnitUser = await User.findOne({
             where: Sequelize.where(
               Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-              Sequelize.fn('LOWER', responsible_unit_name)
+              Sequelize.fn('LOWER', searchField)
             ),
             transaction
           });
@@ -465,20 +495,25 @@ const convertOrForwardTicket = async (req, res) => {
       ticket.status = "Forwarded";
       forwardingDone = true;
 
-      // Create ticket assignment record with comment/description
-      const forwardReason = ratingComment && ratingComment.trim() 
-        ? `Ticket forwarded to ${responsible_unit_name} by reviewer. Comment: ${ratingComment.trim()}`
-        : `Ticket forwarded to ${responsible_unit_name} by reviewer`;
-      
-      await TicketAssignment.create({
-        ticket_id: ticket.id,
-        assigned_by_id: userId,
-        assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId), // Use reviewer ID as fallback
-        assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'reviewer'),
-        action: "Forwarded",
-        reason: forwardReason,
-        created_at: new Date()
-      }, { transaction });
+      // If both conversion and forwarding happen, combine them into one record
+      // Otherwise, create separate "Forwarded" record
+      if (!conversionDone) {
+        // Only forwarding (no conversion) - create separate "Forwarded" entry
+        const forwardReason = ratingComment && ratingComment.trim() 
+          ? `Ticket forwarded to ${responsible_unit_name} by reviewer. Comment: ${ratingComment.trim()}`
+          : `Ticket forwarded to ${responsible_unit_name} by reviewer`;
+        
+        await TicketAssignment.create({
+          ticket_id: ticket.id,
+          assigned_by_id: userId,
+          assigned_to_id: unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId), // Use reviewer ID as fallback
+          assigned_to_role: unitUser ? unitUser.role : (anyUnitUser ? anyUnitUser.role : 'reviewer'),
+          action: "Forwarded",
+          reason: forwardReason,
+          created_at: new Date()
+        }, { transaction });
+      }
+      // If conversionDone is also true, the combined entry will be created below
 
       // Create notification for the assigned user (head of unit or any unit user)
       const assignedUserId = unitUser ? unitUser.id : (anyUnitUser ? anyUnitUser.id : userId);
@@ -515,16 +550,33 @@ const convertOrForwardTicket = async (req, res) => {
       }, { transaction });
     }
 
+    // Handle conversion - combine with forwarding if both happened
     if (conversionDone) {
-      await TicketAssignment.create({
-        ticket_id: ticket.id,
-        assigned_by_id: userId,
-        assigned_to_id: ticket.assigned_to_id, // Use the actual assigned user ID
-        assigned_to_role: ticket.assigned_to_role, // Use the actual assigned role
-        action: "Converted",
-        reason: `Ticket converted to Inquiry by reviewer and assigned to ${ticket.assigned_to_role}`,
-        created_at: new Date()
-      }, { transaction });
+      if (forwardingDone) {
+        // Both conversion and forwarding happened - combine into one "Converted" entry
+        const combinedReason = `Ticket converted to Inquiry and forwarded to ${responsible_unit_name} by reviewer. ` +
+                               (ratingComment && ratingComment.trim() ? `Comment: ${ratingComment.trim()}` : '');
+        await TicketAssignment.create({
+          ticket_id: ticket.id,
+          assigned_by_id: userId,
+          assigned_to_id: ticket.assigned_to_id, // Use the actual assigned user ID
+          assigned_to_role: ticket.assigned_to_role, // Use the actual assigned role
+          action: "Converted",
+          reason: combinedReason,
+          created_at: new Date()
+        }, { transaction });
+      } else {
+        // Only conversion (no forwarding) - create separate "Converted" entry
+        await TicketAssignment.create({
+          ticket_id: ticket.id,
+          assigned_by_id: userId,
+          assigned_to_id: ticket.assigned_to_id, // Use the actual assigned user ID
+          assigned_to_role: ticket.assigned_to_role, // Use the actual assigned role
+          action: "Converted",
+          reason: `Ticket converted to Inquiry by reviewer and assigned to ${ticket.assigned_to_role}`,
+          created_at: new Date()
+        }, { transaction });
+      }
     }
 
     // Commit the transaction

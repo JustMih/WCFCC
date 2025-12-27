@@ -3891,7 +3891,9 @@ const getAllAttendee = async (req, res) => {
       return res.status(404).json({ message: "Current user not found" });
     }
     
-    console.log(`DEBUG: Current user - Role: ${currentUser.role}, Unit: ${currentUser.unit_section}, ID: ${currentUser.id}`);
+    // Get current user's full name for filtering attendees who report to them
+    const currentUserFullName = currentUser?.full_name || '';
+    console.log(`DEBUG: Current user - Role: ${currentUser.role}, Full Name: ${currentUserFullName}, Unit: ${currentUser.unit_section}, Report To: ${currentUser.report_to}, ID: ${currentUser.id}`);
     
     // Build the where clause to filter users
     let whereClause = { 
@@ -3928,34 +3930,85 @@ const getAllAttendee = async (req, res) => {
       // Check if ticketId is provided in query parameters
       const ticketId = req.query.ticketId;
       
+      console.log(`DEBUG: Focal person - full_name: "${currentUserFullName}", unit_section: "${currentUser.unit_section}"`);
+      
       if (ticketId) {
-        // Fetch the ticket to get its sub_section
+        // Fetch the ticket to get its sub_section (for reference only)
         const ticket = await Ticket.findByPk(ticketId, {
           attributes: ['id', 'sub_section', 'section']
         });
         
-        if (ticket && ticket.sub_section && ticket.sub_section.trim() !== '') {
-          // Filter attendees by the ticket's sub_section
-          whereClause.unit_section = ticket.sub_section;
-          console.log(`DEBUG: Focal person filtering ${targetRole}s by ticket sub_section: ${ticket.sub_section}`);
+        // For focal persons: filter attendees by unit_section AND report_to
+        // Attendees must be in the same unit_section AND report to the same manager as the focal person
+        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role = 'attendee'
+        if (currentUser.unit_section && currentUser.unit_section.trim() !== '' && 
+            currentUser.report_to && currentUser.report_to.trim() !== '') {
+          // Use case-insensitive matching for both unit_section and report_to
+          whereClause[Op.and] = [
+            {
+              [Op.or]: [
+                { unit_section: currentUser.unit_section },
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.fn('TRIM', Sequelize.col('unit_section'))),
+                  currentUser.unit_section.trim().toLowerCase()
+                )
+              ]
+            },
+            {
+              [Op.or]: [
+                { report_to: currentUser.report_to },
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.fn('TRIM', Sequelize.col('report_to'))),
+                  currentUser.report_to.trim().toLowerCase()
+                )
+              ]
+            }
+          ];
+          console.log(`DEBUG: Focal person filtering ${targetRole}s by unit_section: "${currentUser.unit_section}" AND report_to: "${currentUser.report_to}" (case-insensitive)`);
+          if (ticket && ticket.sub_section) {
+            console.log(`DEBUG: Ticket sub_section: "${ticket.sub_section}" (for reference only, not used for filtering)`);
+          }
         } else {
-          // Fallback to report_to if ticket doesn't have sub_section
-          if (currentUser.report_to && currentUser.report_to.trim() !== '') {
-            whereClause.report_to = currentUser.report_to;
-            console.log(`DEBUG: Ticket has no sub_section, filtering ${targetRole}s by report_to: ${currentUser.report_to}`);
-          } else {
-            console.log(`DEBUG: No ticket sub_section or report_to found for focal person, showing all ${targetRole}s`);
+          console.log(`DEBUG: Missing unit_section or report_to for focal person, showing all ${targetRole}s`);
+          console.log(`DEBUG: unit_section: "${currentUser.unit_section}", report_to: "${currentUser.report_to}"`);
+          if (ticket && ticket.sub_section) {
+            console.log(`DEBUG: Ticket sub_section: "${ticket.sub_section}" (not used - focal person missing required fields)`);
           }
         }
       } else {
-        // For focal persons without ticketId, filter by report_to field
-        if (currentUser.report_to && currentUser.report_to.trim() !== '') {
-          whereClause.report_to = currentUser.report_to;
-          console.log(`DEBUG: Filtering ${targetRole}s by report_to: ${currentUser.report_to}`);
+        // For focal persons without ticketId: filter attendees by unit_section AND report_to
+        // Attendees must be in the same unit_section AND report to the same manager as the focal person
+        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role = 'attendee'
+        if (currentUser.unit_section && currentUser.unit_section.trim() !== '' && 
+            currentUser.report_to && currentUser.report_to.trim() !== '') {
+          // Use case-insensitive matching for both unit_section and report_to
+          whereClause[Op.and] = [
+            {
+              [Op.or]: [
+                { unit_section: currentUser.unit_section },
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.fn('TRIM', Sequelize.col('unit_section'))),
+                  currentUser.unit_section.trim().toLowerCase()
+                )
+              ]
+            },
+            {
+              [Op.or]: [
+                { report_to: currentUser.report_to },
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.fn('TRIM', Sequelize.col('report_to'))),
+                  currentUser.report_to.trim().toLowerCase()
+                )
+              ]
+            }
+          ];
+          console.log(`DEBUG: Filtering ${targetRole}s by focal person's unit_section: "${currentUser.unit_section}" AND report_to: "${currentUser.report_to}" (case-insensitive)`);
         } else {
-          console.log(`DEBUG: No report_to found for focal person, showing all ${targetRole}s`);
-          console.log(`DEBUG: Current user report_to value: "${currentUser.report_to}" (type: ${typeof currentUser.report_to})`);
-          console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have a report_to set!`);
+          console.log(`DEBUG: Missing unit_section or report_to for focal person, showing all ${targetRole}s`);
+          console.log(`DEBUG: Current user full_name value: "${currentUserFullName}"`);
+          console.log(`DEBUG: Current user unit_section value: "${currentUser.unit_section}"`);
+          console.log(`DEBUG: Current user report_to value: "${currentUser.report_to}"`);
+          console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have unit_section or report_to set!`);
         }
       }
     } else if (currentUser.role === "head-of-unit") {
@@ -4027,9 +4080,10 @@ const getAllAttendee = async (req, res) => {
     console.log(`DEBUG: Users:`, users.map(u => ({ name: u.full_name, username: u.username, role: u.role, report_to: u.report_to, designation: u.designation })));
     
     // Additional debugging: Show all attendees with their unit_section values for comparison
-    if (users.length === 0) {
+    if (users.length === 0 && currentUser.role === "focal-person") {
       console.log(`DEBUG: No users found with current filter. Let's check what values exist:`);
       console.log(`DEBUG: Where clause used:`, JSON.stringify(whereClause, null, 2));
+      console.log(`DEBUG: Focal person full_name: "${currentUserFullName}"`);
       
       // Check all attendees with their unit_section
       const allAttendees = await User.findAll({
@@ -4041,6 +4095,16 @@ const getAllAttendee = async (req, res) => {
         unit_section: u.unit_section,
         report_to: u.report_to, 
         designation: u.designation 
+      })));
+      
+      // Check attendees whose report_to matches focal person's name (case-insensitive)
+      const matchingAttendees = allAttendees.filter(a => 
+        a.report_to && 
+        a.report_to.trim().toLowerCase() === currentUserFullName.trim().toLowerCase()
+      );
+      console.log(`DEBUG: Attendees with report_to matching focal person name (case-insensitive):`, matchingAttendees.map(u => ({ 
+        name: u.full_name, 
+        report_to: u.report_to
       })));
       
       // Also check if there are any users with the same unit_section
