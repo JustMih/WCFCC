@@ -8,7 +8,7 @@ const AgentLoginLog = require("../../models/agent_activity_logs");
 const ChatMassage = require("../../models/chart_message");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
-const { Op } = require("sequelize");
+const { Op, Sequelize } = require("sequelize");
 const { sendQuickSms } = require("../../services/smsService");
 const { sendEmail, sendEmailNonBlocking, renderEmailCard } = require("../../services/emailService");
 const RequesterDetails = require("../../models/RequesterDetails");
@@ -7070,17 +7070,45 @@ const managerAttendMajor = async (req, res) => {
 
 // Update reversed ticket details (subject and section)
 const updateReversedTicketDetails = async (req, res) => {
+  // VERY PROMINENT LOGS AT THE START - SHOULD ALWAYS SHOW
+  console.error('\n\n\n');
+  console.error('═══════════════════════════════════════════════════════════');
+  console.error('🔍🔍🔍 updateReversedTicketDetails FUNCTION CALLED 🔍🔍🔍');
+  console.error('═══════════════════════════════════════════════════════════');
+  console.error('Timestamp:', new Date().toISOString());
+  console.error('Request method:', req.method);
+  console.error('Request URL:', req.originalUrl || req.url);
+  console.error('Request params:', JSON.stringify(req.params));
+  console.error('Request body keys:', Object.keys(req.body || {}));
+  console.error('═══════════════════════════════════════════════════════════\n\n');
+  
   try {
     const { ticketId } = req.params;
     const { userId, subject, section, sub_section, responsible_unit_id, responsible_unit_name } = req.body;
+    
+    console.error('🔍 Extracted values:');
+    console.error('  - ticketId:', ticketId);
+    console.error('  - userId:', userId);
+    console.error('  - subject:', subject);
+    console.error('  - section:', section);
+    console.error('  - sub_section:', sub_section);
+    console.error('  - responsible_unit_id:', responsible_unit_id);
+    console.error('  - responsible_unit_name:', responsible_unit_name);
+    console.error('');
 
     if (!ticketId || !userId) {
+      console.error('❌ ERROR: Missing ticketId or userId');
+      console.error('  - ticketId:', ticketId);
+      console.error('  - userId:', userId);
       return res.status(400).json({ message: "Ticket ID and user ID are required" });
     }
 
     if (!subject) {
+      console.error('❌ ERROR: Missing subject');
       return res.status(400).json({ message: "Subject is required" });
     }
+    
+    console.error('✅ Validation passed, proceeding with update...');
 
     // Get the ticket
     const ticket = await Ticket.findOne({
@@ -7090,6 +7118,12 @@ const updateReversedTicketDetails = async (req, res) => {
           model: User,
           as: "creator",
           attributes: ["id", "full_name"]
+        },
+        {
+          model: User,
+          as: "assignee",
+          attributes: ["id", "full_name", "role", "unit_section"],
+          required: false
         }
       ]
     });
@@ -7127,122 +7161,147 @@ const updateReversedTicketDetails = async (req, res) => {
       updateData.sub_section = sub_section;
     }
 
-    // Find appropriate user based on responsible_unit_name (director, head-of-unit, or focal-person)
+    // Find focal-person for the specific unit/directorate (no fallback - must be the specific focal person)
     let assignedUser = null;
     let assignedRole = null;
     
     if (responsible_unit_name && responsible_unit_name.trim() !== "") {
-      const unitNameLower = responsible_unit_name.toLowerCase();
-      const isDirectorate = unitNameLower.includes("directorate");
+      const trimmedUnitName = responsible_unit_name.trim();
+      const trimmedSubSection = sub_section && sub_section.trim() !== "" ? sub_section.trim() : null;
       
-      if (isDirectorate) {
-        // If it's a directorate, find director for this unit
-        assignedUser = await User.findOne({
-          where: {
-            role: "director",
-            unit_section: responsible_unit_name,
-          },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
-        });
-        assignedRole = "director";
-        console.log("Found director for directorate:", assignedUser?.full_name);
-        
-        // If no director found for specific directorate, try to find any director
-        if (!assignedUser) {
-          assignedUser = await User.findOne({
-            where: {
-              role: "director",
-            },
-            attributes: ["id", "full_name", "email", "role", "unit_section"],
-          });
-          console.log("Found fallback director:", assignedUser?.full_name);
-        }
+      console.log("🔍 ===== STARTING FOCAL PERSON SEARCH =====");
+      console.log("🔍 Looking for focal-person for unit/directorate:", trimmedUnitName);
+      console.log("🔍 Also checking sub_section:", trimmedSubSection);
+      
+      // Only find focal-person for this specific unit/directorate - NO FALLBACK TO DIRECTOR OR HEAD-OF-UNIT
+      // Priority 1: Try matching by sub_section first (more specific)
+      // Priority 2: Then try matching by unit_section (directorate/unit name)
+      let searchConditions = [];
+      
+      // First priority: search by sub_section if provided (more specific match)
+      if (trimmedSubSection) {
+        searchConditions.push(
+          { unit_section: trimmedSubSection },
+          Sequelize.where(
+            Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+            Sequelize.fn('LOWER', trimmedSubSection)
+          )
+        );
+        console.log("🔍 Priority 1: Searching by sub_section:", trimmedSubSection);
+      }
+      
+      // Second priority: search by unit_section (directorate/unit name)
+      searchConditions.push(
+        { unit_section: trimmedUnitName },
+        Sequelize.where(
+          Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+          Sequelize.fn('LOWER', trimmedUnitName)
+        )
+      );
+      console.log("🔍 Priority 2: Searching by unit_section:", trimmedUnitName);
+      
+      assignedUser = await User.findOne({
+        where: {
+          role: "focal-person",
+          [Op.or]: searchConditions
+        },
+        attributes: ["id", "full_name", "email", "role", "unit_section"],
+        order: [
+          // Prefer exact matches first, then case-insensitive
+          [Sequelize.literal(`CASE WHEN unit_section = '${trimmedSubSection || trimmedUnitName}' THEN 1 ELSE 2 END`), 'ASC']
+        ]
+      });
+      assignedRole = "focal-person";
+      
+      if (assignedUser) {
+        console.log("✅ SUCCESS: Found focal person:", assignedUser.full_name, "ID:", assignedUser.id);
+        console.log("✅ Focal person unit_section:", assignedUser.unit_section);
+        console.log("✅ Matched with:", trimmedUnitName);
       } else {
-        // If it's a unit (not directorate), find head-of-unit for this unit
-        assignedUser = await User.findOne({
-          where: {
-            role: "head-of-unit",
-            unit_section: responsible_unit_name,
-          },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
-        });
-        assignedRole = "head-of-unit";
-        console.log("Found head-of-unit for unit:", assignedUser?.full_name);
-        
-        // If no head-of-unit found for specific unit, try to find any head-of-unit
-        if (!assignedUser) {
-          assignedUser = await User.findOne({
-            where: {
-              role: "head-of-unit",
-            },
-            attributes: ["id", "full_name", "email", "role", "unit_section"],
-          });
-          console.log("Found fallback head-of-unit:", assignedUser?.full_name);
+        console.log("❌ ERROR: No focal person found for unit/directorate:", trimmedUnitName);
+        if (sub_section) {
+          console.log("❌ Also checked sub_section:", sub_section);
         }
-      }
-      
-      // If still no user found, try focal-person as fallback
-      if (!assignedUser) {
-        assignedUser = await User.findOne({
-          where: {
-            role: "focal-person",
-            unit_section: responsible_unit_name,
-          },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
-        });
-        assignedRole = "focal-person";
-        console.log("Found focal person for updated unit:", assignedUser?.full_name);
+        console.log("❌ Ticket will NOT be reassigned - focal person MUST exist");
+        console.log("❌ NO FALLBACK to director or head-of-unit - assignment will remain unchanged");
         
-        // If no focal person found for the specific unit, try to find any focal person
-        if (!assignedUser) {
-          assignedUser = await User.findOne({
-            where: {
-              role: "focal-person",
-            },
-            attributes: ["id", "full_name", "email", "role", "unit_section"],
-          });
-          console.log("Found fallback focal person:", assignedUser?.full_name);
-        }
+        // Log all focal persons in database for debugging
+        const allFocalPersons = await User.findAll({
+          where: { role: "focal-person" },
+          attributes: ["id", "full_name", "unit_section"],
+        });
+        console.log("📋 All focal persons in database:", JSON.stringify(allFocalPersons.map(fp => ({
+          name: fp.full_name,
+          unit_section: fp.unit_section
+        })), null, 2));
+        console.log("🔍 ===== END FOCAL PERSON SEARCH =====");
       }
+    } else {
+      console.log("⚠️ No responsible_unit_name provided - cannot find focal person");
+      console.log("⚠️ Ticket assignment will NOT be changed");
     }
 
-    // Update ticket with appropriate user assignment if found
-    if (assignedUser) {
+    // Update ticket with focal person assignment ONLY if found (no fallback)
+    // CRITICAL: Only assign if we found a focal-person - NEVER assign to director or head-of-unit
+    if (assignedUser && assignedUser.role === "focal-person") {
       updateData.assigned_to_id = assignedUser.id;
-      updateData.assigned_to_role = assignedRole || assignedUser.role;
-      console.log(`Ticket will be reassigned to ${assignedRole || assignedUser.role}: ${assignedUser.full_name} (${assignedUser.role})`);
+      updateData.assigned_to_role = "focal-person";
+      console.log(`✅✅✅ REASSIGNING to focal-person: ${assignedUser.full_name} (ID: ${assignedUser.id}) for unit/directorate: ${responsible_unit_name}`);
+      console.log(`✅✅✅ assigned_to_role will be set to: focal-person`);
+    } else {
+      if (assignedUser && assignedUser.role !== "focal-person") {
+        console.log(`❌❌❌ SECURITY CHECK: assignedUser role is "${assignedUser.role}" not "focal-person" - NOT ASSIGNING`);
+        assignedUser = null; // Clear it to prevent assignment
+      }
+      console.log(`❌ ERROR: Cannot reassign ticket - no focal person found for unit/directorate: ${responsible_unit_name}`);
+      console.log(`❌ Ticket assignment will NOT be changed - stays with current assignee`);
+      // Explicitly remove assignment fields from updateData to ensure no assignment happens
+      delete updateData.assigned_to_id;
+      delete updateData.assigned_to_role;
     }
 
+    console.log('🔍 About to update ticket with updateData:', JSON.stringify(updateData, null, 2));
+    console.log('🔍 assignedUser before update:', assignedUser ? `${assignedUser.full_name} (${assignedUser.role})` : 'null');
+    
     await ticket.update(updateData);
+    
+    // Reload ticket to get fresh data after update
+    await ticket.reload({
+      include: [
+        {
+          model: User,
+          as: "assignee",
+          attributes: ["id", "full_name", "role", "unit_section"]
+        }
+      ]
+    });
+    
+    console.log('🔍 Ticket after update - assigned_to_id:', ticket.assigned_to_id);
+    console.log('🔍 Ticket after update - assigned_to_role:', ticket.assigned_to_role);
+    console.log('🔍 Ticket after update - assignee:', ticket.assignee ? `${ticket.assignee.full_name} (${ticket.assignee.role})` : 'null');
 
     // Create assignment record if ticket was reassigned
-    if (assignedUser && assignedUser.id !== userId) {
-      const actionMessage = assignedRole === "director" 
-        ? "Reassigned to director after details update"
-        : assignedRole === "head-of-unit"
-        ? "Reassigned to head-of-unit after details update"
-        : "Reassigned to focal person after details update";
+    if (assignedUser && assignedUser.id !== userId && assignedUser.role === "focal-person") {
+      const actionMessage = "Reassigned to focal person after details update";
+      
+      console.log('🔍 Creating TicketAssignment record for focal person:', assignedUser.full_name);
       
       await TicketAssignment.create({
         ticket_id: ticketId,
         assigned_by_id: userId,
         assigned_to_id: assignedUser.id,
-        assigned_to_role: assignedRole || assignedUser.role,
+        assigned_to_role: "focal-person",
         action: actionMessage,
         reason: `Ticket details updated - Subject: ${subject}, Section: ${section || 'N/A'}, Sub-section: ${sub_section || 'N/A'}}`,
         created_at: new Date(),
       });
+    } else {
+      console.log('🔍 NOT creating TicketAssignment - assignedUser:', assignedUser ? `${assignedUser.full_name} (${assignedUser.role})` : 'null');
     }
 
     // Create a notification for the update
-    const roleName = assignedRole === "director" 
-      ? "director"
-      : assignedRole === "head-of-unit"
-      ? "head-of-unit"
-      : "focal person";
-    
     const notificationMessage = assignedUser 
-      ? `Ticket details updated and reassigned to ${roleName}: ${ticket.subject} (ID: ${ticket.ticket_id})`
+      ? `Ticket details updated and reassigned to focal person: ${ticket.subject} (ID: ${ticket.ticket_id})`
       : `Ticket details updated: ${ticket.subject} (ID: ${ticket.ticket_id})`;
 
     await Notification.create({
@@ -7271,9 +7330,24 @@ const updateReversedTicketDetails = async (req, res) => {
     // Log the update
     console.log(`Ticket ${ticketId} details updated by user ${userId}:`, updateData);
 
-    const responseMessage = assignedUser 
-      ? `Ticket details updated successfully and reassigned to ${roleName}`
-      : "Ticket details updated successfully";
+    // Determine response message based on ACTUAL ticket state after update
+    const actualAssignedRole = ticket.assigned_to_role;
+    const actualAssignedUser = ticket.assignee;
+    
+    console.log('🔍 ===== RESPONSE PREPARATION =====');
+    console.log('🔍 actualAssignedRole from ticket:', actualAssignedRole);
+    console.log('🔍 actualAssignedUser from ticket:', actualAssignedUser ? `${actualAssignedUser.full_name} (${actualAssignedUser.role})` : 'null');
+    console.log('🔍 assignedUser variable:', assignedUser ? `${assignedUser.full_name} (${assignedUser.role})` : 'null');
+    
+    // Only say "reassigned" if we actually found and assigned a focal-person
+    let responseMessage;
+    if (assignedUser && assignedUser.role === "focal-person" && actualAssignedRole === "focal-person") {
+      responseMessage = `Ticket details updated successfully and reassigned to focal person`;
+      console.log('✅ Response: Reassigned to focal person');
+    } else {
+      responseMessage = "Ticket details updated successfully";
+      console.log('ℹ️ Response: Updated only (no reassignment)');
+    }
 
     const responseData = {
       message: responseMessage,
@@ -7290,24 +7364,27 @@ const updateReversedTicketDetails = async (req, res) => {
       }
     };
 
-    if (assignedUser) {
-      // Use generic key name that works for all roles
+    // Only include assigned_user if we actually assigned to focal-person
+    if (assignedUser && assignedUser.role === "focal-person" && actualAssignedRole === "focal-person") {
       responseData.assigned_user = {
         id: assignedUser.id,
         full_name: assignedUser.full_name,
-        role: assignedRole || assignedUser.role,
+        role: "focal-person",
         unit_section: assignedUser.unit_section
       };
-      // Also include focal_person for backward compatibility if it's a focal-person
-      if (assignedRole === "focal-person" || assignedUser.role === "focal-person") {
-        responseData.focal_person = {
-          id: assignedUser.id,
-          full_name: assignedUser.full_name,
-          role: assignedUser.role,
-          unit_section: assignedUser.unit_section
-        };
-      }
+      responseData.focal_person = {
+        id: assignedUser.id,
+        full_name: assignedUser.full_name,
+        role: "focal-person",
+        unit_section: assignedUser.unit_section
+      };
+      console.log('✅ Including assigned_user in response:', assignedUser.full_name);
+    } else {
+      console.log('❌ NOT including assigned_user - no focal person assigned');
     }
+    
+    console.log('🔍 Final responseData:', JSON.stringify(responseData, null, 2));
+    console.log('🔍 ===== END RESPONSE PREPARATION =====');
 
     return res.json(responseData);
 
