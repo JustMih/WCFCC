@@ -2703,10 +2703,8 @@ const getAllTickets = async (req, res) => {
 
     let tickets;
 
-    if (user.role === "super-admin" || user.role === "supervisor" 
-      || user.role === "head-of-unit" || user.role === "director" || user.role === "manager" 
-      || user.role === "focal-person"
-    ) {
+    if (user.role === "super-admin" || user.role === "supervisor") {
+      // Super-admin and supervisor see all tickets
       tickets = await Ticket.findAll({
         attributes: { exclude: ["userId"] },
         include: [
@@ -2772,8 +2770,15 @@ const getAllTickets = async (req, res) => {
         order: [["created_at", "DESC"]],
       });
     } else {
+      // For all other roles (including head-of-unit, director, manager, focal-person, attendee, etc.)
+      // Show only tickets created by this user (Total Opened by Me)
       tickets = await Ticket.findAll({
-        where: { userId },
+        where: { 
+          [Op.or]: [
+            { userId: userId },
+            { created_by: userId }
+          ]
+        },
         attributes: { exclude: ["userId"] },
         include: [
           {
@@ -5770,10 +5775,18 @@ const getAllTicketsCount = async (req, res) => {
     });
     if (!user) return res.status(404).json({ message: "User not found" });
     let count;
-    if (user.role === "super-admin") {
+    if (user.role === "super-admin" || user.role === "supervisor") {
       count = await Ticket.count();
     } else {
-      count = await Ticket.count({ where: { userId } });
+      // For all other roles, count only tickets created by this user (Total Opened by Me)
+      count = await Ticket.count({ 
+        where: { 
+          [Op.or]: [
+            { userId: userId },
+            { created_by: userId }
+          ]
+        } 
+      });
     }
     res.status(200).json({ count });
   } catch (error) {
