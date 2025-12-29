@@ -239,20 +239,25 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   });
   if (previousAssignee && previousAssignee.email) {
     setImmediate(() => {
+      const emailSubject = `Ticket Escalated: ${ticket.ticket_id || ticket.id}`;
+      const bodyHtml = `<p>Dear ${previousAssignee.full_name},</p><p>The ticket has been escalated from your queue to ${nextUser.full_name} (${nextRole}) due to SLA breach.</p>`;
+      const detailsHtml = `
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticket.id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || 'N/A'}</li>
+          <li><strong>Category:</strong> ${ticket.category || 'N/A'}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Escalated To:</strong> ${nextUser.full_name} (${nextRole})</li>
+          <li><strong>Reason:</strong> SLA breach</li>
+        </ul>
+      `;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
+      
       sendEmail({
         // to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
         to:`rehema.said3@ttcl.co.tz`,
-        subject: `Ticket Escalated: ${ticket.ticket_id || ticket.id}`,
-        htmlBody: `
-          <p>Dear ${previousAssignee.full_name},</p>
-          <p>The ticket <b>${
-            ticket.ticket_id || ticket.id
-          }</b> has been escalated from your queue to <b>${
-          nextUser.full_name
-        }</b> (${nextRole}) due to SLA breach.</p>
-          <p><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</p>
-          <p>Please log in to the system for more details.</p>
-        `,
+        subject: emailSubject,
+        htmlBody: emailHtmlBody,
       }).catch((e) =>
         console.error("Error sending escalation email:", e.message)
       );
@@ -4185,7 +4190,7 @@ const getTicketAssignments = async (req, res) => {
     
     let mappedAssignments = assignmentsWithUsers.map((a) => ({
       assigned_to_id: a.assigned_to_id,
-      assigned_to_name: a.assignedTo ? a.assignedTo.full_name : null,
+      assigned_to_name: a.assignedTo ? a.assignedTo.full_name : "Unknown User",
       assigned_to_role: a.assignedTo ? a.assignedTo.role : null,
       reason: a.reason,
       action: a.action,
@@ -4194,7 +4199,13 @@ const getTicketAssignments = async (req, res) => {
       evidence_url: a.evidence_url,
       action_details: a.action_details,
       workflow_step: a.workflow_step,
-      workflow_path: a.workflow_path
+      workflow_path: a.workflow_path,
+      // Include assignedTo object for frontend fallback
+      assignedTo: a.assignedTo ? {
+        id: a.assignedTo.id,
+        full_name: a.assignedTo.full_name,
+        role: a.assignedTo.role
+      } : null
     }));
 
     // Add creator_name to the first assignment if available
