@@ -307,6 +307,9 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
+      // Special case: "Units" is a generic term, always treat as unit and use sub_section
+      const isGenericUnits = responsible_unit_name && responsible_unit_name.trim().toLowerCase() === 'units';
+      
       // Check if it's a Section (directorate) or Function (unit)
       const section = await Section.findOne({
         where: { name: responsible_unit_name },
@@ -314,18 +317,22 @@ const convertOrForwardTicket = async (req, res) => {
       });
 
       let functionUnit = null;
-      const isDirectorate = section !== null;
+      // If it's "Units" (generic), always treat as unit, not directorate
+      const isDirectorate = !isGenericUnits && section !== null;
       
       // If not found as Section, check if it's a Function (unit like "ICT Units")
-      if (!section) {
-        functionUnit = await FunctionModel.findOne({
-          where: { name: responsible_unit_name },
-          transaction
-        });
-        
-        if (!functionUnit) {
-          await safeRollback(transaction);
-          return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+      if (!section || isGenericUnits) {
+        // For generic "Units", skip Function lookup and use sub_section directly
+        if (!isGenericUnits) {
+          functionUnit = await FunctionModel.findOne({
+            where: { name: responsible_unit_name },
+            transaction
+          });
+          
+          if (!functionUnit) {
+            await safeRollback(transaction);
+            return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+          }
         }
       }
 
@@ -351,25 +358,51 @@ const convertOrForwardTicket = async (req, res) => {
       // Find a user with the target role in the selected unit
       let unitUser = null;
       if (targetRole) {
-        // If it's a unit (not directorate), use ticket.sub_section to find head of unit or focal-person
+        // If it's a unit (not directorate), prioritize ticket.sub_section to find head of unit
         // If it's a directorate, use responsible_unit_name
-        const searchField = isDirectorate ? responsible_unit_name : (ticket.sub_section || responsible_unit_name);
+        let searchField = null;
+        if (isDirectorate) {
+          searchField = responsible_unit_name;
+        } else {
+          // For units, prioritize sub_section over responsible_unit_name
+          searchField = ticket.sub_section || responsible_unit_name;
+          console.log(`DEBUG: For unit, using sub_section: "${ticket.sub_section}" or fallback: "${responsible_unit_name}"`);
+        }
         
         console.log(`DEBUG: Looking for ${targetRole} in ${isDirectorate ? 'directorate' : 'unit'}: "${searchField}"`);
         console.log(`DEBUG: Ticket sub_section: "${ticket.sub_section}", responsible_unit_name: "${responsible_unit_name}"`);
         
-        // Try exact match first
-        unitUser = await User.findOne({
-          where: { 
-            unit_section: searchField,
-            role: targetRole 
-          },
-          transaction
-        });
+        // Try exact match first with searchField
+        if (searchField) {
+          unitUser = await User.findOne({
+            where: { 
+              unit_section: searchField,
+              role: targetRole 
+            },
+            transaction
+          });
+        }
         
-        // If not found, try case-insensitive match
-        if (!unitUser) {
-          console.log(`DEBUG: Exact match not found, trying case-insensitive match`);
+        // If not found and it's a unit, also try searching by sub_section directly (case-insensitive)
+        if (!unitUser && !isDirectorate && ticket.sub_section) {
+          console.log(`DEBUG: Exact match not found, trying case-insensitive match with sub_section: "${ticket.sub_section}"`);
+          unitUser = await User.findOne({
+            where: {
+              [Op.and]: [
+                Sequelize.where(
+                  Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                  Sequelize.fn('LOWER', ticket.sub_section)
+                ),
+                { role: targetRole }
+              ]
+            },
+            transaction
+          });
+        }
+        
+        // If still not found, try case-insensitive match with searchField
+        if (!unitUser && searchField) {
+          console.log(`DEBUG: Still not found, trying case-insensitive match with searchField: "${searchField}"`);
           unitUser = await User.findOne({
             where: {
               [Op.and]: [
@@ -384,21 +417,39 @@ const convertOrForwardTicket = async (req, res) => {
           });
         }
         
-        // If still not found for unit, try to find focal-person
+        // If still not found for unit, try to find focal-person using sub_section
         if (!unitUser && !isDirectorate) {
-          console.log(`DEBUG: No ${targetRole} found, trying focal-person for unit`);
-          unitUser = await User.findOne({
-            where: {
-              [Op.and]: [
-                Sequelize.where(
-                  Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-                  Sequelize.fn('LOWER', searchField)
-                ),
-                { role: 'focal-person' }
-              ]
-            },
-            transaction
-          });
+          console.log(`DEBUG: No ${targetRole} found, trying focal-person for unit using sub_section: "${ticket.sub_section}"`);
+          // First try with sub_section if available
+          if (ticket.sub_section) {
+            unitUser = await User.findOne({
+              where: {
+                [Op.and]: [
+                  Sequelize.where(
+                    Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                    Sequelize.fn('LOWER', ticket.sub_section)
+                  ),
+                  { role: 'focal-person' }
+                ]
+              },
+              transaction
+            });
+          }
+          // If still not found, try with searchField
+          if (!unitUser && searchField) {
+            unitUser = await User.findOne({
+              where: {
+                [Op.and]: [
+                  Sequelize.where(
+                    Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                    Sequelize.fn('LOWER', searchField)
+                  ),
+                  { role: 'focal-person' }
+                ]
+              },
+              transaction
+            });
+          }
           if (unitUser) {
             console.log(`DEBUG: Found focal-person instead: ${unitUser.full_name}`);
           }
@@ -425,21 +476,42 @@ const convertOrForwardTicket = async (req, res) => {
       // If no user found with target role, find any user in that unit
       let anyUnitUser = null;
       if (!unitUser) {
-        // If it's a unit (not directorate), use ticket.sub_section to find any user
+        // If it's a unit (not directorate), prioritize ticket.sub_section to find any user
         // If it's a directorate, use responsible_unit_name
-        const searchField = isDirectorate ? responsible_unit_name : (ticket.sub_section || responsible_unit_name);
+        let searchField = null;
+        if (isDirectorate) {
+          searchField = responsible_unit_name;
+        } else {
+          // For units, prioritize sub_section over responsible_unit_name
+          searchField = ticket.sub_section || responsible_unit_name;
+          console.log(`DEBUG: For unit, using sub_section: "${ticket.sub_section}" or fallback: "${responsible_unit_name}"`);
+        }
         
         console.log(`DEBUG: Looking for any user in ${isDirectorate ? 'directorate' : 'unit'}: "${searchField}"`);
         
-        // Try exact match first
-        anyUnitUser = await User.findOne({
-          where: { unit_section: searchField },
-          transaction
-        });
+        // Try exact match first with searchField
+        if (searchField) {
+          anyUnitUser = await User.findOne({
+            where: { unit_section: searchField },
+            transaction
+          });
+        }
         
-        // If not found, try case-insensitive match
-        if (!anyUnitUser) {
-          console.log(`DEBUG: Exact match not found, trying case-insensitive match`);
+        // If not found and it's a unit, also try searching by sub_section directly (case-insensitive)
+        if (!anyUnitUser && !isDirectorate && ticket.sub_section) {
+          console.log(`DEBUG: Exact match not found, trying case-insensitive match with sub_section: "${ticket.sub_section}"`);
+          anyUnitUser = await User.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+              Sequelize.fn('LOWER', ticket.sub_section)
+            ),
+            transaction
+          });
+        }
+        
+        // If still not found, try case-insensitive match with searchField
+        if (!anyUnitUser && searchField) {
+          console.log(`DEBUG: Still not found, trying case-insensitive match with searchField: "${searchField}"`);
           anyUnitUser = await User.findOne({
             where: Sequelize.where(
               Sequelize.fn('LOWER', Sequelize.col('unit_section')),

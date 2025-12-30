@@ -4582,9 +4582,12 @@ const getDashboardCounts = async (req, res) => {
         };
 
         // For super admin and supervisor, show all assignments
-        // For other roles, show only assignments made by this user
+        // For other roles, show assignments made by this user OR assigned to this user
         if (user.role !== "super-admin" && user.role !== "supervisor") {
-          whereClause.assigned_by_id = userId;
+          whereClause[Op.or] = [
+            { assigned_by_id: userId },
+            { assigned_to_id: userId }
+          ];
         }
 
         // Get only the most recent assignment per ticket_id
