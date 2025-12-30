@@ -3933,7 +3933,12 @@ const getAllAttendee = async (req, res) => {
       console.log(`DEBUG: Focal person requesting attendees from their unit`);
     }
     
-    whereClause.role = targetRole;
+    // Include both "attendee" and "agent" roles when targetRole is "attendee"
+    if (targetRole === "attendee") {
+      whereClause.role = { [Op.in]: ["attendee", "agent"] };
+    } else {
+      whereClause.role = targetRole;
+    }
     
     // Filter users based on current user's role and available data
     if (currentUser.role === "focal-person") {
@@ -3950,7 +3955,7 @@ const getAllAttendee = async (req, res) => {
         
         // For focal persons: filter attendees by unit_section AND report_to
         // Attendees must be in the same unit_section AND report to the same manager as the focal person
-        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role = 'attendee'
+        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role IN ('attendee', 'agent')
         if (currentUser.unit_section && currentUser.unit_section.trim() !== '' && 
             currentUser.report_to && currentUser.report_to.trim() !== '') {
           // Use case-insensitive matching for both unit_section and report_to
@@ -3972,7 +3977,9 @@ const getAllAttendee = async (req, res) => {
                   currentUser.report_to.trim().toLowerCase()
                 )
               ]
-            }
+            },
+            // Include both attendee and agent roles
+            targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent"] } } : { role: targetRole }
           ];
           console.log(`DEBUG: Focal person filtering ${targetRole}s by unit_section: "${currentUser.unit_section}" AND report_to: "${currentUser.report_to}" (case-insensitive)`);
           if (ticket && ticket.sub_section) {
@@ -3988,7 +3995,7 @@ const getAllAttendee = async (req, res) => {
       } else {
         // For focal persons without ticketId: filter attendees by unit_section AND report_to
         // Attendees must be in the same unit_section AND report to the same manager as the focal person
-        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role = 'attendee'
+        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role IN ('attendee', 'agent')
         if (currentUser.unit_section && currentUser.unit_section.trim() !== '' && 
             currentUser.report_to && currentUser.report_to.trim() !== '') {
           // Use case-insensitive matching for both unit_section and report_to
@@ -4010,7 +4017,9 @@ const getAllAttendee = async (req, res) => {
                   currentUser.report_to.trim().toLowerCase()
                 )
               ]
-            }
+            },
+            // Include both attendee and agent roles
+            targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent"] } } : { role: targetRole }
           ];
           console.log(`DEBUG: Filtering ${targetRole}s by focal person's unit_section: "${currentUser.unit_section}" AND report_to: "${currentUser.report_to}" (case-insensitive)`);
         } else {
@@ -4025,8 +4034,12 @@ const getAllAttendee = async (req, res) => {
       // For head-of-unit, filter by unit_section AND role = "attendee" (unless directorate shows managers)
       if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
         whereClause.unit_section = currentUser.unit_section;
-        // Ensure we're filtering by attendee role (unless directorate which shows managers)
-        whereClause.role = targetRole; // This is already set above, but ensure it's correct
+        // Ensure we're filtering by attendee/agent roles (unless directorate which shows managers)
+        if (targetRole === "attendee") {
+          whereClause.role = { [Op.in]: ["attendee", "agent"] };
+        } else {
+          whereClause.role = targetRole;
+        }
         console.log(`DEBUG: Head of Unit filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
         console.log(`DEBUG: Where clause for head-of-unit:`, JSON.stringify(whereClause, null, 2));
       } else {
@@ -4095,9 +4108,9 @@ const getAllAttendee = async (req, res) => {
       console.log(`DEBUG: Where clause used:`, JSON.stringify(whereClause, null, 2));
       console.log(`DEBUG: Focal person full_name: "${currentUserFullName}"`);
       
-      // Check all attendees with their unit_section
+      // Check all attendees with their unit_section (including agents)
       const allAttendees = await User.findAll({
-        where: { role: targetRole },
+        where: targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent"] } } : { role: targetRole },
         attributes: ['id', 'full_name', 'unit_section', 'report_to', 'designation']
       });
       console.log(`DEBUG: All ${targetRole}s in database:`, allAttendees.map(u => ({ 
@@ -5001,9 +5014,12 @@ const getInProgressAssignments = async (req, res) => {
     };
 
     // For super admin and supervisor, show all assignments
-    // For other roles, show only assignments made by this user
+    // For other roles, show assignments made by this user OR assigned to this user
     if (user.role !== "super-admin" && user.role !== "supervisor") {
-      whereClause.assigned_by_id = userId;
+      whereClause[Op.or] = [
+        { assigned_by_id: userId },
+        { assigned_to_id: userId }
+      ];
     }
 
     // Get only the most recent assignment per ticket_id, including ticket details
