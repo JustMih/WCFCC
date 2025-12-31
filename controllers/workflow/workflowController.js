@@ -1,4 +1,4 @@
-const { Ticket, User, TicketAssignment, Section } = require('../../models');
+const { Ticket, User, TicketAssignment, Section, Notification } = require('../../models');
 const { Op } = require('sequelize');
 const { deactivateUserUpdates } = require('../ticket/ticketUpdateController');
 
@@ -229,7 +229,7 @@ const attendAndRecommend = async (req, res) => {
       return res.status(404).json({ message: 'Ticket not found' });
     }
 
-    // Check if user is attendee and ticket is Minor/Major complaint from head of unit
+    // Check if user is attendee and ticket is Minor/Major complaint
     if (req.user.role !== 'attendee') {
       await safeRollback(transaction);
       return res.status(403).json({ message: 'Only attendees can use this endpoint' });
@@ -240,65 +240,114 @@ const attendAndRecommend = async (req, res) => {
       return res.status(400).json({ message: 'This endpoint is only for Minor/Major complaints' });
     }
 
-    const isFromHeadOfUnit = ticket.responsible_unit_name && 
-                             !ticket.responsible_unit_name.toLowerCase().includes('directorate');
-    
-    if (!isFromHeadOfUnit) {
-      await safeRollback(transaction);
-      return res.status(400).json({ message: 'This endpoint is only for tickets from head of unit' });
-    }
-
-    // Find head of unit for this unit
-    const headOfUnit = await User.findOne({
-      where: {
-        role: 'head-of-unit',
-        unit_section: ticket.responsible_unit_name
-      },
+    // Find previous assigner from assignment history (head-of-unit or manager)
+    const allAssignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'DESC']],
       transaction
     });
 
-    if (!headOfUnit) {
-      await safeRollback(transaction);
-      return res.status(404).json({ message: `Head of unit not found for unit: ${ticket.responsible_unit_name}` });
+    let currentUserAssignment = null;
+    for (const assignment of allAssignments) {
+      if (assignment.assigned_to_id === userId) {
+        currentUserAssignment = assignment;
+        break;
+      }
     }
 
-    // Update ticket with recommendation and assign to head of unit
+    let previousAssigner = null;
+    
+    // If current user was reassigned, return to the reassigned_by (assigned_by_id of current assignment)
+    if (currentUserAssignment && currentUserAssignment.action === 'Reassigned') {
+      previousAssigner = await User.findByPk(currentUserAssignment.assigned_by_id, { transaction });
+    } else if (currentUserAssignment && currentUserAssignment.assigned_by_id) {
+      // If not reassigned, find the previous assigner from assignment history
+      for (const assignment of allAssignments) {
+        if (assignment.assigned_to_id === currentUserAssignment.assigned_by_id &&
+            assignment.created_at < currentUserAssignment.created_at) {
+          previousAssigner = await User.findByPk(assignment.assigned_to_id, { transaction });
+          break;
+        }
+      }
+    }
+
+    // If previous assigner not found in history, try to find head-of-unit or manager
+    if (!previousAssigner) {
+      const headOfUnit = await User.findOne({
+        where: {
+          role: 'head-of-unit',
+          unit_section: ticket.responsible_unit_name || ticket.section
+        },
+        transaction
+      });
+
+      if (headOfUnit) {
+        previousAssigner = headOfUnit;
+      } else {
+        const manager = await User.findOne({
+          where: {
+            role: 'manager',
+            unit_section: ticket.responsible_unit_name || ticket.section
+          },
+          transaction
+        });
+
+        if (manager) {
+          previousAssigner = manager;
+        }
+      }
+    }
+
+    if (!previousAssigner) {
+      await safeRollback(transaction);
+      return res.status(404).json({ message: 'Previous assigner (head-of-unit or manager) not found' });
+    }
+
     await ticket.update({
       recommendation: recommendation,
       recommendation_details: recommendation,
       recommended_by_id: userId,
       recommended_at: new Date(),
-      assigned_to_id: headOfUnit.id,
-      assigned_to_role: 'head-of-unit',
-      status: 'Attended and Recommended',
+      assigned_to_id: previousAssigner.id,
+      assigned_to_role: previousAssigner.role,
+      status: 'Reversed', // Use Reversed status to indicate reverse mechanism
       evidence_url: evidence_url || ticket.evidence_url
     }, { transaction });
 
-    // Create assignment record
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: userId,
-      assigned_to_id: headOfUnit.id,
-      assigned_to_role: 'head-of-unit',
-      action: 'Attended and Recommended',
+      assigned_to_id: previousAssigner.id,
+      assigned_to_role: previousAssigner.role,
+      action: 'Reversed', // Use Reversed action instead of "Attended and Recommended"
       reason: `Recommendation: ${recommendation}`,
       created_at: new Date()
     }, { transaction });
 
-    // Deactivate all updates for this user on this ticket
-    await deactivateUserUpdates(ticket.id, userId);
+    // Create notification for previous assigner
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: userId,
+      recipient_id: previousAssigner.id,
+      message: `Ticket reversed to you with recommendation: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+      category: ticket.category || "General",
+      comment: recommendation // Include recommendation in comment
+    }, { transaction });
 
+    await deactivateUserUpdates(ticket.id, userId);
     await transaction.commit();
 
     return res.json({
       success: true,
-      message: 'Recommendation submitted! Ticket sent to Head of Unit for review.',
+      message: `Recommendation submitted! Ticket reversed to ${previousAssigner.role} for review.`,
       data: {
         ticket,
         assignedTo: {
-          id: headOfUnit.id,
-          name: headOfUnit.full_name || headOfUnit.first_name + ' ' + headOfUnit.last_name,
-          role: headOfUnit.role
+          id: previousAssigner.id,
+          name: previousAssigner.full_name || previousAssigner.first_name + ' ' + previousAssigner.last_name,
+          role: previousAssigner.role
         }
       }
     });

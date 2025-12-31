@@ -1,4 +1,6 @@
 const nodemailer = require('nodemailer');
+const path = require('path');
+const fs = require('fs');
 
 /**
  * Render a standardized email card with consistent styling
@@ -65,20 +67,111 @@ const emailTransporter = nodemailer.createTransport({
 });
 
 /**
+ * Helper function to format attachments for nodemailer
+ * @param {string|Array} attachmentPaths - Single file path or array of file paths
+ * @returns {Array} Formatted attachments array for nodemailer
+ */
+const formatAttachments = (attachmentPaths) => {
+  if (!attachmentPaths) return [];
+  
+  // If single path string, convert to array
+  const paths = Array.isArray(attachmentPaths) ? attachmentPaths : [attachmentPaths];
+  
+  return paths
+    .filter(filePath => filePath && typeof filePath === 'string' && filePath.trim() !== '')
+    .map(filePath => {
+      let fullPath;
+      let possiblePaths = [];
+      
+      // If absolute path, use as is
+      if (path.isAbsolute(filePath)) {
+        fullPath = filePath;
+      } else {
+        // Try multiple possible locations
+        possiblePaths = [
+          path.join(__dirname, '..', 'uploads', filePath), // Standard uploads directory
+          path.join(__dirname, '..', '..', 'uploads', filePath), // Alternative location
+          path.join(process.cwd(), 'uploads', filePath), // From project root
+        ];
+        
+        // Find the first existing path
+        fullPath = possiblePaths.find(p => fs.existsSync(p));
+        
+        // If none found, use the first possible path (will show error later)
+        if (!fullPath) {
+          fullPath = possiblePaths[0];
+        }
+      }
+      
+      // Check if file exists
+      if (fs.existsSync(fullPath)) {
+        return {
+          filename: path.basename(fullPath),
+          path: fullPath,
+          // Add content type for better email client handling (download/view)
+          contentType: getContentType(fullPath)
+        };
+      } else {
+        console.warn(`⚠️ [Email] Attachment file not found: ${fullPath}`);
+        if (possiblePaths.length > 0) {
+          console.warn(`⚠️ [Email] Attempted paths: ${possiblePaths.join(', ')}`);
+        }
+        return null;
+      }
+    })
+    .filter(attachment => attachment !== null);
+};
+
+/**
+ * Helper function to determine content type from file extension
+ * @param {string} filePath - Path to the file
+ * @returns {string} MIME type
+ */
+const getContentType = (filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  const contentTypes = {
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.txt': 'text/plain',
+    '.zip': 'application/zip',
+    '.rar': 'application/x-rar-compressed',
+  };
+  return contentTypes[ext] || 'application/octet-stream';
+};
+
+/**
  * Send an email using the configured transporter with fallback
  * @param {Object} param0
  * @param {string} param0.to - Recipient email address
  * @param {string} param0.subject - Email subject
  * @param {string} param0.htmlBody - HTML body of the email
+ * @param {string|Array} param0.attachments - Optional: File path(s) to attach
  * @returns {Promise}
  */
-const sendEmail = async ({ to, subject, htmlBody }) => {
+const sendEmail = async ({ to, subject, htmlBody, attachments }) => {
+  // Format attachments if provided
+  const formattedAttachments = attachments 
+    ? (Array.isArray(attachments) && attachments[0]?.filename ? attachments : formatAttachments(attachments))
+    : [];
+  
   const mailOptions = {
     from: 'WCF MAC <noreply.mac@wcf.go.tz>',
     to,
     subject,
     html: htmlBody,
+    attachments: formattedAttachments,
   };
+  
+  if (formattedAttachments.length > 0) {
+    console.log(`📎 [Email] Attaching ${formattedAttachments.length} file(s) to email`);
+  }
 
   return new Promise((resolve, reject) => {
     // Use only the primary transporter (WCF settings)
@@ -97,10 +190,15 @@ const sendEmail = async ({ to, subject, htmlBody }) => {
 };
 
 // Non-blocking version of sendEmail for fire-and-forget emails
-const sendEmailNonBlocking = ({ to, subject, htmlBody }) => {
+const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
   // Force test email address for all emails
   const testEmail = 'rehema.said3@ttcl.co.tz';
   const actualRecipient = to; // Store original for logging
+  
+  // Format attachments if provided
+  const formattedAttachments = attachments 
+    ? (Array.isArray(attachments) && attachments[0]?.filename ? attachments : formatAttachments(attachments))
+    : [];
   
   const mailOptions = {
     from: 'WCF MAC <noreply.mac@wcf.go.tz>',
@@ -109,17 +207,24 @@ const sendEmailNonBlocking = ({ to, subject, htmlBody }) => {
     to: testEmail, // Always use test email
     subject: subject,
     html: htmlBody,
+    attachments: formattedAttachments,
   };
+  
+  if (formattedAttachments.length > 0) {
+    console.log(`📎 [Email] Attaching ${formattedAttachments.length} file(s) to email`);
+  }
 
   // Use only the primary transporter (WCF settings)
-  console.log(`📧 [Email] Attempting to send email using WCF transporter (non-blocking)...`);
+  const startTime = Date.now();
+  console.log(`📧 [Email] [${new Date().toISOString()}] Attempting to send email using WCF transporter (non-blocking)...`);
   console.log(`📧 [Email] Original recipient: ${actualRecipient}, Sending to test email: ${testEmail}`);
   
   emailTransporter.sendMail(mailOptions, (error, info) => {
+    const duration = Date.now() - startTime;
     if (error) {
-      console.error(`❌ [Email] WCF transporter failed:`, error.message);
+      console.error(`❌ [Email] [${new Date().toISOString()}] WCF transporter failed after ${duration}ms:`, error.message);
     } else {
-      console.log(`✅ [Email] Email sent successfully to test email: ${testEmail} (original: ${actualRecipient}), Message ID: ${info.messageId}`);
+      console.log(`✅ [Email] [${new Date().toISOString()}] Email sent successfully to test email: ${testEmail} (original: ${actualRecipient}) after ${duration}ms, Message ID: ${info.messageId}`);
     }
   });
 };

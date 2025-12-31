@@ -6,6 +6,7 @@ const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
 const { Sequelize } = require("sequelize");
+const { sendEmailNonBlocking, renderEmailCard } = require("../../services/emailService");
 const sequelize = require("../../config/mysql_connection");
 
 const createUser = async (req, res) => {
@@ -324,6 +325,45 @@ const getAgents = async (req, res) => {
   }
 };
 
+const getCRMUsers = async (req, res) => {
+  try {
+    const { Op } = require("sequelize");
+    const crmUsers = await User.findAll({
+      where: {
+        role: {
+          [Op.in]: [
+            "attendee",
+            "agent",
+            "reviewer",
+            "head-of-unit",
+            "manager",
+            "director",
+            "director-general",
+            "focal-person",
+            "claim-focal-person",
+            "compliance-focal-person",
+            "admin",
+            "super-admin"
+          ]
+        },
+        full_name: {
+          [Op.ne]: null
+        }
+      },
+      attributes: ['id', 'full_name', 'email', 'role'],
+      order: [['full_name', 'ASC']]
+    });
+
+    res.status(200).json({
+      users: crmUsers,
+      count: crmUsers.length,
+      total: crmUsers.length,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 const getSupervisor = async (req, res) => {
   try {
     const supervisors = await User.findAll({
@@ -371,6 +411,72 @@ const getUsersByRole = async (req, res) => {
   }
 };
 
+// Get all conversations for a user (users they've chatted with)
+const getConversations = async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Get all messages where user is sender or receiver
+    const allMessages = await ChatMassage.findAll({
+      where: {
+        [Op.or]: [
+          { senderId: userId },
+          { receiverId: userId }
+        ]
+      },
+      order: [['createdAt', 'DESC']],
+      attributes: ['id', 'senderId', 'receiverId', 'message', 'isRead', 'createdAt']
+    });
+
+    // Group by other user ID
+    const userMap = new Map();
+    
+    for (const msg of allMessages) {
+      const otherUserId = msg.senderId === userId ? msg.receiverId : msg.senderId;
+      
+      if (!userMap.has(otherUserId)) {
+        // Get unread count for this conversation
+        const unreadCount = await ChatMassage.count({
+          where: {
+            senderId: otherUserId,
+            receiverId: userId,
+            isRead: false
+          }
+        });
+
+        userMap.set(otherUserId, {
+          userId: otherUserId,
+          lastMessageTime: msg.createdAt,
+          lastMessage: {
+            text: msg.message,
+            senderId: msg.senderId,
+            time: msg.createdAt,
+            isRead: msg.isRead
+          },
+          unreadCount: unreadCount
+        });
+      }
+    }
+
+    // Convert map to array and sort
+    const conversationList = Array.from(userMap.values());
+
+    // Sort: unread first, then by time (most recent first)
+    conversationList.sort((a, b) => {
+      // First sort by unread count (unread first)
+      if (a.unreadCount > 0 && b.unreadCount === 0) return -1;
+      if (a.unreadCount === 0 && b.unreadCount > 0) return 1;
+      // Then sort by time (most recent first)
+      return new Date(b.lastMessageTime) - new Date(a.lastMessageTime);
+    });
+
+    res.json({ conversations: conversationList });
+  } catch (error) {
+    console.error("Error fetching conversations:", error);
+    res.status(500).json({ error: "Failed to fetch conversations" });
+  }
+};
+
 const getMessage = async (req, res) => {
   const { user1, user2 } = req.params;
 
@@ -383,25 +489,28 @@ const getMessage = async (req, res) => {
         ],
       },
       order: [["createdAt", "ASC"]], // Sort messages by time
-      attributes: ["senderId", "receiverId", "message", "createdAt"], // Only select necessary fields
-      include: [
-        {
-          model: User,
-          attributes: {
-            exclude: ["password", "createdAt", "updatedAt", "role"],
-          },
-        },
-      ],
+      attributes: ["id", "senderId", "receiverId", "message", "isRead", "createdAt", "updatedAt"], // Include all necessary fields
     });
 
+    // Format messages for frontend
+    const formattedMessages = messages.map(msg => ({
+      id: msg.id,
+      senderId: msg.senderId,
+      receiverId: msg.receiverId,
+      message: msg.message,
+      isRead: msg.isRead,
+      timestamp: msg.createdAt,
+      createdAt: msg.createdAt
+    }));
+
     // Check if there are no messages
-    if (messages.length === 0) {
+    if (formattedMessages.length === 0) {
       return res
-        .status(404)
-        .json({ message: "No messages found between these users." });
+        .status(200)
+        .json([]); // Return empty array instead of 404
     }
 
-    res.json(messages);
+    res.json(formattedMessages);
   } catch (error) {
     console.error("Error fetching messages:", error);
     res.status(500).json({ error: "Failed to fetch messages" });
@@ -462,6 +571,94 @@ const getSenderReceiverUnreadCount = async (req, res) => {
 };
 
 // update isRead to true when a receiver is read a message from sender
+// Create/Send a new message
+const createMessage = async (req, res) => {
+  const { senderId, receiverId, message } = req.body;
+
+  try {
+    // Validate input
+    if (!senderId || !receiverId || !message || !message.trim()) {
+      return res.status(400).json({ 
+        message: "senderId, receiverId, and message are required" 
+      });
+    }
+
+    // Fetch sender and receiver details for email
+    const [sender, receiver] = await Promise.all([
+      User.findByPk(senderId, { attributes: ['id', 'full_name', 'email'] }),
+      User.findByPk(receiverId, { attributes: ['id', 'full_name', 'email'] })
+    ]);
+
+    if (!sender || !receiver) {
+      return res.status(404).json({ 
+        message: "Sender or receiver not found" 
+      });
+    }
+
+    // Create message in database
+    const newMessage = await ChatMassage.create({
+      senderId,
+      receiverId,
+      message: message.trim(),
+      isRead: false,
+    });
+
+    console.log(`✅ Message saved to database: ID ${newMessage.id}`);
+
+    // Send email notification to receiver (non-blocking)
+    if (receiver.email) {
+      try {
+        const senderName = sender.full_name || 'User';
+        const subject = `From CRM Chat: You have received a new CRM chat message from ${senderName}`;
+        const bodyHtml = `
+          <p>Hello ${receiver.full_name || 'User'},</p>
+          <p>You have received a new CRM chat message from <b>${senderName}</b>:</p>
+        `;
+        const detailsHtml = `
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <p style="margin: 0; font-style: italic; color: #666;">"${message.trim().substring(0, 300)}${message.trim().length > 300 ? '...' : ''}"</p>
+          </div>
+          <p>Please log into the CRM system to view and reply to this message.</p>
+        `;
+        const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
+        
+        sendEmailNonBlocking({
+          to: receiver.email,
+          subject: subject,
+          htmlBody: htmlBody
+        });
+        
+        console.log(`✅ [Chat Email] Email sending initiated to: ${receiver.email} (will be sent to test email: rehema.said3@ttcl.co.tz)`);
+      } catch (emailError) {
+        console.error(`❌ [Chat Email] Error sending email to ${receiver.email}:`, emailError);
+        // Don't fail the request if email fails
+      }
+    } else {
+      console.log(`⚠️ [Chat Email] Receiver ${receiver.full_name} has no email address`);
+    }
+
+    // Return the created message
+    res.status(201).json({
+      message: "Message sent successfully",
+      data: {
+        id: newMessage.id,
+        senderId: newMessage.senderId,
+        receiverId: newMessage.receiverId,
+        message: newMessage.message,
+        isRead: newMessage.isRead,
+        timestamp: newMessage.createdAt,
+        createdAt: newMessage.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error creating message:", error);
+    res.status(500).json({ 
+      message: "Failed to send message", 
+      error: error.message 
+    });
+  }
+};
+
 const updateIsRead = async (req, res) => {
   const { senderId, receiverId } = req.params;
 
@@ -1186,6 +1383,7 @@ module.exports = {
   createUser,
   getAllUsers,
   getAgents,
+  getCRMUsers,
   deleteUser,
   activateUser,
   deactivateUser,
@@ -1203,6 +1401,8 @@ module.exports = {
   getSupervisorOnline,
   getSupervisorOffline,
   getMessage,
+  getConversations,
+  createMessage,
   updateAgentStatus,
   updateUserStatus,
   getUsersByRole,

@@ -8,6 +8,7 @@ const {
   resetUserPassword,
   getAllUsers,
   getAgents,
+  getCRMUsers,
   getAgentOffline,
   getAgentOnline,
   getAgentActive,
@@ -20,6 +21,8 @@ const {
   getSupervisorOnline,
   getSupervisorOffline,
   getMessage,
+  getConversations,
+  createMessage,
   updateAgentStatus,
   updateUserStatus,
   getUsersByRole,
@@ -53,15 +56,27 @@ router.get(
 router.get(
   "/messages/:user1/:user2",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
   getMessage
+);
+
+// Get all conversations for a user
+router.get(
+  "/conversations/:userId",
+  authMiddleware,
+  getConversations
+);
+
+// Create/Send a new message
+router.post(
+  "/messages",
+  authMiddleware,
+  createMessage
 );
 
 // Get unread messages
 router.get(
   "/unread-messages/:userId",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
   unReadMessage
 );
 
@@ -69,7 +84,6 @@ router.get(
 router.get(
   "/unread-messages-count/:senderId/:receiverId",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
   getSenderReceiverUnreadCount
 );
 
@@ -77,7 +91,6 @@ router.get(
 router.put(
   "/update-read-message/:senderId/:receiverId",
   authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent", "supervisor"]),
   updateIsRead
 );
 
@@ -107,6 +120,12 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   getAgents
+);
+
+router.get(
+  "/crm-users",
+  authMiddleware,
+  getCRMUsers
 );
 
 // route to get users by role

@@ -246,11 +246,11 @@ router.post(
   reverseComplaint
 );
 
-// Route for reviewer/director to forward major complaint to Director General
+// Route for director/head-of-unit to forward major complaint to Director General
 router.post(
   '/:ticketId/forward-to-dg',
   authMiddleware,
-  roleMiddleware(['reviewer', 'director']),
+  roleMiddleware(['director', 'head-of-unit']),
   forwardToDirectorGeneral
 );
 

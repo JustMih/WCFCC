@@ -19,6 +19,17 @@ const TicketUpdate = require("../../models/TicketUpdate");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 const workflowService = require("../../services/workflowCommunicationService");
 
+/**
+ * Helper function to get attachments array from ticket
+ * @param {Object} ticket - Ticket object
+ * @returns {Array} Array of attachment paths (empty if no attachments)
+ */
+const getTicketAttachments = (ticket) => {
+  if (!ticket) return [];
+  const attachmentPath = ticket.attachment_path || ticket.attachmentPath;
+  return attachmentPath ? [attachmentPath] : [];
+};
+
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
  * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.
@@ -253,11 +264,13 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       `;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       
+      const attachments = getTicketAttachments(ticket);
       sendEmail({
         // to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
         to:`rehema.said3@ttcl.co.tz`,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
+        attachments: attachments,
       }).catch((e) =>
         console.error("Error sending escalation email:", e.message)
       );
@@ -1185,12 +1198,14 @@ const createTicket = async (req, res) => {
           <li><strong>Channel:</strong> ${newTicket.channel}</li>
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
+      const attachments = getTicketAttachments(newTicket);
       // Send emails in background to avoid blocking the assignment
-      sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
+      sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
       sendEmailNonBlocking({
         to: "rehema.said3@ttcl.co.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
+        attachments: attachments,
       });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
@@ -1228,11 +1243,15 @@ const createTicket = async (req, res) => {
           </ul>`;
         const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
         
+        // Get attachments for email
+        const attachments = getTicketAttachments(newTicket);
+        
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
           to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
+          attachments: attachments,
         });
         console.log(`✅ Email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${newTicket.ticket_id}`);
       }
@@ -1264,11 +1283,15 @@ const createTicket = async (req, res) => {
           </ul>`;
         const creatorEmailHtmlBody = renderEmailCard(creatorEmailSubject, creatorBodyHtml, creatorDetailsHtml);
         
+        // Get attachments for email
+        const attachments = getTicketAttachments(newTicket);
+        
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
           to: "rehema.said3@ttcl.co.tz", // For testing, replace with creatorUser.email in production
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
+          attachments: attachments,
         });
         console.log(`✅ Email queued for creator (${creatorUser.full_name}) for ticket ${newTicket.ticket_id}`);
       }
@@ -1314,11 +1337,13 @@ const createTicket = async (req, res) => {
           </ul>
           <p>Please review the resolution details above.</p>
         `;
+        const attachments = getTicketAttachments(newTicket);
         sendEmail({
           // to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
           to:`rehema.said3@ttcl.co.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
+          attachments: attachments,
         }).catch((emailError) => {
           console.error(
             "Error sending email to head-of-unit:",
@@ -1437,11 +1462,15 @@ const createTicket = async (req, res) => {
           const { renderEmailCard } = require('../../services/emailService');
           const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
           
+          // Get attachments for email
+          const attachments = getTicketAttachments(newTicket);
+          
           sendEmail({
             // to: creatorUser.email,
             to: "rehema.said3@ttcl.co.tz",
             subject: emailSubject,
             htmlBody: htmlBody,
+            attachments: attachments,
           }).catch((emailError) => {
             console.error(
               "Error sending closure email to creator:",
@@ -1474,11 +1503,15 @@ const createTicket = async (req, res) => {
               </ul>`;
             const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
             
+            // Get attachments for email
+            const attachments = getTicketAttachments(newTicket);
+            
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
               to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
+              attachments: attachments,
             });
             console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${newTicket.ticket_id}`);
           }
@@ -1508,10 +1541,15 @@ const createTicket = async (req, res) => {
           <li><strong>Channel:</strong> ${newTicket.channel}</li>
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml2, detailsHtml2);
+      
+      // Get attachments for email
+      const attachments = getTicketAttachments(newTicket);
+      
       sendEmail({
         to: "rehema.said3@ttcl.co.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
+        attachments: attachments,
       }).catch((emailError) => {
         console.error("Error sending email:", emailError.message);
       });
@@ -1551,11 +1589,15 @@ const createTicket = async (req, res) => {
           </ul>
           <p>Thank you for using the WCF Customer Care System.</p>
         `;
+        // Get attachments for email
+        const attachments = getTicketAttachments(newTicket);
+        
         sendEmail({
           // to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
           to:`rehema.said3@ttcl.co.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
+          attachments: attachments,
         }).catch((emailError) => {
           console.error(
             "Error sending closure email to agent:",
@@ -3205,6 +3247,21 @@ async function notifyUsersByRole(
     const senderUser = await User.findOne({ where: { id: senderId } });
     if (senderUser && senderUser.role) senderRole = senderUser.role;
   }
+  
+  // Fetch ticket to get attachments
+  let ticket = null;
+  let attachments = [];
+  if (ticketId) {
+    try {
+      ticket = await Ticket.findByPk(ticketId);
+      if (ticket) {
+        attachments = getTicketAttachments(ticket);
+      }
+    } catch (error) {
+      console.error("Error fetching ticket for attachments:", error);
+    }
+  }
+  
   for (const user of users) {
     if (user.email) {
       setImmediate(() => {
@@ -3213,6 +3270,7 @@ async function notifyUsersByRole(
           to:`rehema.said3@ttcl.co.tz`,
           subject,
           htmlBody,
+          attachments: attachments,
         }).catch((e) =>
           console.error("Error sending notifyUsersByRole email:", e.message)
         );
@@ -3345,11 +3403,15 @@ const closeTicket = async (req, res) => {
           </ul>`;
         const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
         
+        // Get attachments for email
+        const attachments = getTicketAttachments(ticket);
+        
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
           to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
+          attachments: attachments,
         });
         console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
       }
@@ -3483,11 +3545,15 @@ const closeTicket = async (req, res) => {
         const { renderEmailCard } = require('../../services/emailService');
         const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
         
+        // Get attachments for email
+        const attachments = getTicketAttachments(ticket);
+        
         sendEmail({
           // to: ticket.creator.email,
           to: "rehema.said3@ttcl.co.tz",
           subject: emailSubject,
           htmlBody: htmlBody,
+          attachments: attachments,
         }).catch((emailError) => {
           console.error(
             "Error sending closure email to creator:",
@@ -3689,11 +3755,15 @@ const closeReviewerTicket = async (req, res) => {
       const { renderEmailCard } = require('../../services/emailService');
       const htmlBody = renderEmailCard(emailSubject, emailBody, detailsHtml);
       
+      // Get attachments for email
+      const attachments = getTicketAttachments(ticket);
+      
       sendEmail({
         // to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
         to:`rehema.said3@ttcl.co.tz`,
         subject: emailSubject,
         htmlBody: htmlBody,
+        attachments: attachments,
       }).catch((emailError) => {
         console.error(
           "Error sending closure email to creator:",
@@ -3865,8 +3935,9 @@ const assignTicket = async (req, res) => {
           <p>Please log into the system to review and take action.</p>
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
+        const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking assignment
-        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -4582,8 +4653,11 @@ const getDashboardCounts = async (req, res) => {
         };
 
         // For super admin and supervisor, show all assignments
+        // For director-general, show tickets assigned to them (forwarded to them)
         // For other roles, show assignments made by this user OR assigned to this user
-        if (user.role !== "super-admin" && user.role !== "supervisor") {
+        if (user.role === "director-general") {
+          whereClause.assigned_to_id = userId;
+        } else if (user.role !== "super-admin" && user.role !== "supervisor") {
           whereClause[Op.or] = [
             { assigned_by_id: userId },
             { assigned_to_id: userId }
@@ -4969,9 +5043,10 @@ const reassignTicket = async (req, res) => {
           <p>Please log into the system to review and take action.</p>
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
+        const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking reassignment
-        // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody });
-        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+        // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5011,14 +5086,17 @@ const getInProgressAssignments = async (req, res) => {
     }
 
     let whereClause = {
-      action: { [Op.in]: ["Assigned", "Reassigned", "Open", "Forwaeded", "In progress",
+      action: { [Op.in]: ["Assigned", "Reassigned", "Open", "Forwarded", "In progress",
         "Attended and Recommended"
       ] }
     };
 
     // For super admin and supervisor, show all assignments
+    // For director-general, show tickets assigned to them (forwarded to them)
     // For other roles, show assignments made by this user OR assigned to this user
-    if (user.role !== "super-admin" && user.role !== "supervisor") {
+    if (user.role === "director-general") {
+      whereClause.assigned_to_id = userId;
+    } else if (user.role !== "super-admin" && user.role !== "supervisor") {
       whereClause[Op.or] = [
         { assigned_by_id: userId },
         { assigned_to_id: userId }
@@ -5078,8 +5156,6 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
         <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
         <li><strong>Reversed To:</strong> ${prevUser ? prevUser.full_name : 'Unknown'} (${prevUser ? prevUser.role : 'Unknown'})</li>
         <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-        <li><strong>Workflow Path:</strong> ${ticket.workflow_path || 'N/A'}</li>
-        <li><strong>Current Step:</strong> ${ticket.current_workflow_step || 'N/A'}/${ticket.workflow_total_steps || 'N/A'}</li>
         <li><strong>Reversed Date:</strong> ${new Date().toLocaleString()}</li>
       </ul>`;
     const notifyBodyHtml = `<p>The following ticket has been reversed:</p>`;
@@ -5128,17 +5204,17 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
           <li><strong>Category:</strong> ${ticket.category}</li>
           <li><strong>Reversed By:</strong> ${attended_by_name} (${attended_by_role})</li>
           <li><strong>Reversal Reason:</strong> ${reason || 'Ticket reversed to previous user'}</li>
-          <li><strong>Workflow Path:</strong> ${ticket.workflow_path || 'N/A'}</li>
-          <li><strong>Current Step:</strong> ${ticket.current_workflow_step || 'N/A'}/${ticket.workflow_total_steps || 'N/A'}</li>
         </ul>`;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
+      const attachments = getTicketAttachments(ticket);
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
         to:`rehema.said3@ttcl.co.tz`,
         // to: prevUser.email,
         subject: emailSubject,
-        htmlBody: emailHtmlBody
+        htmlBody: emailHtmlBody,
+        attachments: attachments
       });
     }
   } catch (error) {
@@ -5186,9 +5262,31 @@ const reverseTicket = async (req, res) => {
     const isFromHeadOfUnit = ticket.responsible_unit_name && 
                              !ticket.responsible_unit_name.toLowerCase().includes("directorate");
     const isAttendeeReversing = req.user && req.user.role === "attendee";
+    const isAgentReversing = req.user && req.user.role === "agent";
 
-    // If there are at least 2 assignments, use the second most recent
-    if (assignments.length >= 2) {
+    // Find current user's assignment to check if they were reassigned
+    let currentUserAssignment = null;
+    for (const assignment of assignments) {
+      if (assignment.assigned_to_id === userId) {
+        currentUserAssignment = assignment;
+        break;
+      }
+    }
+
+    // If current user was reassigned, return to the reassigned_by (assigned_by_id of current assignment)
+    if (currentUserAssignment && currentUserAssignment.action === "Reassigned") {
+      const reassignedBy = await User.findByPk(currentUserAssignment.assigned_by_id);
+      if (reassignedBy) {
+        prevAssignment = {
+          assigned_to_id: reassignedBy.id,
+          assigned_to_role: reassignedBy.role
+        };
+        targetUserId = reassignedBy.id;
+        targetUserRole = reassignedBy.role;
+        console.log(`DEBUG: User was reassigned - returning to reassigned_by: ${reassignedBy.full_name} (${reassignedBy.role})`);
+      }
+    } else if (assignments.length >= 2) {
+      // If not reassigned, use the second most recent assignment
       prevAssignment = assignments[1];
       targetUserId = prevAssignment.assigned_to_id;
       targetUserRole = prevAssignment.assigned_to_role;
@@ -5884,7 +5982,7 @@ function getRequesterDisplayName(ticket) {
 const forwardToDirectorGeneral = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, resolution_details, assignmentId } = req.body; // Added assignmentId
+    const { userId, resolution_details, own_description, last_attendee_agent_description, assignmentId } = req.body; // Added own_description and last_attendee_agent_description
 
     if (!ticketId || !userId) {
       return res
@@ -5951,22 +6049,93 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Update resolution details if reviewer edited them
-    if (resolution_details) {
-      await ticket.update({
-        resolution_details: resolution_details
+    // Find all assignments for this ticket, ordered by creation time
+    const allAssignments = await TicketAssignment.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'ASC']]
+    });
+    
+    // Find the most recent assignment where current user was assigned to (but NOT director-general assignment)
+    // IMPORTANT: We need to find director's/head-of-unit's own assignment, not director-general's assignment
+    let currentUserAssignment = null;
+    for (let i = allAssignments.length - 1; i >= 0; i--) {
+      const assignment = allAssignments[i];
+      // Find assignment where current user was assigned to, but exclude director-general assignments
+      if (assignment.assigned_to_id === userId && 
+          assignment.assigned_to_role !== "director-general" &&
+          assignment.assigned_by_role !== "director-general") {
+        currentUserAssignment = assignment;
+        break;
+      }
+    }
+    
+    // Update current user's (director/head-of-unit) assignment record with their own description
+    // IMPORTANT: Do not update director-general assignment records - they remain as created and cannot be edited
+    if (currentUserAssignment && 
+        currentUserAssignment.assigned_to_role !== "director-general" && 
+        currentUserAssignment.assigned_by_role !== "director-general" &&
+        own_description !== null && own_description !== undefined && String(own_description).trim()) {
+      await currentUserAssignment.update({
+        reason: String(own_description).trim()
       });
     }
-
-    // Find the attendee's assignment record and update the description
-    if (resolution_details && assignmentId) {
-      // Find the specific assignment record by ID (primary key)
-      const attendeeAssignment = await TicketAssignment.findByPk(assignmentId);
-
-      if (attendeeAssignment) {
-        // Update the attendee's assignment record with the new description
-        await attendeeAssignment.update({
-          reason: resolution_details
+    
+    // For director only: update last attendee/agent's assignment record with edited description
+    // Find the attendee's description that was sent to the manager (who assigned to director)
+    if (currentUser.role === "director" && last_attendee_agent_description !== null && last_attendee_agent_description !== undefined && String(last_attendee_agent_description).trim()) {
+      // Find the manager who assigned to the director
+      let managerId = null;
+      if (currentUserAssignment && currentUserAssignment.assigned_by_role === "manager") {
+        managerId = currentUserAssignment.assigned_by_id;
+      }
+      
+      // Find the attendee/agent assignment that was sent to this manager
+      // Look for assignments where attendee/agent assigned TO the manager
+      let lastAttendeeAgentAssignment = null;
+      if (managerId) {
+        for (let i = allAssignments.length - 1; i >= 0; i--) {
+          const assignment = allAssignments[i];
+          if ((assignment.assigned_by_role === "attendee" || assignment.assigned_by_role === "agent") && 
+              assignment.assigned_to_id && assignment.assigned_to_id === managerId &&
+              assignment.created_at < currentUserAssignment.created_at) {
+            lastAttendeeAgentAssignment = assignment;
+            break;
+          }
+        }
+      }
+      
+      // IMPORTANT: Do not update director-general assignment records - they remain as created and cannot be edited
+      if (lastAttendeeAgentAssignment && 
+          lastAttendeeAgentAssignment.assigned_to_role !== "director-general" &&
+          lastAttendeeAgentAssignment.assigned_by_role !== "director-general") {
+        await lastAttendeeAgentAssignment.update({
+          reason: String(last_attendee_agent_description).trim()
+        });
+      }
+    }
+    
+    // For head-of-unit: update last attendee/agent's assignment record with edited description
+    // Find the attendee's description that was sent to the head-of-unit
+    if (currentUser.role === "head-of-unit" && last_attendee_agent_description !== null && last_attendee_agent_description !== undefined && String(last_attendee_agent_description).trim()) {
+      // Find the attendee/agent assignment that was sent to head-of-unit
+      // Look for assignments where attendee/agent assigned TO the head-of-unit
+      let lastAttendeeAgentAssignment = null;
+      for (let i = allAssignments.length - 1; i >= 0; i--) {
+        const assignment = allAssignments[i];
+        if ((assignment.assigned_by_role === "attendee" || assignment.assigned_by_role === "agent") && 
+            assignment.assigned_to_id && assignment.assigned_to_id === userId &&
+            assignment.created_at < currentUserAssignment.created_at) {
+          lastAttendeeAgentAssignment = assignment;
+          break;
+        }
+      }
+      
+      // IMPORTANT: Do not update director-general assignment records - they remain as created and cannot be edited
+      if (lastAttendeeAgentAssignment && 
+          lastAttendeeAgentAssignment.assigned_to_role !== "director-general" &&
+          lastAttendeeAgentAssignment.assigned_by_role !== "director-general") {
+        await lastAttendeeAgentAssignment.update({
+          reason: String(last_attendee_agent_description).trim()
         });
       }
     }
@@ -5982,13 +6151,36 @@ const forwardToDirectorGeneral = async (req, res) => {
     );
 
     // Record the assignment to Director General
+    // IMPORTANT: Director General's assignment reason uses director's own_description (like other roles)
+    // BUT it cannot be edited after creation - it remains as created
+    // Director's own assignment record will be updated separately with their own description
+    let assignmentReason = "";
+    
+    if (currentUser.role === "head-of-unit" || currentUser.role === "director") {
+      // Use director's/head-of-unit's own_description for Director General (like other roles)
+      if (own_description !== null && own_description !== undefined && String(own_description).trim()) {
+        assignmentReason = String(own_description).trim();
+      } else {
+        assignmentReason = currentUser.role === "director" 
+          ? "Director forwarded to Director General for final approval"
+          : "Head of Unit forwarded to Director General for final approval";
+      }
+    } else {
+      // For reviewer: use resolution_details or default message
+      if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
+        assignmentReason = String(resolution_details).trim();
+      } else {
+        assignmentReason = "Reviewer reviewed and forwarded to Director General for final approval";
+      }
+    }
+    
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: userId,
       assigned_to_id: directorGeneral.id,
       assigned_to_role: directorGeneral.role,
       action: "Forwarded",
-      reason: "Reviewer reviewed and forwarded to Director General for final approval",
+      reason: assignmentReason,
       created_at: new Date()
     });
 
@@ -5997,9 +6189,10 @@ const forwardToDirectorGeneral = async (req, res) => {
       ticket_id: ticketId,
       sender_id: userId,
       recipient_id: directorGeneral.id,
-      message: `Ticket forwarded to you for review: ${ticket.subject || ticket.ticket_id}`,
+      message: `Ticket forwarded to you: ${ticket.subject || ticket.ticket_id}`,
       channel: "In-System",
       status: "unread",
+      category: ticket.category || "General",
     });
 
     // Send email to assigned Director General (if email exists)
@@ -6022,12 +6215,16 @@ const forwardToDirectorGeneral = async (req, res) => {
       `;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       try {
+        // Prepare attachments if ticket has attachment
+        const attachments = ticket.attachment_path ? [ticket.attachment_path] : [];
+        
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
             to: ['rehema.said3@ttcl.co.tz'],
             subject: emailSubject,
-            htmlBody: emailHtmlBody
+            htmlBody: emailHtmlBody,
+            attachments: attachments
           }).catch(emailError => {
             console.error("Error sending assignment email:", emailError.message);
           });
@@ -6573,9 +6770,13 @@ const reverseComplaint = async (req, res) => {
         <p>Please log into the system to review and take action.</p>
       `;
       const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
+      
+      // Get attachments for email
+      const attachments = getTicketAttachments(ticket);
+      
       // Send email in background to avoid blocking
-      // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody });
-      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+      // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7147,11 +7348,13 @@ const managerAttendMajor = async (req, res) => {
         <p>Thank you.</p>
       `;
       
+      const attachments = getTicketAttachments(ticket);
       sendEmail({
         // to: headOfUnit.email,
         to: ['rehema.said3@ttcl.co.tz'],
         subject: emailSubject,
-        htmlBody: emailBody
+        htmlBody: emailBody,
+        attachments: attachments
       }).catch(emailError => {
         console.error("Error sending email to Head of Unit:", emailError.message);
       });
@@ -7701,7 +7904,11 @@ const managerSendToDirector = async (req, res) => {
         <p>Please log into the system to review and take action.</p>
       `;
       const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
-      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody });
+      
+      // Get attachments for email
+      const attachments = getTicketAttachments(ticket);
+      
+      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({
