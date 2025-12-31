@@ -5273,6 +5273,13 @@ const reverseTicket = async (req, res) => {
       }
     }
 
+    // Get current user to check role (will be used later as assignedBy)
+    const currentUser = await User.findByPk(userId);
+    if (!currentUser) {
+      return res.status(404).json({ message: "Reversing user not found" });
+    }
+    const isDirectorReversing = currentUser.role === "director";
+
     // If current user was reassigned, return to the reassigned_by (assigned_by_id of current assignment)
     if (currentUserAssignment && currentUserAssignment.action === "Reassigned") {
       const reassignedBy = await User.findByPk(currentUserAssignment.assigned_by_id);
@@ -5284,6 +5291,26 @@ const reverseTicket = async (req, res) => {
         targetUserId = reassignedBy.id;
         targetUserRole = reassignedBy.role;
         console.log(`DEBUG: User was reassigned - returning to reassigned_by: ${reassignedBy.full_name} (${reassignedBy.role})`);
+      }
+    } else if (isDirectorReversing) {
+      // If director is reversing, find last manager to send ticket to
+      const managerAssignment = assignments.find(assignment => 
+        assignment.assigned_to_role === "manager"
+      );
+      
+      if (managerAssignment) {
+        prevAssignment = managerAssignment;
+        targetUserId = managerAssignment.assigned_to_id;
+        targetUserRole = managerAssignment.assigned_to_role;
+        console.log(`DEBUG: Director reversing - returning to last manager: ${targetUserId}`);
+      } else {
+        // If no manager assignment found, fall back to second most recent assignment
+        if (assignments.length >= 2) {
+          prevAssignment = assignments[1];
+          targetUserId = prevAssignment.assigned_to_id;
+          targetUserRole = prevAssignment.assigned_to_role;
+          console.log(`DEBUG: Director reversing - no manager found, using second most recent: ${targetUserId}`);
+        }
       }
     } else if (assignments.length >= 2) {
       // If not reassigned, use the second most recent assignment
@@ -5345,10 +5372,8 @@ const reverseTicket = async (req, res) => {
       console.log("Attachment uploaded:", attachmentPath);
     }
 
-    const assignedBy = await User.findByPk(userId);
-    if (!assignedBy) {
-      return res.status(404).json({ message: "Reversing user not found" });
-    }
+    // Use currentUser as assignedBy (already fetched above)
+    const assignedBy = currentUser;
 
     // Check if ticket has workflow path set
     if (ticket.workflow_path) {
@@ -6048,6 +6073,32 @@ const forwardToDirectorGeneral = async (req, res) => {
         message: "Director General not found",
       });
     }
+
+    // Append amended description to ticket's description ONLY if it's different from current
+    // If not edited (same as current), keep current description as is
+    if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
+      const currentDescription = ticket.description || "";
+      const amendedDescription = String(resolution_details).trim();
+      
+      // Only update if amended description is different from current description
+      // If they are the same, don't update (keep current description)
+      if (amendedDescription !== currentDescription) {
+        // Format with clear separation: Previous description, separator, then amended description
+        let updatedDescription = "";
+        if (currentDescription) {
+          // Clean layout: Previous description on top, separator line, then amended description
+          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Amended Description ---\n" + amendedDescription;
+        } else {
+          updatedDescription = amendedDescription;
+        }
+        
+        await ticket.update({
+          description: updatedDescription
+        });
+      }
+      // If amended description is same as current, do nothing (keep current description)
+    }
+    // If resolution_details is not provided or empty, do nothing (keep current description)
 
     // Assign to Director General using normal assignment process (simple, like normal assignment)
     await Ticket.update(
@@ -7613,7 +7664,7 @@ const updateReversedTicketDetails = async (req, res) => {
 const managerSendToDirector = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, recommendation } = req.body;
+    const { userId, recommendation, resolution_details } = req.body;
 
     if (!ticketId || !userId || !recommendation) {
       return res.status(400).json({ 
@@ -7752,6 +7803,28 @@ const managerSendToDirector = async (req, res) => {
       return res.status(404).json({ 
         message: "Cannot send to Director: No Director found for this ticket. Please contact administrator." 
       });
+    }
+
+    // Update ticket description if resolution_details is provided and different from current
+    // Append amended description to ticket's description ONLY if it's different from current
+    if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
+      const currentDescription = ticket.description || "";
+      const amendedDescription = String(resolution_details).trim();
+      
+      // Only update if amended description is different from current description
+      if (amendedDescription !== currentDescription) {
+        // Format: Previous description on top, separator line, then amended description
+        let updatedDescription = "";
+        if (currentDescription) {
+          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Amended Description ---\n" + amendedDescription;
+        } else {
+          updatedDescription = amendedDescription;
+        }
+        
+        await ticket.update({
+          description: updatedDescription
+        });
+      }
     }
 
     // Update ticket to assign to Director
