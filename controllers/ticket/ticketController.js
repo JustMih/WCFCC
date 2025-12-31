@@ -6016,7 +6016,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if this is a major complaint assigned to reviewer/director OR a reversed/recommended ticket assigned to reviewer/director
+    // Check if this is a major complaint assigned to director/head-of-unit OR a reversed/recommended ticket assigned to director/head-of-unit
     const isMajorComplaint = ticket.category === "Complaint" && 
                             ticket.complaint_type === "Major" && 
                             ticket.assigned_to_id === userId;
@@ -6049,34 +6049,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Find all assignments for this ticket, ordered by creation time
-    const allAssignments = await TicketAssignment.findAll({
-      where: { ticket_id: ticketId },
-      order: [['created_at', 'ASC']]
-    });
-    
-    // Update ticket's description (creator's description) if provided
-    if (resolution_details !== null && resolution_details !== undefined) {
-      await ticket.update({
-        description: String(resolution_details).trim()
-      });
-    }
-
-    // Find the most recent assignment where current user was assigned to (but NOT director-general assignment)
-    // IMPORTANT: We need to find director's/head-of-unit's own assignment, not director-general's assignment
-    let currentUserAssignment = null;
-    for (let i = allAssignments.length - 1; i >= 0; i--) {
-      const assignment = allAssignments[i];
-      // Find assignment where current user was assigned to, but exclude director-general assignments
-      if (assignment.assigned_to_id === userId && 
-          assignment.assigned_to_role !== "director-general" &&
-          assignment.assigned_by_role !== "director-general") {
-        currentUserAssignment = assignment;
-        break;
-      }
-    }
-
-    // Assign to Director General using normal assignment process
+    // Assign to Director General using normal assignment process (simple, like normal assignment)
     await Ticket.update(
       {
         assigned_to_id: directorGeneral.id,
@@ -6086,45 +6059,22 @@ const forwardToDirectorGeneral = async (req, res) => {
       { where: { id: ticketId } }
     );
 
-    // Update current user's (director/head-of-unit) assignment record with their own description
-    // Director will add their own assignment record, no new assignment record for Director General
-    // IMPORTANT: Do not update director-general assignment records - they remain as created and cannot be edited
-    if (currentUserAssignment && 
-        currentUserAssignment.assigned_to_role !== "director-general" && 
-        currentUserAssignment.assigned_by_role !== "director-general" &&
-        currentUserAssignment.assigned_to_id === userId && // Ensure we're updating director's own assignment
-        currentUserAssignment.assigned_to_role === currentUser.role && // Ensure role matches
-        own_description !== null && own_description !== undefined && String(own_description).trim()) {
-      await currentUserAssignment.update({
-        reason: String(own_description).trim()
-      });
-    }
-    
-    // Create assignment record for Director General (normal assignment process)
-    // Use edited description (creator's description) for Director General - like normal assignment
-    // Director's own_description is only for updating director's own assignment record
+    // Create assignment record for Director General (simple, like normal assignment)
+    // Use description from frontend (own_description), or default message if not provided
     let assignmentReason = "";
-    
-    if (currentUser.role === "head-of-unit" || currentUser.role === "director") {
-      // Use edited description (creator's description) for Director General - like normal assignment
-      if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-        assignmentReason = String(resolution_details).trim();
-      } else {
-        assignmentReason = currentUser.role === "director" 
-          ? "Director forwarded to Director General for final approval"
-          : "Head of Unit forwarded to Director General for final approval";
-      }
+    if (own_description !== null && own_description !== undefined && String(own_description).trim()) {
+      // Use description from frontend
+      assignmentReason = String(own_description).trim();
     } else {
-      // For reviewer: use resolution_details or default message
-      if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-        assignmentReason = String(resolution_details).trim();
-      } else {
-        assignmentReason = "Reviewer reviewed and forwarded to Director General for final approval";
+      // Fallback to default message based on role if no description provided
+      if (currentUser.role === "director") {
+        assignmentReason = "Director forwarded to Director General for final approval";
+      } else if (currentUser.role === "head-of-unit") {
+        assignmentReason = "Head of Unit forwarded to Director General for final approval";
       }
     }
     
-    // Create Director General's assignment record (normal assignment process)
-    // This will NOT be updated - it remains as created
+    // Create Director General's assignment record (simple, like normal assignment)
     await TicketAssignment.create({
       ticket_id: ticketId,
       assigned_by_id: userId,
@@ -6134,6 +6084,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       reason: assignmentReason,
       created_at: new Date()
     });
+
 
     // Create notification for Director General
     await Notification.create({
