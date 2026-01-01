@@ -198,15 +198,38 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (idx === -1 || idx === path.length - 1) return false; // Already at top
   const nextRole = path[idx + 1];
 
-  // Find next user in same unit_section
+  // Find next user in same unit_section or sub_section
   let sectionValue;
-  if (ticket.section && ticket.section.toLowerCase() === "unit") {
+  let useSubSection = false;
+  
+  // Determine if ticket is for directorate or unit
+  const isTicketDirectorate = ticket.section && ticket.section.toLowerCase().includes("directorate");
+  const isTicketUnit = ticket.section && ticket.section.toLowerCase() === "unit";
+  
+  if (isTicketDirectorate) {
+    // For directorate: use sub_section to match focal-person's sub_section
     sectionValue = ticket.sub_section;
+    useSubSection = true;
+  } else if (isTicketUnit) {
+    // For unit: use sub_section to match focal-person's unit_section (as before)
+    sectionValue = ticket.sub_section;
+    useSubSection = false;
   } else {
+    // Fallback: use unit_section
     sectionValue = ticket.unit_section;
+    useSubSection = false;
   }
+  
   const userWhere = { role: nextRole };
-  if (sectionValue) userWhere.unit_section = sectionValue;
+  if (sectionValue) {
+    if (useSubSection && nextRole === "focal-person") {
+      // For directorate focal-person: match by sub_section
+      userWhere.sub_section = sectionValue;
+    } else {
+      // For units or other roles: match by unit_section
+      userWhere.unit_section = sectionValue;
+    }
+  }
   let nextUser = await User.findOne({ where: userWhere });
   if (!nextUser) {
     // Fallback: find any user with the nextRole
@@ -813,17 +836,27 @@ const createTicket = async (req, res) => {
     let assignedUser = null;
 
     // Get allocated user from search response (not from institution details)
-    let allocatedUserUsername = req.body.allocated_user_username; // This comes from search response
+    // This comes from the search response when an allocated user is assigned to the employer
+    let allocatedUserUsername = req.body.allocated_user_username;
 
     if (category === "Inquiry") {
-      // First try to assign by allocated username from search response if provided
-      if (allocatedUserUsername) {
+      // ASSIGNMENT PRIORITY FOR INQUIRY:
+      // 1. If allocated user exists (allocated_user_username provided) -> Assign to allocated user by username
+      // 2. If no allocated user -> Assign to focal-person based on sub_section (for directorate) or unit_section (for units)
+      
+      // STEP 1: First priority - Check if allocated user exists and assign by username
+      if (allocatedUserUsername && allocatedUserUsername.trim() !== "") {
+        console.log("🔍 STEP 1: Checking for allocated user with username:", allocatedUserUsername);
         assignedUser = await User.findOne({
           where: { username: allocatedUserUsername },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
+          attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
         });
-        // If not found, create the user
-        if (!assignedUser) {
+        
+        if (assignedUser) {
+          console.log("✅ STEP 1 SUCCESS: Found allocated user:", assignedUser.full_name, "- Assigning ticket to allocated user.");
+        } else {
+          // If allocated user not found in database, create the user
+          console.log("⚠️ STEP 1: Allocated user not found in database, creating new user with username:", allocatedUserUsername);
           const nameParts = allocatedUserUsername
             .split(".")
             .map((part) => part.charAt(0).toUpperCase() + part.slice(1));
@@ -837,11 +870,14 @@ const createTicket = async (req, res) => {
             status: "active",
           });
           assignedUser = newUser;
+          console.log("✅ STEP 1 SUCCESS: Created and assigned to new allocated user:", newUser.full_name);
         }
       }
 
-      // If no allocated user from search response, assign to focal-person with matching section
+      // STEP 2: Second priority - If no allocated user found/assigned, assign to focal-person with matching sub_section
+      // Only proceed if STEP 1 did not find/assign an allocated user
       if (!assignedUser) {
+        console.log("🔍 STEP 2: No allocated user found/assigned, checking for focal-person with matching sub_section...");
         // Helper function to determine if section is directorate or unit
         const getSectionType = (sectionName) => {
           if (!sectionName) return null;
@@ -882,16 +918,16 @@ const createTicket = async (req, res) => {
         let ticketSectionForFocalPerson = null;
 
         if (sectionType === 'directorate') {
-          // For directorate: use section name
-          ticketSectionForFocalPerson = sectionName;
-          console.log("Section is directorate, using section name for focal-person:", ticketSectionForFocalPerson);
+          // For directorate: use sub-section (function name) to match focal-person's sub_section
+          ticketSectionForFocalPerson = subSectionName;
+          console.log("Section is directorate, using sub-section (function name) for focal-person:", ticketSectionForFocalPerson);
         } else if (sectionType === 'unit') {
-          // For unit: use sub-section (function name)
+          // For unit: use sub-section (function name) to match focal-person's unit_section
           ticketSectionForFocalPerson = subSectionName;
           console.log("Section is unit, using sub-section (function name) for focal-person:", ticketSectionForFocalPerson);
         } else {
-          // Fallback: use section name if available, otherwise sub-section
-          ticketSectionForFocalPerson = sectionName || subSectionName;
+          // Fallback: use sub-section if available, otherwise section name
+          ticketSectionForFocalPerson = subSectionName || sectionName;
           console.log("Section type unknown, using fallback for focal-person:", ticketSectionForFocalPerson);
         }
 
@@ -902,28 +938,40 @@ const createTicket = async (req, res) => {
 
         // Only query if ticketSectionForFocalPerson is defined and not empty
         if (ticketSectionForFocalPerson && ticketSectionForFocalPerson.trim() !== "") {
-          assignedUser = await User.findOne({
-            where: {
-              role: "focal-person",
-              unit_section: ticketSectionForFocalPerson,
-            },
-            attributes: ["id", "full_name", "email", "role", "unit_section"],
-          });
-          console.log(
-            "Found focal-person with matching section:",
-            assignedUser?.full_name
-          );
+          // For directorate: match by sub_section, for unit: match by unit_section
+          if (sectionType === 'directorate') {
+            assignedUser = await User.findOne({
+              where: {
+                role: "focal-person",
+                sub_section: ticketSectionForFocalPerson,
+              },
+              attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+            });
+            console.log(
+              "Found focal-person with matching sub_section (directorate):",
+              assignedUser?.full_name
+            );
+          } else {
+            // For units: match by unit_section (as before)
+            assignedUser = await User.findOne({
+              where: {
+                role: "focal-person",
+                unit_section: ticketSectionForFocalPerson,
+              },
+              attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+            });
+            console.log(
+              "Found focal-person with matching unit_section (unit):",
+              assignedUser?.full_name
+            );
+          }
         }
-      }
-
-      // Fallback to any focal-person if no matching section found
-      if (!assignedUser) {
-        assignedUser = await User.findOne({
-          where: {
-            role: "focal-person",
-          },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
-        });
+        
+        // If no focal-person found with matching sub_section/unit_section, log and leave assignedUser as null
+        // Do NOT assign to any focal-person - ticket will remain unassigned
+        if (!assignedUser) {
+          console.log("⚠️ STEP 2: No focal-person found with matching sub_section/unit_section. Ticket will not be assigned to any focal-person.");
+        }
       }
     } else if (["Complaint", "Suggestion", "Compliment"].includes(category)) {
       // Assign to reviewer
@@ -933,8 +981,18 @@ const createTicket = async (req, res) => {
       });
     }
     if (!assignedUser) {
+      // For Inquiry category, provide more specific error message
+      if (category === "Inquiry") {
+        return res.status(400).json({
+          message: `No appropriate user found to assign the ${category} ticket to. Please ensure there is either an allocated user or a focal-person with matching sub-section/unit-section.`,
+          error: "NO_ASSIGNEE_FOUND",
+          category: category
+        });
+      }
       return res.status(400).json({
         message: `No appropriate user found to assign the ${category} ticket to.`,
+        error: "NO_ASSIGNEE_FOUND",
+        category: category
       });
     }
 
@@ -1646,11 +1704,25 @@ const getTickets = async (req, res) => {
       });
     } else if (user.role === "focal-person") {
       // Focal person: Fetch tickets for their section/unit
+      // For directorate: match by sub_section, for unit: match by unit_section
+      const isDirectorate = user.unit_section && user.unit_section.toLowerCase().includes("directorate");
+      
+      let whereClause = {
+        status: { [Op.ne]: "Closed" },
+      };
+      
+      if (isDirectorate && user.sub_section) {
+        // For directorate: match ticket's sub_section with focal-person's sub_section
+        whereClause.sub_section = user.sub_section;
+        console.log(`Focal-person (directorate) fetching tickets with sub_section: "${user.sub_section}"`);
+      } else if (user.unit_section) {
+        // For units: match ticket's section with focal-person's unit_section (as before)
+        whereClause.section = user.unit_section;
+        console.log(`Focal-person (unit) fetching tickets with section: "${user.unit_section}"`);
+      }
+      
       tickets = await Ticket.findAll({
-        where: {
-          section: user.unit_section,
-          status: { [Op.ne]: "Closed" },
-        },
+        where: whereClause,
         attributes: { exclude: ["userId"] },
         order: [["created_at", "DESC"]],
       });

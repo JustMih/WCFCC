@@ -24,6 +24,7 @@ const createUser = async (req, res) => {
       role,
       isActive,
       unit_section,
+      sub_section,
     } = req.body;
 
     console.log("🔍 Extracted data:");
@@ -42,6 +43,24 @@ const createUser = async (req, res) => {
         required: ["full_name", "email", "password", "role"],
         received: { full_name, email, password: password ? "***" : null, role }
       });
+    }
+
+    // Validate that focal-person must have unit_section (sub-section) ONLY if it's for a directorate
+    // For units, sub-section is not required
+    if (role === "focal-person") {
+      const unitSectionLower = (unit_section || "").toLowerCase();
+      const isDirectorate = unitSectionLower.includes("directorate");
+      
+      // Only require sub-section if it's a directorate
+      if (isDirectorate && (!unit_section || unit_section.trim() === "")) {
+        console.log("❌ Focal person for directorate missing unit_section (sub-section)");
+        return res.status(400).json({ 
+          message: "Focal person for directorate must have a sub-section (unit_section)", 
+          error: "Missing required field for focal-person role in directorate",
+          field: "unit_section",
+          role: role
+        });
+      }
     }
 
     if (
@@ -82,6 +101,7 @@ const createUser = async (req, res) => {
       isActive,
       username,
       unit_section,
+      sub_section,
     };
     console.log("📊 User data to create:", JSON.stringify(userData, null, 2));
 
@@ -204,6 +224,7 @@ const createUser = async (req, res) => {
         isActive: newUser.isActive,
         username: newUser.username,
         unit_section: newUser.unit_section,
+        sub_section: newUser.sub_section,
       },
     });
     console.log("📤 Response sent successfully");
@@ -1216,6 +1237,7 @@ const updateUser = async (req, res) => {
     isActive,
     extension,
     unit_section,
+    sub_section,
   } = req.body;
 
   try {
@@ -1229,6 +1251,28 @@ const updateUser = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
+    }
+
+    // Validate that focal-person must have unit_section (sub-section) ONLY if it's for a directorate
+    // For units, sub-section is not required
+    // Check if role is being updated to focal-person or if user is already focal-person
+    const newRole = role || user.role;
+    const newUnitSection = unit_section !== undefined ? unit_section : user.unit_section;
+    
+    if (newRole === "focal-person") {
+      const unitSectionLower = (newUnitSection || "").toLowerCase();
+      const isDirectorate = unitSectionLower.includes("directorate");
+      
+      // Only require sub-section if it's a directorate
+      if (isDirectorate && (!newUnitSection || newUnitSection.trim() === "")) {
+        console.log("❌ Focal person for directorate missing unit_section (sub-section)");
+        return res.status(400).json({ 
+          message: "Focal person for directorate must have a sub-section (unit_section)", 
+          error: "Missing required field for focal-person role in directorate",
+          field: "unit_section",
+          role: newRole
+        });
+      }
     }
 
     // Check if email is being updated and ensure it's unique
@@ -1255,8 +1299,9 @@ const updateUser = async (req, res) => {
     }
     if (role) user.role = role; // Optional: Only allow certain roles for admins
     if (extension) user.extension = extension;
-    if (isActive) user.isActive = isActive;
+    if (isActive !== undefined) user.isActive = isActive;
     if (unit_section !== undefined) user.unit_section = unit_section;
+    if (sub_section !== undefined) user.sub_section = sub_section;
 
     // If role is 'agent', handle extension logic
     if (role === "agent" && extension) {
@@ -1310,6 +1355,7 @@ const updateUser = async (req, res) => {
         role: user.role,
         isActive: user.isActive,
         unit_section: user.unit_section,
+        sub_section: user.sub_section,
       },
     });
   } catch (error) {

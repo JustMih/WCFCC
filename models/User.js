@@ -76,6 +76,11 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: true,
       comment: "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')"
+    },
+    sub_section: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: "The sub-section (function) within a directorate (e.g., 'Pension Payment', 'Workplace Risk Assessment Matters')"
     }
   },
   {
