@@ -682,6 +682,17 @@ const findSupervisorForSection = async (section) => {
 const createTicket = async (req, res) => {
   console.log("🎯 CREATE TICKET ENDPOINT CALLED!");
   console.log("Request body received:", req.body);
+  
+  // ========== EARLY ALLOCATED USER CHECK ==========
+  console.log("🔵 ========== EARLY ALLOCATED USER CHECK ==========");
+  console.log("🔵 Checking req.body for allocated user fields BEFORE destructuring:");
+  console.log("  - req.body.allocated_user_username:", req.body.allocated_user_username);
+  console.log("  - req.body.allocatedUserUsername:", req.body.allocatedUserUsername);
+  console.log("  - req.body.employerAllocatedStaffUsername:", req.body.employerAllocatedStaffUsername);
+  console.log("  - req.body.allocatedUser:", req.body.allocatedUser);
+  console.log("  - req.body.allocated_user:", req.body.allocated_user);
+  console.log("  - req.body.category:", req.body.category);
+  console.log("🔵 ================================================");
 
   try {
     console.log("Incoming ticket creation request body:", req.body);
@@ -853,34 +864,89 @@ const createTicket = async (req, res) => {
 
     // Get allocated user from search response (not from institution details)
     // This comes from the search response when an allocated user is assigned to the employer
-    let allocatedUserUsername = req.body.allocated_user_username;
+    // ========== COMPREHENSIVE REQ.BODY LOGGING FOR ALLOCATED USER ==========
+    console.log("🔵 ========== ALLOCATED USER DEBUG - START ==========");
+    console.log("🔵 FULL REQ.BODY KEYS:", Object.keys(req.body));
+    console.log("🔵 ALLOCATED USER FIELDS IN REQ.BODY:");
+    console.log("  - req.body.allocated_user_username:", req.body.allocated_user_username);
+    console.log("  - req.body.allocatedUserUsername:", req.body.allocatedUserUsername);
+    console.log("  - req.body.employerAllocatedStaffUsername:", req.body.employerAllocatedStaffUsername);
+    console.log("  - req.body.allocatedUser:", req.body.allocatedUser);
+    console.log("  - req.body.allocated_user:", req.body.allocated_user);
+    console.log("  - req.body.allocated_user_id:", req.body.allocated_user_id);
+    console.log("  - req.body.allocated_user_name:", req.body.allocated_user_name);
+    console.log("🔵 TICKET CONTEXT:");
+    console.log("  - category:", category);
+    console.log("  - shouldClose:", shouldClose);
+    console.log("  - isInquiry:", category === "Inquiry");
+    console.log("  - willRunAssignmentLogic:", !shouldClose && category === "Inquiry");
+    
+    // Check multiple possible field names including employerAllocatedStaffUsername
+    let allocatedUserUsername = req.body.allocated_user_username || 
+                                req.body.allocatedUserUsername || 
+                                req.body.employerAllocatedStaffUsername ||
+                                req.body.allocatedUser || 
+                                req.body.allocated_user;
+    
+    console.log("🔵 ALLOCATED USER EXTRACTION RESULT:");
+    console.log("  - Final allocatedUserUsername:", allocatedUserUsername);
+    console.log("  - allocatedUserUsername type:", typeof allocatedUserUsername);
+    console.log("  - allocatedUserUsername is truthy:", !!allocatedUserUsername);
+    console.log("  - allocatedUserUsername trimmed:", allocatedUserUsername ? allocatedUserUsername.trim() : "N/A");
+    console.log("  - allocatedUserUsername trimmed length:", allocatedUserUsername ? allocatedUserUsername.trim().length : 0);
+    console.log("🔵 ========== ALLOCATED USER DEBUG - END ==========");
 
     // Only run assignment logic if ticket is NOT closed on creation
     if (!shouldClose && category === "Inquiry") {
+      console.log("🔵 ========== INQUIRY ASSIGNMENT LOGIC STARTED ==========");
+      console.log("🔵 STEP 1 CHECK - Allocated User Username:");
+      console.log("  - allocatedUserUsername value:", allocatedUserUsername);
+      console.log("  - allocatedUserUsername type:", typeof allocatedUserUsername);
+      console.log("  - allocatedUserUsername is truthy:", !!allocatedUserUsername);
+      console.log("  - allocatedUserUsername trimmed:", allocatedUserUsername ? allocatedUserUsername.trim() : "N/A");
+      console.log("  - allocatedUserUsername trimmed length:", allocatedUserUsername ? allocatedUserUsername.trim().length : 0);
+      console.log("  - Will enter STEP 1?", allocatedUserUsername && allocatedUserUsername.trim() !== "");
+      
       // ASSIGNMENT PRIORITY FOR INQUIRY:
-      // 1. If allocated user exists (allocated_user_username provided) -> Assign to allocated user by username
+      // 1. If allocated user exists (allocated_user_username provided) -> Assign to allocated user by username (ALWAYS, regardless of sub-section)
       // 2. If no allocated user -> Assign to focal-person based on sub_section (for directorate) or unit_section (for units)
       
       // STEP 1: First priority - Check if allocated user exists and assign by username
+      // Allocated user ALWAYS takes priority, even for "Records Section"
       if (allocatedUserUsername && allocatedUserUsername.trim() !== "") {
-        console.log("🔍 STEP 1: Checking for allocated user with username:", allocatedUserUsername);
+        const trimmedUsername = allocatedUserUsername.trim();
+        console.log("🔍 STEP 1: Checking for allocated user with username:", trimmedUsername);
+        
+        // Try exact match first
         assignedUser = await User.findOne({
-          where: { username: allocatedUserUsername },
+          where: { username: trimmedUsername },
           attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
         });
+        
+        // If not found, try case-insensitive match (MySQL compatible)
+        if (!assignedUser) {
+          console.log("🔍 STEP 1: Exact match not found, trying case-insensitive search for username:", trimmedUsername);
+          assignedUser = await User.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('username')),
+              Sequelize.fn('LOWER', trimmedUsername)
+            ),
+            attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+          });
+        }
         
         if (assignedUser) {
           console.log("✅ STEP 1 SUCCESS: Found allocated user:", assignedUser.full_name, "- Assigning ticket to allocated user.");
         } else {
           // If allocated user not found in database, create the user
-          console.log("⚠️ STEP 1: Allocated user not found in database, creating new user with username:", allocatedUserUsername);
-          const nameParts = allocatedUserUsername
+          console.log("⚠️ STEP 1: Allocated user not found in database, creating new user with username:", trimmedUsername);
+          const nameParts = trimmedUsername
             .split(".")
             .map((part) => part.charAt(0).toUpperCase() + part.slice(1));
           const newUser = await User.create({
-            username: allocatedUserUsername,
+            username: trimmedUsername,
             full_name: nameParts.join(" "),
-            email: `${allocatedUserUsername}@ttcl.co.tz`,
+            email: `${trimmedUsername}@ttcl.co.tz`,
             role: "attendee",
             unit_section: finalSection || responsible_unit_name,
             password: await bcrypt.hash("user12345", 10),
@@ -889,12 +955,23 @@ const createTicket = async (req, res) => {
           assignedUser = newUser;
           console.log("✅ STEP 1 SUCCESS: Created and assigned to new allocated user:", newUser.full_name);
         }
+      } else {
+        console.log("⚠️ STEP 1 SKIPPED: No allocated user username provided or it was empty.");
+        console.log("⚠️ STEP 1 SKIPPED - Details:");
+        console.log("  - allocatedUserUsername:", allocatedUserUsername);
+        console.log("  - allocatedUserUsername === null:", allocatedUserUsername === null);
+        console.log("  - allocatedUserUsername === undefined:", allocatedUserUsername === undefined);
+        console.log("  - allocatedUserUsername === '':", allocatedUserUsername === '');
+        console.log("  - allocatedUserUsername?.trim() === '':", allocatedUserUsername?.trim() === '');
       }
 
       // STEP 2: Second priority - If no allocated user found/assigned, assign to focal-person with matching sub_section
       // Only proceed if STEP 1 did not find/assign an allocated user
       if (!assignedUser) {
+        console.log("🔍 ========== STEP 2 STARTED ==========");
         console.log("🔍 STEP 2: No allocated user found/assigned, checking for focal-person with matching sub_section...");
+        console.log("🔍 STEP 2 - assignedUser check:", assignedUser);
+        console.log("🔍 STEP 2 - assignedUser is null/undefined:", !assignedUser);
         // Helper function to determine if section is directorate or unit
         const getSectionType = (sectionName) => {
           if (!sectionName) return null;
@@ -954,9 +1031,11 @@ const createTicket = async (req, res) => {
         );
 
         // Only query if ticketSectionForFocalPerson is defined and not empty
-        if (ticketSectionForFocalPerson && ticketSectionForFocalPerson.trim() !== "") {
+        // AND ensure we still don't have an assigned user (double-check from STEP 1)
+        if (ticketSectionForFocalPerson && ticketSectionForFocalPerson.trim() !== "" && !assignedUser) {
           // For directorate: match by sub_section, for unit: match by unit_section
           if (sectionType === 'directorate') {
+            console.log("🔍 STEP 2: Searching for focal-person with sub_section:", ticketSectionForFocalPerson, "for directorate");
             assignedUser = await User.findOne({
               where: {
                 role: "focal-person",
@@ -966,10 +1045,11 @@ const createTicket = async (req, res) => {
             });
             console.log(
               "Found focal-person with matching sub_section (directorate):",
-              assignedUser?.full_name
+              assignedUser?.full_name || "None found"
             );
-          } else {
+          } else if (sectionType === 'unit') {
             // For units: match by unit_section (as before)
+            console.log("🔍 STEP 2: Searching for focal-person with unit_section:", ticketSectionForFocalPerson, "for unit");
             assignedUser = await User.findOne({
               where: {
                 role: "focal-person",
@@ -979,9 +1059,15 @@ const createTicket = async (req, res) => {
             });
             console.log(
               "Found focal-person with matching unit_section (unit):",
-              assignedUser?.full_name
+              assignedUser?.full_name || "None found"
             );
+          } else {
+            console.log("⚠️ STEP 2: Section type is not directorate or unit, skipping focal-person assignment");
           }
+        } else if (assignedUser) {
+          console.log("✅ STEP 2 SKIPPED: Already have assigned user from STEP 1, skipping focal-person assignment");
+        } else {
+          console.log("⚠️ STEP 2 SKIPPED: ticketSectionForFocalPerson is empty or undefined");
         }
         
         // If no focal-person found with matching sub_section/unit_section, log and leave assignedUser as null
@@ -1286,15 +1372,15 @@ const createTicket = async (req, res) => {
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
     if (!shouldClose) {
-      await Notification.create({
-        ticket_id: newTicket.id,
-        sender_id: userId,
-        recipient_id: assignedUser.id,
+    await Notification.create({
+      ticket_id: newTicket.id,
+      sender_id: userId,
+      recipient_id: assignedUser.id,
         message: `New ${category} ticket assigned to you: ${finalSubject}`,
-        channel: channel,
-        status: "unread",
+      channel: channel,
+      status: "unread",
         category: category,
-      });
+    });
     }
 
     // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) ---
@@ -1726,7 +1812,7 @@ const getTickets = async (req, res) => {
       const isDirectorate = user.unit_section && user.unit_section.toLowerCase().includes("directorate");
       
       let whereClause = {
-        status: { [Op.ne]: "Closed" },
+          status: { [Op.ne]: "Closed" },
       };
       
       if (isDirectorate && user.sub_section) {
@@ -3367,14 +3453,14 @@ async function notifyUsersByRole(
       });
     }
     try {
-      await Notification.create({
-        ticket_id: ticketId,
-        sender_id: senderId,
-        recipient_id: user.id,
-        message,
-        status: "unread",
-        channel: senderRole,
-      });
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: senderId,
+      recipient_id: user.id,
+      message,
+      status: "unread",
+      channel: senderRole,
+    });
       console.log(`✅ Notification created for ${user.role} ${user.id} for ticket ${ticketId}`);
     } catch (notifError) {
       console.error(`❌ Error creating notification for ${user.role} ${user.id}:`, notifError);
@@ -3404,7 +3490,7 @@ const closeTicket = async (req, res) => {
       console.log("❌ ERROR: Ticket ID is missing");
       return res.status(400).json({ message: "Ticket ID is required" });
     }
-    
+
     if (!userId) {
       console.log("❌ ERROR: User ID is missing");
       return res.status(400).json({ message: "User ID is required" });
@@ -3485,40 +3571,40 @@ const closeTicket = async (req, res) => {
     // Notify all reviewers and supervisors
     console.log("🔵 Preparing notifications for reviewers and supervisors...");
     try {
-      const notifySubject = `Ticket Closed: ${ticket.subject}`;
-      const notifyBody = `
+    const notifySubject = `Ticket Closed: ${ticket.subject}`;
+    const notifyBody = `
         <p>A ticket has been closed successfully by ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"}). Here are the details:</p>
-      `;
-      const notifyDetails = `
-        <ul>
-          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-          <li><strong>Subject:</strong> ${ticket.subject}</li>
-          <li><strong>Category:</strong> ${ticket.category}</li>
-          <li><strong>Description:</strong> ${ticket.description}</li>
-          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-          <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
-          <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
-          <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
-          <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
-        </ul>
-      `;
-      
-      const { renderEmailCard } = require('../../services/emailService');
-      const notifyHtml = renderEmailCard(notifySubject, notifyBody, notifyDetails);
+    `;
+    const notifyDetails = `
+      <ul>
+        <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+        <li><strong>Subject:</strong> ${ticket.subject}</li>
+        <li><strong>Category:</strong> ${ticket.category}</li>
+        <li><strong>Description:</strong> ${ticket.description}</li>
+        <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+        <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+        <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+        <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+        <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+      </ul>
+    `;
+    
+    const { renderEmailCard } = require('../../services/emailService');
+    const notifyHtml = renderEmailCard(notifySubject, notifyBody, notifyDetails);
       const categoryText = ticket.category ? ` (${ticket.category})` : '';
       const notifyMsg = `Ticket ${ticket.ticket_id}${categoryText} has been closed by ${
-        attended_by_name || "Unknown"
-      } (${attended_by_role || "Unknown Role"}).`;
+      attended_by_name || "Unknown"
+    } (${attended_by_role || "Unknown Role"}).`;
       
       console.log("🔵 Calling notifyUsersByRole...");
-      await notifyUsersByRole(
-        ["reviewer", "supervisor"],
-        notifySubject,
-        notifyHtml,
-        ticketId,
-        userId,
-        notifyMsg
-      );
+    await notifyUsersByRole(
+      ["reviewer", "supervisor"],
+      notifySubject,
+      notifyHtml,
+      ticketId,
+      userId,
+      notifyMsg
+    );
       console.log("✅ Notifications sent to reviewers and supervisors");
     } catch (notifyError) {
       console.error("❌ ERROR in notifyUsersByRole:", notifyError);
@@ -3529,44 +3615,44 @@ const closeTicket = async (req, res) => {
     // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) for ticket closure ---
     console.log("🔵 Finding supervisors for section:", ticket.section);
     try {
-      const supervisors = await findSupervisorForSection(ticket.section);
-      if (supervisors && supervisors.length > 0) {
+    const supervisors = await findSupervisorForSection(ticket.section);
+    if (supervisors && supervisors.length > 0) {
         console.log("✅ Found supervisors:", supervisors.length);
-        const supervisorEmailSubject = `Ticket Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
-        
-        // Send email to each supervisor
-        for (const supervisor of supervisors) {
-          const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A ticket has been closed in your unit/section.</p>`;
-          const supervisorDetailsHtml = `
-            <ul>
-              <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-              <li><strong>Subject:</strong> ${ticket.subject}</li>
-              <li><strong>Category:</strong> ${ticket.category}</li>
-              <li><strong>Description:</strong> ${ticket.description}</li>
-              <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-              <li><strong>Assigned To:</strong> ${ticket.assigned_to_name || "Unknown"}</li>
-              <li><strong>Section/Unit:</strong> ${ticket.section}</li>
-              <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
-              <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
-              <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
-              <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
-            </ul>`;
-          const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+      const supervisorEmailSubject = `Ticket Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
+      
+      // Send email to each supervisor
+      for (const supervisor of supervisors) {
+        const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A ticket has been closed in your unit/section.</p>`;
+        const supervisorDetailsHtml = `
+          <ul>
+            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+            <li><strong>Subject:</strong> ${ticket.subject}</li>
+            <li><strong>Category:</strong> ${ticket.category}</li>
+            <li><strong>Description:</strong> ${ticket.description}</li>
+            <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+            <li><strong>Assigned To:</strong> ${ticket.assigned_to_name || "Unknown"}</li>
+            <li><strong>Section/Unit:</strong> ${ticket.section}</li>
+            <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+            <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+            <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+            <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+          </ul>`;
+        const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
           
           // Get attachments for email
           const attachments = getTicketAttachments(ticket);
-          
-          // Send email in background to avoid blocking
-          sendEmailNonBlocking({
-            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
-            subject: supervisorEmailSubject,
-            htmlBody: supervisorEmailHtmlBody,
+        
+        // Send email in background to avoid blocking
+        sendEmailNonBlocking({
+          to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+          subject: supervisorEmailSubject,
+          htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
-          });
-          console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
-        }
-      } else {
-        console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
+        });
+        console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
+      }
+    } else {
+      console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
       }
     } catch (supervisorError) {
       console.error("❌ ERROR in findSupervisorForSection:", supervisorError);
@@ -4174,7 +4260,7 @@ const getAllAttendee = async (req, res) => {
     if (targetRole === "attendee") {
       whereClause.role = { [Op.in]: ["attendee", "agent"] };
     } else {
-      whereClause.role = targetRole;
+    whereClause.role = targetRole;
     }
     
     // Filter users based on current user's role and available data
@@ -4222,7 +4308,7 @@ const getAllAttendee = async (req, res) => {
           if (ticket && ticket.sub_section) {
             console.log(`DEBUG: Ticket sub_section: "${ticket.sub_section}" (for reference only, not used for filtering)`);
           }
-        } else {
+      } else {
           console.log(`DEBUG: Missing unit_section or report_to for focal person, showing all ${targetRole}s`);
           console.log(`DEBUG: unit_section: "${currentUser.unit_section}", report_to: "${currentUser.report_to}"`);
           if (ticket && ticket.sub_section) {
@@ -5351,14 +5437,14 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
     const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
     
     try {
-      await notifyUsersByRole(
-        ["reviewer", "supervisor"],
-        notifySubject,
-        notifyHtml,
-        ticket.id,
-        userId,
-        notifyMsg
-      );
+    await notifyUsersByRole(
+      ["reviewer", "supervisor"],
+      notifySubject,
+      notifyHtml,
+      ticket.id,
+      userId,
+      notifyMsg
+    );
       console.log(`✅ Notifications created for reviewers/supervisors for reversed ticket ${ticket.ticket_id}`);
     } catch (notifError) {
       console.error(`❌ Error creating notifications for reviewers/supervisors:`, notifError);
@@ -5477,7 +5563,7 @@ const reverseTicket = async (req, res) => {
         console.log(`DEBUG: Director reversing - returning to last manager: ${targetUserId}`);
       } else {
         // If no manager assignment found, fall back to second most recent assignment
-        if (assignments.length >= 2) {
+    if (assignments.length >= 2) {
           prevAssignment = assignments[1];
           targetUserId = prevAssignment.assigned_to_id;
           targetUserRole = prevAssignment.assigned_to_role;
@@ -5592,13 +5678,13 @@ const reverseTicket = async (req, res) => {
         console.error(`❌ DEBUG: result:`, result);
       } else {
         try {
-          await Notification.create({
-            ticket_id: ticketId,
-            sender_id: userId,
-            recipient_id: targetUserId,
-            message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
-            channel: "In-System",
-            status: "unread",
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: targetUserId,
+        message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+        channel: "In-System",
+        status: "unread",
           });
           console.log(`✅ Notification created for recipient ${targetUserId} for reversed ticket ${ticket.ticket_id}`);
         } catch (notifError) {
@@ -5673,13 +5759,13 @@ const reverseTicket = async (req, res) => {
         console.error(`❌ ERROR: targetUserId is null/undefined! Cannot create notification for recipient.`);
       } else {
         try {
-          await Notification.create({
-            ticket_id: ticketId,
-            sender_id: userId,
-            recipient_id: targetUserId,
-            message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
-            channel: "In-System",
-            status: "unread",
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: userId,
+        recipient_id: targetUserId,
+        message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+        channel: "In-System",
+        status: "unread",
           });
           console.log(`✅ Notification created for recipient ${targetUserId} for reversed ticket ${ticket.ticket_id}`);
         } catch (notifError) {
@@ -7675,18 +7761,18 @@ const updateReversedTicketDetails = async (req, res) => {
       );
       console.log("🔍 Priority 2: Searching by unit_section:", trimmedUnitName);
       
-      assignedUser = await User.findOne({
-        where: {
-          role: "focal-person",
+        assignedUser = await User.findOne({
+          where: {
+            role: "focal-person",
           [Op.or]: searchConditions
-        },
-        attributes: ["id", "full_name", "email", "role", "unit_section"],
+          },
+          attributes: ["id", "full_name", "email", "role", "unit_section"],
         order: [
           // Prefer exact matches first, then case-insensitive
           [Sequelize.literal(`CASE WHEN unit_section = '${trimmedSubSection || trimmedUnitName}' THEN 1 ELSE 2 END`), 'ASC']
         ]
-      });
-      assignedRole = "focal-person";
+        });
+        assignedRole = "focal-person";
       
       if (assignedUser) {
         console.log("✅ SUCCESS: Found focal person:", assignedUser.full_name, "ID:", assignedUser.id);
@@ -7737,7 +7823,7 @@ const updateReversedTicketDetails = async (req, res) => {
 
     console.log('🔍 About to update ticket with updateData:', JSON.stringify(updateData, null, 2));
     console.log('🔍 assignedUser before update:', assignedUser ? `${assignedUser.full_name} (${assignedUser.role})` : 'null');
-    
+
     await ticket.update(updateData);
     
     // Reload ticket to get fresh data after update
@@ -7847,12 +7933,12 @@ const updateReversedTicketDetails = async (req, res) => {
         role: "focal-person",
         unit_section: assignedUser.unit_section
       };
-      responseData.focal_person = {
-        id: assignedUser.id,
-        full_name: assignedUser.full_name,
+        responseData.focal_person = {
+          id: assignedUser.id,
+          full_name: assignedUser.full_name,
         role: "focal-person",
-        unit_section: assignedUser.unit_section
-      };
+          unit_section: assignedUser.unit_section
+        };
       console.log('✅ Including assigned_user in response:', assignedUser.full_name);
     } else {
       console.log('❌ NOT including assigned_user - no focal person assigned');
