@@ -3348,14 +3348,20 @@ async function notifyUsersByRole(
         );
       });
     }
-    await Notification.create({
-      ticket_id: ticketId,
-      sender_id: senderId,
-      recipient_id: user.id,
-      message,
-      status: "unread",
-      channel: senderRole,
-    });
+    try {
+      await Notification.create({
+        ticket_id: ticketId,
+        sender_id: senderId,
+        recipient_id: user.id,
+        message,
+        status: "unread",
+        channel: senderRole,
+      });
+      console.log(`✅ Notification created for ${user.role} ${user.id} for ticket ${ticketId}`);
+    } catch (notifError) {
+      console.error(`❌ Error creating notification for ${user.role} ${user.id}:`, notifError);
+      // Don't fail the whole operation if notification creation fails
+    }
   }
 }
 
@@ -5256,14 +5262,20 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
     
     const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
     
-    await notifyUsersByRole(
-      ["reviewer", "supervisor"],
-      notifySubject,
-      notifyHtml,
-      ticket.id,
-      userId,
-      notifyMsg
-    );
+    try {
+      await notifyUsersByRole(
+        ["reviewer", "supervisor"],
+        notifySubject,
+        notifyHtml,
+        ticket.id,
+        userId,
+        notifyMsg
+      );
+      console.log(`✅ Notifications created for reviewers/supervisors for reversed ticket ${ticket.ticket_id}`);
+    } catch (notifError) {
+      console.error(`❌ Error creating notifications for reviewers/supervisors:`, notifError);
+      // Don't fail the whole operation if notification creation fails
+    }
 
     // Send email to the previous user
     if (prevUser && prevUser.email) {
@@ -5449,6 +5461,17 @@ const reverseTicket = async (req, res) => {
 
     // Check if ticket has workflow path set
     if (ticket.workflow_path) {
+      // Ensure prevAssignment exists before using it
+      if (!prevAssignment || !prevAssignment.assigned_to_id) {
+        console.error(`❌ ERROR: prevAssignment is null or missing assigned_to_id! Cannot process workflow reversal.`);
+        console.error(`❌ DEBUG: prevAssignment:`, prevAssignment);
+        console.error(`❌ DEBUG: targetUserId:`, targetUserId);
+        console.error(`❌ DEBUG: assignments length:`, assignments.length);
+        return res.status(500).json({ 
+          message: "Cannot reverse ticket: Previous assignment not found. Please contact administrator." 
+        });
+      }
+
       // Use workflow service to process the reversal
       const result = await workflowService.processWorkflowStepTransition(
         ticketId,
@@ -5466,16 +5489,35 @@ const reverseTicket = async (req, res) => {
         });
       }
 
+      // Ensure targetUserId is set from prevAssignment if not already set
+      if (!targetUserId && prevAssignment && prevAssignment.assigned_to_id) {
+        targetUserId = prevAssignment.assigned_to_id;
+        targetUserRole = prevAssignment.assigned_to_role;
+        console.log(`🔍 DEBUG: Set targetUserId from prevAssignment: ${targetUserId}`);
+      }
+
       // Create notification for the target user (the one receiving the reversed ticket)
-      await Notification.create({
-        ticket_id: ticketId,
-        sender_id: userId,
-        recipient_id: targetUserId,
-        message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
-        channel: "In-System",
-        status: "unread",
-        category: ticket.category,
-      });
+      console.log(`🔍 DEBUG: Creating notification for recipient (with workflow) - targetUserId: ${targetUserId}, prevAssignment.assigned_to_id: ${prevAssignment?.assigned_to_id}, ticketId: ${ticketId}, ticket.ticket_id: ${ticket.ticket_id}`);
+      if (!targetUserId) {
+        console.error(`❌ ERROR: targetUserId is null/undefined! Cannot create notification for recipient.`);
+        console.error(`❌ DEBUG: prevAssignment:`, prevAssignment);
+        console.error(`❌ DEBUG: result:`, result);
+      } else {
+        try {
+          await Notification.create({
+            ticket_id: ticketId,
+            sender_id: userId,
+            recipient_id: targetUserId,
+            message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+            channel: "In-System",
+            status: "unread",
+          });
+          console.log(`✅ Notification created for recipient ${targetUserId} for reversed ticket ${ticket.ticket_id}`);
+        } catch (notifError) {
+          console.error(`❌ Error creating notification for recipient ${targetUserId}:`, notifError);
+          // Don't fail the whole operation if notification creation fails
+        }
+      }
 
       // Update attachment path if file was uploaded
       if (attachmentPath) {
@@ -5538,15 +5580,25 @@ const reverseTicket = async (req, res) => {
       });
 
       // Create notification for the target user (the one receiving the reversed ticket)
-      await Notification.create({
-        ticket_id: ticketId,
-        sender_id: userId,
-        recipient_id: targetUserId,
-        message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
-        channel: "In-System",
-        status: "unread",
-        category: ticket.category,
-      });
+      console.log(`🔍 DEBUG: Creating notification for recipient (no workflow) - targetUserId: ${targetUserId}, ticketId: ${ticketId}, ticket.ticket_id: ${ticket.ticket_id}`);
+      if (!targetUserId) {
+        console.error(`❌ ERROR: targetUserId is null/undefined! Cannot create notification for recipient.`);
+      } else {
+        try {
+          await Notification.create({
+            ticket_id: ticketId,
+            sender_id: userId,
+            recipient_id: targetUserId,
+            message: `Ticket reversed back to you: ${ticket.subject} (ID: ${ticket.ticket_id})`,
+            channel: "In-System",
+            status: "unread",
+          });
+          console.log(`✅ Notification created for recipient ${targetUserId} for reversed ticket ${ticket.ticket_id}`);
+        } catch (notifError) {
+          console.error(`❌ Error creating notification for recipient ${targetUserId}:`, notifError);
+          // Don't fail the whole operation if notification creation fails
+        }
+      }
 
       // Fetch attended_by user name and role
       let attended_by_name = null;

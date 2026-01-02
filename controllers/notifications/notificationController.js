@@ -115,7 +115,8 @@ const createNotification = async (req, res) => {
 const listNotifications = async (req, res) => {
   try {
     const { userId } = req.params;
-    const notifications = await Notification.findAll({
+    // Get all notifications first (including reversed tickets)
+    const allNotifications = await Notification.findAll({
       where: {
         recipient_id: userId,
         [Op.or]: [{ status: "unread" }, { status: " " }],
@@ -133,14 +134,29 @@ const listNotifications = async (req, res) => {
             "status",
             "description",
           ],
-          where: {
-            status: { [Op.ne]: 'Reversed' } // Exclude reversed tickets
-          },
           required: true // Inner join to ensure ticket exists
         },
       ],
       order: [["created_at", "DESC"]],
     });
+    
+    // Filter out notifications for reversed tickets, BUT include reversal notifications for the recipient
+    const notifications = allNotifications.filter(n => {
+      if (!n.ticket) return false;
+      
+      // If ticket is reversed, only include if it's a reversal notification for this user
+      if (n.ticket.status === 'Reversed') {
+        const messageText = (n.message || '').toLowerCase();
+        // Include if message indicates ticket was reversed back to this user
+        return messageText.includes('reversed back to you') || 
+               messageText.includes('reversed to you') ||
+               (messageText.includes('has been reversed') && messageText.includes('to'));
+      }
+      
+      // For non-reversed tickets, include all
+      return true;
+    });
+    
     return res.status(200).json({ notifications });
   } catch (error) {
     return res
@@ -212,6 +228,7 @@ const getUnreadCount = async (req, res) => {
         recipient_id: userId,
         [Op.or]: [{ status: "unread" }, { status: " " }], // Correctly checking both conditions
       },
+      attributes: ['id', 'ticket_id', 'sender_id', 'recipient_id', 'message', 'channel', 'status', 'comment', 'created_at', 'updated_at'], // Explicitly include message field
       include: [
         {
           model: Ticket,
@@ -222,9 +239,26 @@ const getUnreadCount = async (req, res) => {
       ],
     });
     
-    // Filter out notifications for reversed tickets
+    // Filter out notifications for reversed tickets, BUT include reversal notifications for the recipient
     const validNotifications = notifications.filter(n => {
-      return n.ticket && n.ticket.status !== 'Reversed';
+      if (!n.ticket) return false;
+      
+      // If ticket is reversed, only include if it's a reversal notification for this user
+      if (n.ticket.status === 'Reversed') {
+        const messageText = (n.message || '').toLowerCase();
+        // Include if message indicates ticket was reversed back to this user
+        const isReversalNotification = messageText.includes('reversed back to you') || 
+                                       messageText.includes('reversed to you') ||
+                                       (messageText.includes('has been reversed') && messageText.includes('to'));
+        
+        // Only log if there's an issue (excluded when it should be included)
+        // Removed verbose logging to reduce console noise
+        
+        return isReversalNotification;
+      }
+      
+      // For non-reversed tickets, include all
+      return true;
     });
     
     const count = validNotifications.length;
@@ -250,7 +284,7 @@ const getUnreadTicketsCount = async (req, res) => {
         recipient_id: userId,
         [Op.or]: [{ status: "unread" }, { status: " " }], // Correctly checking both conditions
       },
-      attributes: ['ticket_id', 'comment'],
+      attributes: ['ticket_id', 'comment', 'message'],
       include: [
         {
           model: Ticket,
@@ -261,14 +295,28 @@ const getUnreadTicketsCount = async (req, res) => {
       ]
     });
     
-    // Filter notifications with messages and exclude reversed tickets (same logic as table's getUnreadCountForTicket)
+    // Filter notifications with messages and exclude reversed tickets, BUT include reversal notifications for the recipient
     const validNotifications = notifications.filter(n => {
       const ticketId = n.ticket_id;
-      const hasMessage = n.comment && typeof n.comment === 'string' && n.comment.trim() !== '';
+      // Check both comment and message fields for content
+      const hasComment = n.comment && typeof n.comment === 'string' && n.comment.trim() !== '';
+      const hasMessage = n.message && typeof n.message === 'string' && n.message.trim() !== '';
+      const hasMessageContent = hasComment || hasMessage;
       const isUnread = true; // Already filtered by where clause
-      const isNotReversed = n.ticket && n.ticket.status !== 'Reversed';
       
-      return ticketId && hasMessage && isUnread && isNotReversed;
+      if (!ticketId || !hasMessageContent || !isUnread) return false;
+      
+      // If ticket is reversed, only include if it's a reversal notification for this user
+      if (n.ticket && n.ticket.status === 'Reversed') {
+        const messageText = (n.message || '').toLowerCase();
+        // Include if message indicates ticket was reversed back to this user
+        return messageText.includes('reversed back to you') || 
+               messageText.includes('reversed to you') ||
+               (messageText.includes('has been reversed') && messageText.includes('to'));
+      }
+      
+      // For non-reversed tickets, include all
+      return true;
     });
     
     // Get unique ticket IDs
