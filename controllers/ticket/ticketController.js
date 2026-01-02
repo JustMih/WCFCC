@@ -712,6 +712,7 @@ const createTicket = async (req, res) => {
       sub_section: inputSection,
       shouldClose,
       resolution_details,
+      resolution_type,
       // New fields for representative
       requesterName: rawRequesterName,
       requesterPhoneNumber,
@@ -835,11 +836,27 @@ const createTicket = async (req, res) => {
     // --- Assignment Logic ---
     let assignedUser = null;
 
+    // If ticket is closed on creation, set creator as assigned user and skip assignment logic
+    if (shouldClose) {
+      console.log("✅ Ticket is closed on creation - Setting creator as assigned user");
+      const creatorUser = await User.findOne({
+        where: { id: userId },
+        attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+      });
+      if (creatorUser) {
+        assignedUser = creatorUser;
+        console.log("✅ Creator set as assigned user:", creatorUser.full_name, "Role:", creatorUser.role);
+      } else {
+        console.error("⚠️ Creator user not found, will use default assignment");
+      }
+    }
+
     // Get allocated user from search response (not from institution details)
     // This comes from the search response when an allocated user is assigned to the employer
     let allocatedUserUsername = req.body.allocated_user_username;
 
-    if (category === "Inquiry") {
+    // Only run assignment logic if ticket is NOT closed on creation
+    if (!shouldClose && category === "Inquiry") {
       // ASSIGNMENT PRIORITY FOR INQUIRY:
       // 1. If allocated user exists (allocated_user_username provided) -> Assign to allocated user by username
       // 2. If no allocated user -> Assign to focal-person based on sub_section (for directorate) or unit_section (for units)
@@ -973,13 +990,14 @@ const createTicket = async (req, res) => {
           console.log("⚠️ STEP 2: No focal-person found with matching sub_section/unit_section. Ticket will not be assigned to any focal-person.");
         }
       }
-    } else if (["Complaint", "Suggestion", "Compliment"].includes(category)) {
+    } else if (!shouldClose && ["Complaint", "Suggestion", "Compliment"].includes(category)) {
       // Assign to reviewer
       assignedUser = await User.findOne({
         where: { role: "reviewer" },
         attributes: ["id", "full_name", "email", "role", "unit_section"],
       });
     }
+    
     if (!assignedUser) {
       // For Inquiry category, provide more specific error message
       if (category === "Inquiry") {
@@ -1146,6 +1164,7 @@ const createTicket = async (req, res) => {
     if (shouldClose) {
       ticketData.resolution_details =
         resolution_details || description || "Ticket resolved during creation";
+      ticketData.resolution_type = resolution_type || "Resolved";
       ticketData.date_of_resolution = new Date();
       ticketData.attended_by_id = userId;
     }
@@ -1167,8 +1186,9 @@ const createTicket = async (req, res) => {
     // Dependents are now stored as comma-separated string in the Tickets table
     // No need for separate Dependent records
 
-    // --- Create AssignedOfficer record for initial assignment ---
+    // --- Create Ticket Assignment Record ---
     if (!shouldClose) {
+      // For tickets that are NOT closed on creation, create "Assigned" action
       // await AssignedOfficer.create({
       //   ticket_id: newTicket.id,
       //   assigned_to_id: assignedUser.id,
@@ -1178,7 +1198,6 @@ const createTicket = async (req, res) => {
       //   assigned_at: new Date(),
       //   notes: 'Initial assignment'
       // });
-      // --- Create Ticket Assignment Record ---
       await TicketAssignment.create({
         ticket_id: newTicket.id,
         assigned_by_id: userId,
@@ -1188,10 +1207,9 @@ const createTicket = async (req, res) => {
         reason: description,
         created_at: new Date(),
       });
-    }
-
-    // If ticket is closed at creation, record closure in assignment history
-    if (shouldClose) {
+    } else {
+      // If ticket is closed at creation, only create "Closed" action (no "Created" or "Assigned" action)
+      // This prevents duplicate entries in the stepper
       const closingUser = await User.findOne({ where: { id: userId } });
       await TicketAssignment.create({
         ticket_id: newTicket.id,
@@ -3366,15 +3384,33 @@ async function notifyUsersByRole(
 }
 
 const closeTicket = async (req, res) => {
+  console.log("🔵 ========== CLOSE TICKET STARTED ==========");
+  console.log("🔵 Request params:", req.params);
+  console.log("🔵 Request body:", req.body);
+  console.log("🔵 Request file:", req.file);
+  
   try {
     const { ticketId } = req.params;
     const { resolution_details, userId, resolution_type } = req.body;
     const { deactivateUserUpdates } = require('./ticketUpdateController');
 
+    console.log("🔵 Extracted values:");
+    console.log("  - ticketId:", ticketId);
+    console.log("  - userId:", userId);
+    console.log("  - resolution_details:", resolution_details);
+    console.log("  - resolution_type:", resolution_type);
+
     if (!ticketId) {
+      console.log("❌ ERROR: Ticket ID is missing");
       return res.status(400).json({ message: "Ticket ID is required" });
     }
+    
+    if (!userId) {
+      console.log("❌ ERROR: User ID is missing");
+      return res.status(400).json({ message: "User ID is required" });
+    }
 
+    console.log("🔵 Fetching ticket from database...");
     const ticket = await Ticket.findOne({
       where: { id: ticketId },
       include: [
@@ -3395,112 +3431,154 @@ const closeTicket = async (req, res) => {
     });
 
     if (!ticket) {
+      console.log("❌ ERROR: Ticket not found with ID:", ticketId);
       return res.status(404).json({ message: "Ticket not found" });
     }
+    
+    console.log("✅ Ticket found:");
+    console.log("  - Ticket ID:", ticket.ticket_id);
+    console.log("  - Status:", ticket.status);
+    console.log("  - Category:", ticket.category);
+    console.log("  - Creator:", ticket.creator ? ticket.creator.full_name : "N/A");
 
     // Handle attachment if uploaded
     let attachmentPath = null;
     if (req.file) {
       attachmentPath = `ticket_attachments/${req.file.filename}`; // Save relative path
-      console.log("Attachment uploaded:", attachmentPath);
+      console.log("✅ Attachment uploaded:", attachmentPath);
+    } else {
+      console.log("🔵 No attachment uploaded");
     }
 
     // Update ticket status and add resolution details
-    await ticket.update({
+    console.log("🔵 Updating ticket status to Closed...");
+    const updateData = {
       status: "Closed",
       resolution_details: resolution_details || "Ticket closed by agent",
       resolution_type: resolution_type || "Resolved",
       attachment_path: attachmentPath, // Save attachment path to ticket
       date_of_resolution: new Date(),
       attended_by_id: userId,
-    });
+    };
+    console.log("🔵 Update data:", updateData);
+    
+    await ticket.update(updateData);
+    console.log("✅ Ticket updated successfully");
 
     // Fetch attended_by user name and role
+    console.log("🔵 Fetching attended_by user...");
     let attended_by_name = null;
     let attended_by_role = null;
     if (userId) {
       const attendedByUser = await User.findOne({ where: { id: userId } });
-      attended_by_name = attendedByUser ? attendedByUser.full_name : null;
-      attended_by_role = attendedByUser ? attendedByUser.role : null;
+      if (attendedByUser) {
+        attended_by_name = attendedByUser.full_name;
+        attended_by_role = attendedByUser.role;
+        console.log("✅ Attended by user found:", attended_by_name, "Role:", attended_by_role);
+      } else {
+        console.log("⚠️ WARNING: Attended by user not found for userId:", userId);
+      }
+    } else {
+      console.log("⚠️ WARNING: userId is null or undefined");
     }
 
     // Notify all reviewers and supervisors
-    const notifySubject = `Ticket Closed: ${ticket.subject}`;
-    const notifyBody = `
-      <p>A ticket has been closed successfully. Here are the details:</p>
-    `;
-    const notifyDetails = `
-      <ul>
-        <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-        <li><strong>Subject:</strong> ${ticket.subject}</li>
-        <li><strong>Category:</strong> ${ticket.category}</li>
-        <li><strong>Description:</strong> ${ticket.description}</li>
-        <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-        <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
-        <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
-        <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
-        <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
-      </ul>
-    `;
-    
-    const { renderEmailCard } = require('../../services/emailService');
-    const notifyHtml = renderEmailCard(notifySubject, notifyBody, notifyDetails);
-    const notifyMsg = `Ticket ${ticket.ticket_id} has been closed by ${
-      attended_by_name || "Unknown"
-    } (${attended_by_role || "Unknown Role"}).`;
-    await notifyUsersByRole(
-      ["reviewer", "supervisor"],
-      notifySubject,
-      notifyHtml,
-      ticketId,
-      userId,
-      notifyMsg
-    );
+    console.log("🔵 Preparing notifications for reviewers and supervisors...");
+    try {
+      const notifySubject = `Ticket Closed: ${ticket.subject}`;
+      const notifyBody = `
+        <p>A ticket has been closed successfully by ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"}). Here are the details:</p>
+      `;
+      const notifyDetails = `
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Description:</strong> ${ticket.description}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+          <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+          <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+          <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+        </ul>
+      `;
+      
+      const { renderEmailCard } = require('../../services/emailService');
+      const notifyHtml = renderEmailCard(notifySubject, notifyBody, notifyDetails);
+      const categoryText = ticket.category ? ` (${ticket.category})` : '';
+      const notifyMsg = `Ticket ${ticket.ticket_id}${categoryText} has been closed by ${
+        attended_by_name || "Unknown"
+      } (${attended_by_role || "Unknown Role"}).`;
+      
+      console.log("🔵 Calling notifyUsersByRole...");
+      await notifyUsersByRole(
+        ["reviewer", "supervisor"],
+        notifySubject,
+        notifyHtml,
+        ticketId,
+        userId,
+        notifyMsg
+      );
+      console.log("✅ Notifications sent to reviewers and supervisors");
+    } catch (notifyError) {
+      console.error("❌ ERROR in notifyUsersByRole:", notifyError);
+      console.error("❌ Error stack:", notifyError.stack);
+      // Continue execution even if notification fails
+    }
 
     // --- Email to Supervisors (Head of Unit/Manager + General Supervisor) for ticket closure ---
-    const supervisors = await findSupervisorForSection(ticket.section);
-    if (supervisors && supervisors.length > 0) {
-      const supervisorEmailSubject = `Ticket Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
-      
-      // Send email to each supervisor
-      for (const supervisor of supervisors) {
-        const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A ticket has been closed in your unit/section.</p>`;
-        const supervisorDetailsHtml = `
-          <ul>
-            <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
-            <li><strong>Subject:</strong> ${ticket.subject}</li>
-            <li><strong>Category:</strong> ${ticket.category}</li>
-            <li><strong>Description:</strong> ${ticket.description}</li>
-            <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
-            <li><strong>Assigned To:</strong> ${ticket.assigned_to_name || "Unknown"}</li>
-            <li><strong>Section/Unit:</strong> ${ticket.section}</li>
-            <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
-            <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
-            <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
-            <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
-          </ul>`;
-        const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+    console.log("🔵 Finding supervisors for section:", ticket.section);
+    try {
+      const supervisors = await findSupervisorForSection(ticket.section);
+      if (supervisors && supervisors.length > 0) {
+        console.log("✅ Found supervisors:", supervisors.length);
+        const supervisorEmailSubject = `Ticket Closed: ${ticket.subject} (ID: ${ticket.ticket_id})`;
         
-        // Get attachments for email
-        const attachments = getTicketAttachments(ticket);
-        
-        // Send email in background to avoid blocking
-        sendEmailNonBlocking({
-          to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
-          subject: supervisorEmailSubject,
-          htmlBody: supervisorEmailHtmlBody,
-          attachments: attachments,
-        });
-        console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
+        // Send email to each supervisor
+        for (const supervisor of supervisors) {
+          const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A ticket has been closed in your unit/section.</p>`;
+          const supervisorDetailsHtml = `
+            <ul>
+              <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+              <li><strong>Subject:</strong> ${ticket.subject}</li>
+              <li><strong>Category:</strong> ${ticket.category}</li>
+              <li><strong>Description:</strong> ${ticket.description}</li>
+              <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+              <li><strong>Assigned To:</strong> ${ticket.assigned_to_name || "Unknown"}</li>
+              <li><strong>Section/Unit:</strong> ${ticket.section}</li>
+              <li><strong>Closed By:</strong> ${attended_by_name || "Unknown"} (${attended_by_role || "Unknown Role"})</li>
+              <li><strong>Resolution Type:</strong> ${resolution_type || "Resolved"}</li>
+              <li><strong>Resolution Details:</strong> ${resolution_details || "Ticket closed by agent"}</li>
+              <li><strong>Closed Date:</strong> ${new Date().toLocaleString()}</li>
+            </ul>`;
+          const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+          
+          // Get attachments for email
+          const attachments = getTicketAttachments(ticket);
+          
+          // Send email in background to avoid blocking
+          sendEmailNonBlocking({
+            to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+            subject: supervisorEmailSubject,
+            htmlBody: supervisorEmailHtmlBody,
+            attachments: attachments,
+          });
+          console.log(`✅ Closure email queued for ${supervisor.role} ${supervisor.full_name} for ticket ${ticket.ticket_id}`);
+        }
+      } else {
+        console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
       }
-    } else {
-      console.log(`⚠️ No supervisors found for section: ${ticket.section || ticket.responsible_unit_name}`);
+    } catch (supervisorError) {
+      console.error("❌ ERROR in findSupervisorForSection:", supervisorError);
+      console.error("❌ Error stack:", supervisorError.stack);
+      // Continue execution even if supervisor finding fails
     }
 
     // Notify the creator/requester by SMS, email, and in-system notification
     if (ticket.creator) {
       // Create in-system notification for creator
-      const creatorNotificationMsg = `Your ticket ${ticket.ticket_id} has been closed and resolved. ${resolution_details ? `Resolution: ${resolution_details}` : ''}`;
+      const categoryText = ticket.category ? ` (${ticket.category})` : '';
+      const creatorNotificationMsg = `Your ticket ${ticket.ticket_id}${categoryText} has been closed and resolved. ${resolution_details ? `Resolution: ${resolution_details}` : ''}`;
       
       try {
         await Notification.create({
@@ -3510,7 +3588,6 @@ const closeTicket = async (req, res) => {
           message: creatorNotificationMsg,
           channel: "In-System",
           status: "unread",
-          category: ticket.category || "Ticket Closure",
         });
         console.log(`✅ In-system notification sent to creator (${ticket.creator.full_name}) for ticket ${ticket.ticket_id}`);
       } catch (notificationError) {
@@ -3581,7 +3658,8 @@ const closeTicket = async (req, res) => {
           const resolutionText = resolution_details ? 
             (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
             '';
-          const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${ticket.ticket_id}) has been closed and resolved. ${resolutionText ? `Resolution: ${resolutionText}` : ''}`;
+          const categoryText = ticket.category ? ` (${ticket.category})` : '';
+          const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved. ${resolutionText ? `Resolution: ${resolutionText}` : ''}`;
           
           // Send SMS asynchronously to avoid blocking the response
           sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -3670,7 +3748,8 @@ const closeTicket = async (req, res) => {
       // Continue with ticket closure even if AssignedOfficer update fails
     }
 
-    res.status(200).json({
+    console.log("🔵 Preparing success response...");
+    const responseData = {
       success: true,
       message: `Ticket ${ticket.ticket_id} closed successfully by ${
         attended_by_name || "Unknown"
@@ -3691,10 +3770,19 @@ const closeTicket = async (req, res) => {
         attended_by_name,
         attachment_path: attachmentPath,
       },
-    });
-    return;
+    };
+    console.log("✅ Response data prepared");
+    console.log("🔵 ========== CLOSE TICKET SUCCESS ==========");
+    return res.status(200).json(responseData);
   } catch (error) {
-    console.error("Error closing ticket:", error);
+    console.error("🔴 ========== CLOSE TICKET ERROR ==========");
+    console.error("❌ ERROR closing ticket:", error);
+    console.error("❌ Error name:", error.name);
+    console.error("❌ Error message:", error.message);
+    console.error("❌ Error code:", error.code);
+    console.error("❌ Error stack:", error.stack);
+    console.error("❌ Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    console.error("🔴 ========================================");
     return res.status(500).json({
       success: false,
       message: "Failed to close ticket",
