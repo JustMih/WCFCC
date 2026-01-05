@@ -692,6 +692,9 @@ const createTicket = async (req, res) => {
   console.log("  - req.body.allocatedUser:", req.body.allocatedUser);
   console.log("  - req.body.allocated_user:", req.body.allocated_user);
   console.log("  - req.body.category:", req.body.category);
+  console.log("  - req.body.isInquiry:", req.body.isInquiry);
+  console.log("  - req.body.hasClaim:", req.body.hasClaim);
+  console.log("🔵 CRITICAL: For Inquiry tickets, if ANY allocated user field has value, it MUST be used (not checklist user)");
   console.log("🔵 ================================================");
 
   try {
@@ -882,6 +885,15 @@ const createTicket = async (req, res) => {
     console.log("  - willRunAssignmentLogic:", !shouldClose && category === "Inquiry");
     
     // Check multiple possible field names including employerAllocatedStaffUsername
+    // CRITICAL: Check ALL possible field names to ensure we capture allocated user
+    console.log("🔵 ========== ALLOCATED USER EXTRACTION - START ==========");
+    console.log("🔵 Checking ALL possible allocated user field names:");
+    console.log("  - req.body.allocated_user_username:", req.body.allocated_user_username, "(type:", typeof req.body.allocated_user_username, ")");
+    console.log("  - req.body.allocatedUserUsername:", req.body.allocatedUserUsername, "(type:", typeof req.body.allocatedUserUsername, ")");
+    console.log("  - req.body.employerAllocatedStaffUsername:", req.body.employerAllocatedStaffUsername, "(type:", typeof req.body.employerAllocatedStaffUsername, ")");
+    console.log("  - req.body.allocatedUser:", req.body.allocatedUser, "(type:", typeof req.body.allocatedUser, ")");
+    console.log("  - req.body.allocated_user:", req.body.allocated_user, "(type:", typeof req.body.allocated_user, ")");
+    
     let allocatedUserUsername = req.body.allocated_user_username || 
                                 req.body.allocatedUserUsername || 
                                 req.body.employerAllocatedStaffUsername ||
@@ -892,13 +904,18 @@ const createTicket = async (req, res) => {
     console.log("  - Final allocatedUserUsername:", allocatedUserUsername);
     console.log("  - allocatedUserUsername type:", typeof allocatedUserUsername);
     console.log("  - allocatedUserUsername is truthy:", !!allocatedUserUsername);
+    console.log("  - allocatedUserUsername === null:", allocatedUserUsername === null);
+    console.log("  - allocatedUserUsername === undefined:", allocatedUserUsername === undefined);
+    console.log("  - allocatedUserUsername === '':", allocatedUserUsername === '');
     console.log("  - allocatedUserUsername trimmed:", allocatedUserUsername ? allocatedUserUsername.trim() : "N/A");
     console.log("  - allocatedUserUsername trimmed length:", allocatedUserUsername ? allocatedUserUsername.trim().length : 0);
+    console.log("  - Will proceed to Inquiry assignment?", !shouldClose && category === "Inquiry" && allocatedUserUsername && allocatedUserUsername.trim() !== "");
     console.log("🔵 ========== ALLOCATED USER DEBUG - END ==========");
 
     // Only run assignment logic if ticket is NOT closed on creation
     if (!shouldClose && category === "Inquiry") {
       console.log("🔵 ========== INQUIRY ASSIGNMENT LOGIC STARTED ==========");
+      console.log("🔵 CRITICAL: For Inquiry tickets, allocated user ALWAYS takes priority over checklist user, even if claim exists");
       console.log("🔵 STEP 1 CHECK - Allocated User Username:");
       console.log("  - allocatedUserUsername value:", allocatedUserUsername);
       console.log("  - allocatedUserUsername type:", typeof allocatedUserUsername);
@@ -908,14 +925,32 @@ const createTicket = async (req, res) => {
       console.log("  - Will enter STEP 1?", allocatedUserUsername && allocatedUserUsername.trim() !== "");
       
       // ASSIGNMENT PRIORITY FOR INQUIRY:
-      // 1. If allocated user exists (allocated_user_username provided) -> Assign to allocated user by username (ALWAYS, regardless of sub-section)
+      // CRITICAL RULE: If Inquiry + allocated user exists (not null/empty) -> ALWAYS assign to allocated user, NEVER to checklist user
+      // This applies to ALL sub-sections, but especially for "Compliance Section"
+      // 1. If Inquiry + allocated user exists -> Assign to allocated user by username (ALWAYS, regardless of sub-section or claim existence)
       // 2. If no allocated user -> Assign to focal-person based on sub_section (for directorate) or unit_section (for units)
       
-      // STEP 1: First priority - Check if allocated user exists and assign by username
-      // Allocated user ALWAYS takes priority, even for "Records Section"
+      // Get sub_section from request body for special handling
+      const ticketSubSection = req.body.sub_section || inputSection || null;
+      const normalizedSubSection = ticketSubSection ? ticketSubSection.toLowerCase().trim() : null;
+      const isComplianceSection = normalizedSubSection === "compliance section";
+      const isSpecialSubSection = isComplianceSection;
+      
+      console.log("🔵 INQUIRY SUB-SECTION CHECK:");
+      console.log("  - ticketSubSection:", ticketSubSection);
+      console.log("  - normalizedSubSection:", normalizedSubSection);
+      console.log("  - isComplianceSection:", isComplianceSection);
+      console.log("  - isSpecialSubSection:", isSpecialSubSection);
+      console.log("  - allocatedUserUsername:", allocatedUserUsername);
+      
+      // STEP 1: CRITICAL - Check if allocated user exists and assign by username
+      // RULE: If Inquiry + allocated user exists (not null/empty) -> ALWAYS assign to allocated user, NEVER to checklist user
+      // This applies regardless of claim existence or sub-section
       if (allocatedUserUsername && allocatedUserUsername.trim() !== "") {
         const trimmedUsername = allocatedUserUsername.trim();
+        console.log("🔍 STEP 1: CRITICAL - Allocated user provided for Inquiry ticket");
         console.log("🔍 STEP 1: Checking for allocated user with username:", trimmedUsername);
+        console.log("🔍 STEP 1: This will OVERRIDE any checklist user assignment, even if claim exists");
         
         // Try exact match first
         assignedUser = await User.findOne({
@@ -936,7 +971,15 @@ const createTicket = async (req, res) => {
         }
         
         if (assignedUser) {
-          console.log("✅ STEP 1 SUCCESS: Found allocated user:", assignedUser.full_name, "- Assigning ticket to allocated user.");
+          if (isSpecialSubSection) {
+            console.log(`✅ STEP 1 SUCCESS: Found allocated user for Compliance Section:`, assignedUser.full_name);
+            console.log(`✅ STEP 1 SUCCESS: Assigning to allocated user (OVERRIDING checklist user, even with claim)`);
+          } else {
+            console.log("✅ STEP 1 SUCCESS: Found allocated user:", assignedUser.full_name);
+            console.log("✅ STEP 1 SUCCESS: Assigning to allocated user (OVERRIDING checklist user, even with claim)");
+          }
+          // CRITICAL: Set assignedUser and skip all other assignment logic
+          // This ensures allocated user takes priority over checklist user
         } else {
           // If allocated user not found in database, create the user
           console.log("⚠️ STEP 1: Allocated user not found in database, creating new user with username:", trimmedUsername);
@@ -954,6 +997,7 @@ const createTicket = async (req, res) => {
           });
           assignedUser = newUser;
           console.log("✅ STEP 1 SUCCESS: Created and assigned to new allocated user:", newUser.full_name);
+          console.log("✅ STEP 1 SUCCESS: This OVERRIDES any checklist user assignment");
         }
       } else {
         console.log("⚠️ STEP 1 SKIPPED: No allocated user username provided or it was empty.");
@@ -963,6 +1007,7 @@ const createTicket = async (req, res) => {
         console.log("  - allocatedUserUsername === undefined:", allocatedUserUsername === undefined);
         console.log("  - allocatedUserUsername === '':", allocatedUserUsername === '');
         console.log("  - allocatedUserUsername?.trim() === '':", allocatedUserUsername?.trim() === '');
+        console.log("⚠️ STEP 1 SKIPPED: Will proceed to STEP 2 (focal-person assignment)");
       }
 
       // STEP 2: Second priority - If no allocated user found/assigned, assign to focal-person with matching sub_section
@@ -1075,6 +1120,25 @@ const createTicket = async (req, res) => {
         if (!assignedUser) {
           console.log("⚠️ STEP 2: No focal-person found with matching sub_section/unit_section. Ticket will not be assigned to any focal-person.");
         }
+      }
+      
+      // CRITICAL CHECK: After Inquiry assignment logic, verify that if allocated user was provided, it was used
+      // This prevents any other logic from overriding the allocated user assignment
+      if (allocatedUserUsername && allocatedUserUsername.trim() !== "" && !assignedUser) {
+        console.error("❌ ERROR: Allocated user was provided but assignment failed!");
+        console.error("❌ ERROR: allocatedUserUsername:", allocatedUserUsername);
+        console.error("❌ ERROR: assignedUser:", assignedUser);
+        return res.status(500).json({
+          message: "Failed to assign ticket to allocated user. Please check if the allocated user exists in the system.",
+          error: "ALLOCATED_USER_ASSIGNMENT_FAILED",
+          allocatedUserUsername: allocatedUserUsername
+        });
+      }
+      
+      // CRITICAL: If assignedUser is set from allocated user, log confirmation
+      if (assignedUser && allocatedUserUsername && allocatedUserUsername.trim() !== "") {
+        console.log("✅ CONFIRMED: Inquiry ticket assigned to allocated user:", assignedUser.full_name);
+        console.log("✅ CONFIRMED: This assignment OVERRIDES any checklist user routing, even with claim");
       }
     } else if (!shouldClose && ["Complaint", "Suggestion", "Compliment"].includes(category)) {
       // Assign to reviewer
@@ -4256,11 +4320,15 @@ const getAllAttendee = async (req, res) => {
       console.log(`DEBUG: Focal person requesting attendees from their unit`);
     }
     
-    // Include both "attendee" and "agent" roles when targetRole is "attendee"
+    // Include "attendee", "agent", and "focal-person" roles when targetRole is "attendee"
+    // Also include "focal-person" when targetRole is "manager" (for managers/directors viewing attendees)
     if (targetRole === "attendee") {
-      whereClause.role = { [Op.in]: ["attendee", "agent"] };
+      whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
+    } else if (targetRole === "manager") {
+      // For managers/directors, show both managers and focal-persons in attendees list
+      whereClause.role = { [Op.in]: ["manager", "focal-person"] };
     } else {
-    whereClause.role = targetRole;
+      whereClause.role = targetRole;
     }
     
     // Filter users based on current user's role and available data
@@ -4278,7 +4346,7 @@ const getAllAttendee = async (req, res) => {
         
         // For focal persons: filter attendees by unit_section AND report_to
         // Attendees must be in the same unit_section AND report to the same manager as the focal person
-        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role IN ('attendee', 'agent')
+        // Query: WHERE unit_section = focal_person.unit_section AND report_to = focal_person.report_to AND role IN ('attendee', 'agent', 'focal-person')
         if (currentUser.unit_section && currentUser.unit_section.trim() !== '' && 
             currentUser.report_to && currentUser.report_to.trim() !== '') {
           // Use case-insensitive matching for both unit_section and report_to
@@ -4301,8 +4369,8 @@ const getAllAttendee = async (req, res) => {
                 )
               ]
             },
-            // Include both attendee and agent roles
-            targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent"] } } : { role: targetRole }
+            // Include attendee, agent, and focal-person roles
+            targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent", "focal-person"] } } : { role: targetRole }
           ];
           console.log(`DEBUG: Focal person filtering ${targetRole}s by unit_section: "${currentUser.unit_section}" AND report_to: "${currentUser.report_to}" (case-insensitive)`);
           if (ticket && ticket.sub_section) {
@@ -4341,8 +4409,8 @@ const getAllAttendee = async (req, res) => {
                 )
               ]
             },
-            // Include both attendee and agent roles
-            targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent"] } } : { role: targetRole }
+            // Include attendee, agent, and focal-person roles
+            targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent", "focal-person"] } } : { role: targetRole }
           ];
           console.log(`DEBUG: Filtering ${targetRole}s by focal person's unit_section: "${currentUser.unit_section}" AND report_to: "${currentUser.report_to}" (case-insensitive)`);
         } else {
@@ -4357,9 +4425,12 @@ const getAllAttendee = async (req, res) => {
       // For head-of-unit, filter by unit_section AND role = "attendee" (unless directorate shows managers)
       if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
         whereClause.unit_section = currentUser.unit_section;
-        // Ensure we're filtering by attendee/agent roles (unless directorate which shows managers)
+        // Ensure we're filtering by attendee/agent/focal-person roles (unless directorate which shows managers and focal-persons)
         if (targetRole === "attendee") {
-          whereClause.role = { [Op.in]: ["attendee", "agent"] };
+          whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
+        } else if (targetRole === "manager") {
+          // For head-of-unit with directorate, show both managers and focal-persons
+          whereClause.role = { [Op.in]: ["manager", "focal-person"] };
         } else {
           whereClause.role = targetRole;
         }
@@ -4431,9 +4502,9 @@ const getAllAttendee = async (req, res) => {
       console.log(`DEBUG: Where clause used:`, JSON.stringify(whereClause, null, 2));
       console.log(`DEBUG: Focal person full_name: "${currentUserFullName}"`);
       
-      // Check all attendees with their unit_section (including agents)
+      // Check all attendees with their unit_section (including agents and focal-persons)
       const allAttendees = await User.findAll({
-        where: targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent"] } } : { role: targetRole },
+        where: targetRole === "attendee" ? { role: { [Op.in]: ["attendee", "agent", "focal-person"] } } : { role: targetRole },
         attributes: ['id', 'full_name', 'unit_section', 'report_to', 'designation']
       });
       console.log(`DEBUG: All ${targetRole}s in database:`, allAttendees.map(u => ({ 
