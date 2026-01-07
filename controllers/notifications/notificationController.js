@@ -145,12 +145,22 @@ const listNotifications = async (req, res) => {
       if (!n.ticket) return false;
       
       // If ticket is reversed, only include if it's a reversal notification for this user
-      if (n.ticket.status === 'Reversed') {
+      const ticketStatus = n.ticket.status || '';
+      const isReversedTicket = ticketStatus.toLowerCase() === 'reversed';
+      
+      if (isReversedTicket) {
+        const recipientId = n.recipient_id;
+        const isForCurrentUser = String(recipientId) === String(userId);
+        const isUnread = n.status === 'unread' || n.status === ' ';
         const messageText = (n.message || '').toLowerCase();
-        // Include if message indicates ticket was reversed back to this user
-        return messageText.includes('reversed back to you') || 
-               messageText.includes('reversed to you') ||
-               (messageText.includes('has been reversed') && messageText.includes('to'));
+        
+        // Include if it's for current user, unread, and message indicates ticket was reversed back to this user
+        return isForCurrentUser && isUnread && (
+          messageText.includes('reversed back to you') || 
+          messageText.includes('reversed to you') ||
+          messageText.includes('reassigned to focal person') ||
+          (messageText.includes('has been reversed') && messageText.includes('to'))
+        );
       }
       
       // For non-reversed tickets, include all

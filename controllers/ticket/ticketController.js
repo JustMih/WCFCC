@@ -301,24 +301,32 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   }
   if (nextUser && nextUser.email) {
     setImmediate(() => {
+      const emailSubject = `New Escalated Ticket Assigned: ${ticket.ticket_id || ticket.id}`;
+      const bodyHtml = `<p>Dear ${nextUser.full_name},</p><p>A ticket has been escalated to you for action. Please review and resolve as soon as possible.</p>`;
+      const detailsHtml = `
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id || ticket.id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject || 'N/A'}</li>
+          <li><strong>Category:</strong> ${ticket.category || 'N/A'}</li>
+          <li><strong>Description:</strong> ${ticket.description || 'N/A'}</li>
+          <li><strong>Requester:</strong> ${getRequesterDisplayName(ticket)}</li>
+          <li><strong>Escalated To:</strong> ${nextUser.full_name} (${nextRole})</li>
+          <li><strong>Reason:</strong> SLA breach - Ticket escalated due to SLA time limit exceeded</li>
+          <li><strong>Section/Unit:</strong> ${ticket.section || 'N/A'}</li>
+          <li><strong>Sub-section:</strong> ${ticket.sub_section || 'N/A'}</li>
+          <li><strong>Channel:</strong> ${ticket.channel || 'N/A'}</li>
+          <li><strong>Status:</strong> ${ticket.status || 'N/A'}</li>
+        </ul>
+      `;
+      const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
+      
+      const attachments = getTicketAttachments(ticket);
       sendEmail({
         // to: [nextUser.email, "rehema.said3@ttcl.co.tz"],
-        to:`rehema.said3@ttcl.co.tz`,
-        subject: `New Escalated Ticket Assigned: ${
-          ticket.ticket_id || ticket.id
-        }`,
-        htmlBody: `
-          <p>Dear ${nextUser.full_name},</p>
-          <p>A ticket <b>${
-            ticket.ticket_id || ticket.id
-          }</b> has been escalated to you for action. Please review and resolve as soon as possible.</p>
-          <p>Details:<br>
-          Subject: ${ticket.subject}<br>
-          Category: ${ticket.category}<br>
-          <strong>Requester:</strong> ${getRequesterDisplayName(ticket)}<br>
-          </p>
-          <p>Please log in to the system for more details.</p>
-        `,
+        to: `rehema.said3@ttcl.co.tz`,
+        subject: emailSubject,
+        htmlBody: emailHtmlBody,
+        attachments: attachments,
       }).catch((e) =>
         console.error("Error sending escalation email:", e.message)
       );
@@ -970,6 +978,22 @@ const createTicket = async (req, res) => {
           });
         }
         
+        // If still not found, try finding by email
+        if (!assignedUser) {
+          const emailToSearch = `${trimmedUsername}@wcf.go.tz`;
+          console.log("🔍 STEP 1: Username not found, trying to find by email:", emailToSearch);
+          assignedUser = await User.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('email')),
+              Sequelize.fn('LOWER', emailToSearch)
+            ),
+            attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+          });
+          if (assignedUser) {
+            console.log("✅ STEP 1: Found user by email:", assignedUser.email);
+          }
+        }
+        
         if (assignedUser) {
           if (isSpecialSubSection) {
             console.log(`✅ STEP 1 SUCCESS: Found allocated user for Compliance Section:`, assignedUser.full_name);
@@ -982,14 +1006,14 @@ const createTicket = async (req, res) => {
           // This ensures allocated user takes priority over checklist user
         } else {
           // If allocated user not found in database, create the user
-          console.log("⚠️ STEP 1: Allocated user not found in database, creating new user with username:", trimmedUsername);
+          console.log("⚠️ STEP 1: Allocated user not found in database (by username or email), creating new user with username:", trimmedUsername);
           const nameParts = trimmedUsername
             .split(".")
             .map((part) => part.charAt(0).toUpperCase() + part.slice(1));
           const newUser = await User.create({
             username: trimmedUsername,
             full_name: nameParts.join(" "),
-            email: `${trimmedUsername}@ttcl.co.tz`,
+            email: `${trimmedUsername}@wcf.go.tz`,
             role: "attendee",
             unit_section: finalSection || responsible_unit_name,
             password: await bcrypt.hash("user12345", 10),
@@ -1483,6 +1507,53 @@ const createTicket = async (req, res) => {
       }
     } else {
       console.log(`⚠️ No supervisors found for section: ${newTicket.section}`);
+    }
+
+    // --- Additional Email to Supervisor for Inquiry Tickets ---
+    if (category === "Inquiry") {
+      // Find all supervisors (role = "supervisor")
+      const allSupervisors = await User.findAll({
+        where: { role: "supervisor" },
+        attributes: ["id", "full_name", "email"],
+      });
+
+      if (allSupervisors && allSupervisors.length > 0) {
+        const inquirySupervisorEmailSubject = `New Inquiry Ticket Created: ${finalSubject} (ID: ${newTicket.ticket_id})`;
+        
+        for (const supervisor of allSupervisors) {
+          if (supervisor.email) {
+            const supervisorBodyHtml = `<p>Dear ${supervisor.full_name},</p><p>A new Inquiry ticket has been created and assigned to ${assignedUser.full_name}.</p>`;
+            const supervisorDetailsHtml = `
+              <ul>
+                <li><strong>Ticket ID:</strong> ${newTicket.ticket_id}</li>
+                <li><strong>Subject:</strong> ${newTicket.subject}</li>
+                <li><strong>Category:</strong> Inquiry</li>
+                <li><strong>Description:</strong> ${newTicket.description}</li>
+                <li><strong>Requester:</strong> ${requesterFullName} (${ticketPhoneNumber})</li>
+                <li><strong>Assigned To:</strong> ${assignedUser.full_name} (${assignedUser.role})</li>
+                <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
+                <li><strong>Sub-section:</strong> ${newTicket.sub_section}</li>
+                <li><strong>Channel:</strong> ${newTicket.channel}</li>
+                <li><strong>Status:</strong> ${shouldClose ? "Closed" : "Open"}</li>
+              </ul>`;
+            const supervisorEmailHtmlBody = renderEmailCard(inquirySupervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
+            
+            // Get attachments for email
+            const attachments = getTicketAttachments(newTicket);
+            
+            // Send email in background to avoid blocking
+            sendEmailNonBlocking({
+              to: supervisor.email,
+              subject: inquirySupervisorEmailSubject,
+              htmlBody: supervisorEmailHtmlBody,
+              attachments: attachments,
+            });
+            console.log(`✅ Inquiry email queued for supervisor ${supervisor.full_name} (${supervisor.email}) for ticket ${newTicket.ticket_id}`);
+          }
+        }
+      } else {
+        console.log(`⚠️ No supervisors found for Inquiry ticket ${newTicket.ticket_id}`);
+      }
     }
 
     // --- Email to Creator (Agent) when ticket is created ---
@@ -6384,6 +6455,13 @@ const forwardToDirectorGeneral = async (req, res) => {
         .json({ message: "Ticket ID and user ID are required" });
     }
 
+    // Handle attachment if uploaded
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`; // Save relative path
+      console.log("✅ Attachment uploaded for forward-to-dg:", attachmentPath);
+    }
+
     const ticket = await Ticket.findOne({
       where: { id: ticketId },
       include: [
@@ -6502,6 +6580,7 @@ const forwardToDirectorGeneral = async (req, res) => {
       assigned_to_role: directorGeneral.role,
       action: "Forwarded",
       reason: assignmentReason,
+      attachment_path: attachmentPath, // Save attachment path to assignment record
       created_at: new Date()
     });
 
@@ -7941,7 +8020,7 @@ const updateReversedTicketDetails = async (req, res) => {
       sender_id: userId,
       recipient_id: ticket.assigned_to_id,
       message: notificationMessage,
-      channel: "In-System",
+      channel: "Agent",
       status: "unread",
       category: ticket.category,
     });
