@@ -22,10 +22,10 @@ ami.on('error', (err) => {
 
 // ✅ Connect to MySQL (CEL + queue_log)
 const db = mysql.createPool({
-  host: '10.52.0.19',
+  host: '192.168.21.70',
   user: 'asterisk',
-  password: 'Wcf@1234',
-  database: 'asterisk'
+  password: "Wcf@1234",
+  database: "asterisk",
 });
 
 // ✅ Call tracking object
