@@ -66,7 +66,9 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: true,
       // Explicitly prevent Sequelize from looking for report_to_id foreign key
-      field: 'report_to', // Explicitly map to the database column name
+      field: "report_to", // Explicitly map to the database column name
+      // Explicitly tell Sequelize this is NOT a foreign key
+      references: undefined,
     },
     designation: {
       type: DataTypes.STRING(100),
@@ -75,13 +77,15 @@ const User = sequelize.define(
     unit_section: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      comment: "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')"
+      comment:
+        "The specific unit/directorate this user belongs to (e.g., 'directorate of operations', 'ict unit')",
     },
     sub_section: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      comment: "The sub-section (function) within a directorate (e.g., 'Pension Payment', 'Workplace Risk Assessment Matters')"
-    }
+      comment:
+        "The sub-section (function) within a directorate (e.g., 'Pension Payment', 'Workplace Risk Assessment Matters')",
+    },
   },
   {
     timestamps: true,
@@ -92,7 +96,6 @@ const User = sequelize.define(
     // Explicitly tell Sequelize not to auto-detect associations
     underscored: false,
   }
-  
 );
 
 // Associations
