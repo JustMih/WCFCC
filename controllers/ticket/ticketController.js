@@ -1270,7 +1270,9 @@ const createTicket = async (req, res) => {
     } else {
       // For regular tickets (Employee), use the original phoneNumber
       // ticketPhoneNumber is already set to phoneNumber || null above
-      requesterFullName = `${firstName} ${lastName || ""}`;
+      const employeeName = `${firstName} ${lastName || ""}`.trim();
+      // Use employee name if available, otherwise fall back to representative_name (not institution name)
+      requesterFullName = employeeName || representative_name || requesterName || "-";
     }
     
     console.log("🔍 PHONE NUMBER PROCESSING DEBUG:");
@@ -1658,7 +1660,7 @@ const createTicket = async (req, res) => {
 
       if (creatorUser) {
         // Create in-system notification for creator
-        const creatorNotificationMsg = `Your ticket ${newTicket.ticket_id} has been closed and resolved. ${resolution_details ? `Resolution: ${resolution_details}` : ''}`;
+        const creatorNotificationMsg = `Your ticket ${newTicket.ticket_id} has been closed and resolved.`;
         
         try {
           await Notification.create({
@@ -1717,7 +1719,7 @@ const createTicket = async (req, res) => {
             const resolutionText = resolution_details ? 
               (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
               '';
-            const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved. ${resolutionText ? `Resolution: ${resolutionText}` : ''}`;
+            const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.}`;
             
             // Send SMS asynchronously to avoid blocking the response
             sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -3799,7 +3801,7 @@ const closeTicket = async (req, res) => {
     if (ticket.creator) {
       // Create in-system notification for creator
       const categoryText = ticket.category ? ` (${ticket.category})` : '';
-      const creatorNotificationMsg = `Your ticket ${ticket.ticket_id}${categoryText} has been closed and resolved. ${resolution_details ? `Resolution: ${resolution_details}` : ''}`;
+      const creatorNotificationMsg = `Your ticket ${ticket.ticket_id}${categoryText} has been closed and resolved.`;
       
       try {
         await Notification.create({
@@ -3880,7 +3882,7 @@ const closeTicket = async (req, res) => {
             (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
             '';
           const categoryText = ticket.category ? ` (${ticket.category})` : '';
-          const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved. ${resolutionText ? `Resolution: ${resolutionText}` : ''}`;
+          const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved.`;
           
           // Send SMS asynchronously to avoid blocking the response
           sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -6439,6 +6441,8 @@ function getRequesterDisplayName(ticket) {
     .join(" ")
     .trim();
   if (name) return name;
+  // Use representative_name instead of institution when name is not available
+  if (ticket.representative_name) return ticket.representative_name;
   if (ticket.institution) return ticket.institution;
   return "-";
 }
