@@ -761,6 +761,14 @@ const createTicket = async (req, res) => {
       dependents,
     } = req.body;
 
+    // Debug: Log raw representative_name from request
+    console.log("🔍 RAW DATA FROM REQUEST BODY:");
+    console.log("- rawRepresentativeName:", rawRepresentativeName);
+    console.log("- requester:", requester);
+    console.log("- rawEmployerName:", rawEmployerName);
+    console.log("- rawRequesterName:", rawRequesterName);
+    console.log("- req.body.representative_name:", req.body.representative_name);
+
     // Capitalize name fields
     const firstName = capitalizeWords(rawFirstName);
     const middleName = capitalizeWords(rawMiddleName);
@@ -769,6 +777,11 @@ const createTicket = async (req, res) => {
     const requesterName = capitalizeWords(rawRequesterName);
     const employerName = capitalizeWords(rawEmployerName);
     const representative_name = capitalizeWords(rawRepresentativeName);
+    
+    // Debug: Log processed representative_name
+    console.log("🔍 PROCESSED DATA:");
+    console.log("- representative_name (processed):", representative_name);
+    console.log("- employerName (processed):", employerName);
 
     // Initialize finalSection before any use
     let finalSection = inputSection;
@@ -1262,17 +1275,28 @@ const createTicket = async (req, res) => {
       }
       ticketEmployerId = employer.id;
       ticketPhoneNumber = employerPhone || phoneNumber || null; // Use null instead of "N/A"
-      ticketInstitution = employerName;
-      requesterFullName = employerName;
-    } else if (requester === "Representative") {
-      ticketPhoneNumber = requesterPhoneNumber || phoneNumber || null; // Use null instead of "N/A"
-      requesterFullName = requesterName;
-    } else {
-      // For regular tickets (Employee), use the original phoneNumber
-      // ticketPhoneNumber is already set to phoneNumber || null above
+      // For Employer, use employerName as institution (company/employer name)
+      // Fallback to institution field if employerName is not provided
+      ticketInstitution = employerName && employerName.trim() ? employerName.trim() : (institution && institution.trim() ? institution.trim() : "");
+    }
+    
+    // Determine requesterFullName based on requester type
+    if (requester === "Employee") {
+      // For Employee, use first_name + last_name
       const employeeName = `${firstName} ${lastName || ""}`.trim();
-      // Use employee name if available, otherwise fall back to representative_name (not institution name)
-      requesterFullName = employeeName || representative_name || requesterName || "-";
+      // If employee name is not available, fall back to representative_name
+      const trimmedRepName = representative_name ? representative_name.trim() : "";
+      requesterFullName = employeeName || trimmedRepName || "Customer";
+    } else {
+      // For all non-Employee requesters (Employer, Representative, Pensioners, Stakeholders, Spouse, Parent, Child, Sibling, etc.)
+      // Use representative_name directly (it's always submitted)
+      const trimmedRepName = representative_name ? representative_name.trim() : "";
+      requesterFullName = trimmedRepName || "Customer";
+      
+      // Update phone number for Representative
+      if (requester === "Representative") {
+        ticketPhoneNumber = requesterPhoneNumber || phoneNumber || null;
+      }
     }
     
     console.log("🔍 PHONE NUMBER PROCESSING DEBUG:");
@@ -1351,6 +1375,13 @@ const createTicket = async (req, res) => {
     console.log("✅ TICKET CREATED SUCCESSFULLY:");
     console.log("=====================================");
     console.log("Ticket ID:", newTicket.id);
+    console.log("Ticket ID (display):", newTicket.ticket_id);
+    console.log("Requester:", newTicket.requester);
+    console.log("First Name:", newTicket.first_name);
+    console.log("Last Name:", newTicket.last_name);
+    console.log("Representative Name:", newTicket.representative_name);
+    console.log("Institution:", newTicket.institution);
+    console.log("RequesterFullName (for SMS):", requesterFullName);
     console.log("Saved Dependents:", newTicket.dependents);
     console.log("Dependents Type:", typeof newTicket.dependents);
     console.log(
@@ -1421,7 +1452,18 @@ const createTicket = async (req, res) => {
       (requester === "Employee" || requester === "Employer" || requester === "Pensioners" || requester === "Stakeholders" || requester === "Representative" || requester === "Spouse" || requester === "Parent" || requester === "Child" || requester === "Sibling") &&
       isValidTzPhone(smsRecipient)
     ) {
-      const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+      // Ensure requesterFullName is never empty
+      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
+      const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+      
+      console.log(`🔍 Name for SMS (creation) ${newTicket.ticket_id}:`, {
+        requester_type: requester,
+        requesterFullName: requesterFullName,
+        finalName: finalName,
+        representative_name: representative_name,
+        firstName: firstName,
+        lastName: lastName
+      });
       
       // Send SMS asynchronously to avoid blocking the response
       sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -1719,7 +1761,37 @@ const createTicket = async (req, res) => {
             const resolutionText = resolution_details ? 
               (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
               '';
-            const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.}`;
+            // Re-extract name using data from newTicket object (which has the saved data) or variables
+            let finalName = "Customer";
+            
+            // Use data from newTicket object (saved in database) as primary source
+            const ticketRequester = newTicket.requester || requester;
+            const ticketFirstName = newTicket.first_name || firstName;
+            const ticketLastName = newTicket.last_name || lastName;
+            const ticketRepName = newTicket.representative_name || representative_name;
+            
+            if (ticketRequester === "Employee") {
+              const employeeName = `${ticketFirstName} ${ticketLastName || ""}`.trim();
+              const trimmedRepName = ticketRepName ? ticketRepName.trim() : "";
+              finalName = employeeName || trimmedRepName || "Customer";
+            } else {
+              // For all non-Employee requesters, use representative_name directly (it's always submitted)
+              const trimmedRepName = ticketRepName ? ticketRepName.trim() : "";
+              finalName = trimmedRepName || "Customer";
+            }
+            
+            const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.}`;
+            
+            console.log(`🔍 Name for SMS (closed at creation) ${newTicket.ticket_id}:`, {
+              requester_type: ticketRequester,
+              newTicket_requester: newTicket.requester,
+              newTicket_first_name: newTicket.first_name,
+              newTicket_last_name: newTicket.last_name,
+              newTicket_representative_name: newTicket.representative_name,
+              variable_representative_name: representative_name,
+              original_requesterFullName: requesterFullName,
+              finalName: finalName
+            });
             
             // Send SMS asynchronously to avoid blocking the response
             sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -3663,6 +3735,12 @@ const closeTicket = async (req, res) => {
     console.log("  - Status:", ticket.status);
     console.log("  - Category:", ticket.category);
     console.log("  - Creator:", ticket.creator ? ticket.creator.full_name : "N/A");
+    console.log("  - Requester:", ticket.requester);
+    console.log("  - First Name:", ticket.first_name);
+    console.log("  - Last Name:", ticket.last_name);
+    console.log("  - Representative Name:", ticket.representative_name);
+    console.log("  - Institution:", ticket.institution);
+    console.log("  - Full Ticket Data:", JSON.stringify(ticket.toJSON(), null, 2));
 
     // Handle attachment if uploaded
     let attachmentPath = null;
@@ -3875,6 +3953,16 @@ const closeTicket = async (req, res) => {
         // Get requester name for SMS
         const requesterFullName = getRequesterDisplayName(ticket);
         
+        // Debug log for name extraction
+        console.log(`🔍 Name extraction for closing ticket ${ticket.ticket_id}:`, {
+          requester_type: ticket.requester,
+          first_name: ticket.first_name,
+          last_name: ticket.last_name,
+          representative_name: ticket.representative_name,
+          institution: ticket.institution,
+          extracted_name: requesterFullName
+        });
+        
         // Only send SMS if phone is valid (same condition as create ticket)
         if (isValidTzPhone(smsRecipient)) {
           // Truncate resolution details if too long for SMS (SMS limit is usually 160 characters)
@@ -3882,7 +3970,9 @@ const closeTicket = async (req, res) => {
             (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
             '';
           const categoryText = ticket.category ? ` (${ticket.category})` : '';
-          const smsMessage = `Dear ${requesterFullName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved.`;
+          // Ensure requesterFullName is never empty
+          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
+          const smsMessage = `Dear ${finalName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved.`;
           
           // Send SMS asynchronously to avoid blocking the response
           sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -6433,18 +6523,48 @@ const getEscalatedFromTickets = async (req, res) => {
 
 // Helper to get requester display name
 function getRequesterDisplayName(ticket) {
-  if (ticket.requester === "Representative" && ticket.representative_name) {
-    return ticket.representative_name;
+  // Safety check
+  if (!ticket) {
+    console.error("⚠️ getRequesterDisplayName: ticket is null/undefined");
+    return "Customer";
   }
-  const name = [ticket.first_name, ticket.last_name, ticket.middle_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  if (name) return name;
-  // Use representative_name instead of institution when name is not available
-  if (ticket.representative_name) return ticket.representative_name;
-  if (ticket.institution) return ticket.institution;
-  return "-";
+  
+  try {
+    // For Employee, use first_name + last_name
+    if (ticket.requester === "Employee") {
+      const name = [ticket.first_name, ticket.last_name, ticket.middle_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      if (name) return name;
+      // If employee name is not available, fall back to representative_name
+      if (ticket.representative_name && typeof ticket.representative_name === "string") {
+        const repName = ticket.representative_name.trim();
+        if (repName) return repName;
+      }
+      if (ticket.institution && typeof ticket.institution === "string") {
+        const instName = ticket.institution.trim();
+        if (instName) return instName;
+      }
+      return "Customer";
+    }
+    
+    // For all non-Employee requesters (Employer, Representative, Pensioners, Stakeholders, Spouse, Parent, Child, Sibling, etc.)
+    // Use representative_name directly (it's always submitted)
+    if (ticket.representative_name && typeof ticket.representative_name === "string") {
+      const repName = ticket.representative_name.trim();
+      if (repName) {
+        return repName;
+      }
+    }
+    
+    // If representative_name is not available (shouldn't happen), use fallback
+    console.warn(`⚠️ getRequesterDisplayName: representative_name not found for ticket ${ticket.id || ticket.ticket_id || "unknown"}, requester: ${ticket.requester}`);
+    return "Customer";
+  } catch (error) {
+    console.error("❌ Error in getRequesterDisplayName:", error);
+    return "Customer";
+  }
 }
 
 // Reviewer forwards major complaint to Director General
