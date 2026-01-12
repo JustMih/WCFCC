@@ -1780,7 +1780,7 @@ const createTicket = async (req, res) => {
               finalName = trimmedRepName || "Customer";
             }
             
-            const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.}`;
+            const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.`;
             
             console.log(`🔍 Name for SMS (closed at creation) ${newTicket.ticket_id}:`, {
               requester_type: ticketRequester,
