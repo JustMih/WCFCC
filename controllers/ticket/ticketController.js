@@ -3783,6 +3783,10 @@ const closeTicket = async (req, res) => {
       console.log("⚠️ WARNING: userId is null or undefined");
     }
 
+    // Check if this is a Minor or Major complaint
+    const isMinorOrMajorComplaint = ticket.category === "Complaint" && 
+                                    (ticket.complaint_type === "Minor" || ticket.complaint_type === "Major");
+    
     // Notify all reviewers and supervisors
     console.log("🔵 Preparing notifications for reviewers and supervisors...");
     try {
@@ -3812,15 +3816,35 @@ const closeTicket = async (req, res) => {
     } (${attended_by_role || "Unknown Role"}).`;
       
       console.log("🔵 Calling notifyUsersByRole...");
-    await notifyUsersByRole(
-      ["reviewer", "supervisor"],
-      notifySubject,
-      notifyHtml,
-      ticketId,
-      userId,
-      notifyMsg
-    );
-      console.log("✅ Notifications sent to reviewers and supervisors");
+      
+      // Send notifications to supervisors always
+      await notifyUsersByRole(
+        ["supervisor"],
+        notifySubject,
+        notifyHtml,
+        ticketId,
+        userId,
+        notifyMsg
+      );
+
+      // Send notifications to reviewers ONLY if it's a Minor or Major (including Inquiry rated Minor/Major)
+      const isMinorOrMajor = (ticket.complaint_type === "Minor" || ticket.complaint_type === "Major");
+      if (isMinorOrMajor) {
+        console.log(`🔵 Ticket is ${ticket.complaint_type} (category: ${ticket.category}) - sending email to reviewers`);
+        await notifyUsersByRole(
+          ["reviewer"],
+          notifySubject,
+          notifyHtml,
+          ticketId,
+          userId,
+          notifyMsg
+        );
+        console.log("✅ Notifications sent to reviewers for Minor/Major complaint");
+      } else {
+        console.log(`🔵 Ticket is not Minor/Major complaint (category: ${ticket.category}, type: ${ticket.complaint_type}) - skipping reviewer email`);
+      }
+      
+      console.log("✅ Notifications sent to supervisors");
     } catch (notifyError) {
       console.error("❌ ERROR in notifyUsersByRole:", notifyError);
       console.error("❌ Error stack:", notifyError.stack);
@@ -4271,14 +4295,33 @@ const closeReviewerTicket = async (req, res) => {
     
     const notifyHtml2 = renderEmailCard(notifySubject2, notifyBody2, notifyDetails2);
     const notifyMsg2 = `Ticket ${ticket.ticket_id} has been closed by ${reviewer.full_name} (Reviewer).`;
+    
+    // Send notifications to supervisors always
     await notifyUsersByRole(
-      ["reviewer", "supervisor"],
+      ["supervisor"],
       notifySubject2,
       notifyHtml2,
       ticketId,
       userId,
       notifyMsg2
     );
+    
+    // Send notifications to reviewers ONLY if it's a Minor or Major (including Inquiry rated Minor/Major)
+    const isMinorOrMajor = (ticket.complaint_type === "Minor" || ticket.complaint_type === "Major");
+    if (isMinorOrMajor) {
+      console.log(`🔵 Ticket is ${ticket.complaint_type} (category: ${ticket.category}) - sending email to reviewers`);
+      await notifyUsersByRole(
+        ["reviewer"],
+        notifySubject2,
+        notifyHtml2,
+        ticketId,
+        userId,
+        notifyMsg2
+      );
+      console.log("✅ Notifications sent to reviewers for Minor/Major complaint");
+    } else {
+      console.log(`🔵 Ticket is not Minor/Major complaint (category: ${ticket.category}, type: ${ticket.complaint_type}) - skipping reviewer email`);
+    }
 
     // If there was a focal person or other assignee involved, notify them too
     if (ticket.assigned_to && ticket.assigned_to !== userId) {
