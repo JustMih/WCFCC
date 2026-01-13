@@ -5810,38 +5810,49 @@ const reverseTicket = async (req, res) => {
       targetUserId = prevAssignment.assigned_to_id;
       targetUserRole = prevAssignment.assigned_to_role;
       
-      // For Minor complaints from head of unit reversed by attendee, skip reviewer and go to head of unit
-      if (isMinorComplaint && isFromHeadOfUnit && isAttendeeReversing && targetUserRole === "reviewer") {
-        // Find the head of unit assignment in history
-        const headOfUnitAssignment = assignments.find(assignment => 
-          assignment.assigned_to_role === "head-of-unit" || 
-          assignment.assigned_by_role === "head-of-unit"
-        );
+      // Check if ticket was directly forwarded to head-of-unit (currently or in history)
+      const isCurrentlyAssignedToHeadOfUnit = ticket.assigned_to_role === "head-of-unit";
+      const headOfUnitAssignment = assignments.find(assignment => 
+        assignment.assigned_to_role === "head-of-unit"
+      );
+      const wasForwardedToHeadOfUnit = isCurrentlyAssignedToHeadOfUnit || !!headOfUnitAssignment;
+      
+      // For tickets forwarded to head of unit reversed by attendee/agent, skip reviewer and go back to head of unit
+      // This applies to ALL tickets (not just Minor complaints) that were forwarded to head-of-unit
+      if (wasForwardedToHeadOfUnit && (isAttendeeReversing || isAgentReversing) && targetUserRole === "reviewer") {
+        console.log(`DEBUG: Ticket forwarded to head-of-unit - attendee/agent reversing, skipping reviewer and returning to head-of-unit`);
         
-        if (headOfUnitAssignment) {
-          // If head of unit was assigned to, use that
-          if (headOfUnitAssignment.assigned_to_role === "head-of-unit") {
-            prevAssignment = headOfUnitAssignment;
-            targetUserId = headOfUnitAssignment.assigned_to_id;
-            targetUserRole = headOfUnitAssignment.assigned_to_role;
-            console.log(`DEBUG: Minor complaint from head of unit - skipping reviewer, returning to head of unit: ${targetUserId}`);
-          } else if (headOfUnitAssignment.assigned_by_role === "head-of-unit") {
-            // If head of unit forwarded it, find the head of unit user
-            const headOfUnitUser = await User.findOne({
-              where: { 
-                role: "head-of-unit",
-                unit_section: ticket.responsible_unit_name
-              }
-            });
-            if (headOfUnitUser) {
-              prevAssignment = {
-                assigned_to_id: headOfUnitUser.id,
-                assigned_to_role: "head-of-unit"
-              };
-              targetUserId = headOfUnitUser.id;
-              targetUserRole = "head-of-unit";
-              console.log(`DEBUG: Minor complaint from head of unit - skipping reviewer, returning to head of unit: ${targetUserId}`);
+        // If head of unit was assigned to in history, use that assignment
+        if (headOfUnitAssignment && headOfUnitAssignment.assigned_to_role === "head-of-unit") {
+          prevAssignment = headOfUnitAssignment;
+          targetUserId = headOfUnitAssignment.assigned_to_id;
+          targetUserRole = headOfUnitAssignment.assigned_to_role;
+          console.log(`DEBUG: Found head-of-unit assignment in history - returning to head of unit: ${targetUserId}`);
+        } else if (isCurrentlyAssignedToHeadOfUnit && ticket.assigned_to_id) {
+          // If currently assigned to head-of-unit, use current assignment
+          prevAssignment = {
+            assigned_to_id: ticket.assigned_to_id,
+            assigned_to_role: "head-of-unit"
+          };
+          targetUserId = ticket.assigned_to_id;
+          targetUserRole = "head-of-unit";
+          console.log(`DEBUG: Currently assigned to head-of-unit - returning to current head of unit: ${targetUserId}`);
+        } else {
+          // If head of unit forwarded it but not found in assignments, find the head of unit user by responsible_unit_name
+          const headOfUnitUser = await User.findOne({
+            where: { 
+              role: "head-of-unit",
+              unit_section: ticket.responsible_unit_name
             }
+          });
+          if (headOfUnitUser) {
+            prevAssignment = {
+              assigned_to_id: headOfUnitUser.id,
+              assigned_to_role: "head-of-unit"
+            };
+            targetUserId = headOfUnitUser.id;
+            targetUserRole = "head-of-unit";
+            console.log(`DEBUG: Found head-of-unit by responsible_unit_name - returning to head of unit: ${targetUserId}`);
           }
         }
       }
