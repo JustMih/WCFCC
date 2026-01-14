@@ -163,6 +163,9 @@ const getPublicDashboardData = async (req, res) => {
     const totalCounts = await sequelize.query(
       "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
     );
+    const monthlyCounts = await sequelize.query(
+      "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
+    );
     const dailyCounts = await sequelize.query(
       "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
     );
@@ -235,6 +238,8 @@ const getPublicDashboardData = async (req, res) => {
         lost: lostCallsCountToday, // Total lost calls today (from CDR)
       },
       callStats: {
+        totalCounts: totalCounts[0] || [],
+        monthlyCounts: monthlyCounts[0] || [],
         dailyCounts: dailyCounts[0] || [],
         totalRows: totalRows[0]?.[0]?.total || 0,
       },
@@ -398,6 +403,12 @@ const startPeriodicUpdates = () => {
       const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
 
       // Get call stats
+      const totalCounts = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
+      );
+      const monthlyCounts = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
+      );
       const dailyCounts = await sequelize.query(
         "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
       );
@@ -421,6 +432,8 @@ const startPeriodicUpdates = () => {
           lost: lostCallsCountToday, // Total lost calls today
         },
         callStats: {
+          totalCounts: totalCounts[0] || [],
+          monthlyCounts: monthlyCounts[0] || [],
           dailyCounts: dailyCounts[0] || [],
         },
         queueStatus: queueStatus.map((q) => q.toJSON()),
