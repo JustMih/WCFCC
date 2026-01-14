@@ -6,14 +6,17 @@ const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator"); // For input validation
 const { Sequelize } = require("sequelize");
-const { sendEmailNonBlocking, renderEmailCard } = require("../../services/emailService");
+const {
+  sendEmailNonBlocking,
+  renderEmailCard,
+} = require("../../services/emailService");
 const sequelize = require("../../config/mysql_connection");
 
 const createUser = async (req, res) => {
   try {
     console.log("🚀 CREATE USER ENDPOINT CALLED!");
     console.log("📥 Request body:", JSON.stringify(req.body, null, 2));
-    
+
     const {
       full_name,
       report_to,
@@ -32,16 +35,19 @@ const createUser = async (req, res) => {
     console.log("- email:", email);
     console.log("- role:", role);
     console.log("- extension (original):", extension);
-    console.log("- extension (converted):", extension ? parseInt(extension) : null);
+    console.log(
+      "- extension (converted):",
+      extension ? parseInt(extension) : null
+    );
     console.log("- isActive:", isActive);
 
     // Validate required fields
     if (!full_name || !email || !password || !role) {
       console.log("❌ Missing required fields");
-      return res.status(400).json({ 
-        message: "Missing required fields", 
+      return res.status(400).json({
+        message: "Missing required fields",
         required: ["full_name", "email", "password", "role"],
-        received: { full_name, email, password: password ? "***" : null, role }
+        received: { full_name, email, password: password ? "***" : null, role },
       });
     }
 
@@ -50,15 +56,18 @@ const createUser = async (req, res) => {
     if (role === "focal-person") {
       const unitSectionLower = (unit_section || "").toLowerCase();
       const isDirectorate = unitSectionLower.includes("directorate");
-      
+
       // Only require sub-section if it's a directorate
       if (isDirectorate && (!unit_section || unit_section.trim() === "")) {
-        console.log("❌ Focal person for directorate missing unit_section (sub-section)");
-        return res.status(400).json({ 
-          message: "Focal person for directorate must have a sub-section (unit_section)", 
+        console.log(
+          "❌ Focal person for directorate missing unit_section (sub-section)"
+        );
+        return res.status(400).json({
+          message:
+            "Focal person for directorate must have a sub-section (unit_section)",
           error: "Missing required field for focal-person role in directorate",
           field: "unit_section",
-          role: role
+          role: role,
         });
       }
     }
@@ -78,7 +87,9 @@ const createUser = async (req, res) => {
       ].includes(role)
     ) {
       console.log("❌ Invalid role:", role);
-      return res.status(400).json({ message: "Invalid role", receivedRole: role });
+      return res
+        .status(400)
+        .json({ message: "Invalid role", receivedRole: role });
     }
 
     // Generate username from full_name
@@ -109,101 +120,124 @@ const createUser = async (req, res) => {
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       console.log("❌ User with email already exists:", email);
-      return res.status(400).json({ 
-        message: `Email ${email} is already registered. Please use a different email address.`, 
+      return res.status(400).json({
+        message: `Email ${email} is already registered. Please use a different email address.`,
         error: "Email already exists",
         field: "email",
         value: email,
-        existingUser: existingUser.full_name
+        existingUser: existingUser.full_name,
       });
     }
 
     // Check if user with same extension already exists (if extension provided)
     if (userData.extension) {
       console.log("🔍 Checking for existing extension:", userData.extension);
-      
+
       // Check in Users table
-      const existingExtension = await User.findOne({ where: { extension: userData.extension } });
+      const existingExtension = await User.findOne({
+        where: { extension: userData.extension },
+      });
       if (existingExtension) {
-        console.log("❌ User with extension already exists:", userData.extension);
-        return res.status(400).json({ 
-          message: `Extension ${userData.extension} is already assigned to another user. Please choose a different extension.`, 
+        console.log(
+          "❌ User with extension already exists:",
+          userData.extension
+        );
+        return res.status(400).json({
+          message: `Extension ${userData.extension} is already assigned to another user. Please choose a different extension.`,
           error: "Extension already exists",
           field: "extension",
           value: userData.extension,
-          existingUser: existingExtension.full_name
+          existingUser: existingExtension.full_name,
         });
       }
-      
-             // Check in pjsip_endpoints table
-       try {
-         const pjsipEndpoint = await sequelize.query(
-           "SELECT id FROM pjsip_endpoints WHERE id = :extension",
-           {
-             replacements: { extension: userData.extension },
-             type: Sequelize.QueryTypes.SELECT,
-           }
-         );
-         
-         if (pjsipEndpoint && pjsipEndpoint.length > 0) {
-           console.log("❌ Extension already exists in pjsip_endpoints:", userData.extension);
-           return res.status(400).json({ 
-             message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`, 
-             error: "Extension already exists in pjsip_endpoints",
-             field: "extension",
-             value: userData.extension
-           });
-         }
-       } catch (pjsipError) {
-         console.log("ℹ️ Could not check pjsip_endpoints table:", pjsipError.message);
-       }
-       
-       // Check in pjsip_aors table
-       try {
-         const pjsipAors = await sequelize.query(
-           "SELECT id FROM pjsip_aors WHERE id = :extension",
-           {
-             replacements: { extension: userData.extension },
-             type: Sequelize.QueryTypes.SELECT,
-           }
-         );
-         
-         if (pjsipAors && pjsipAors.length > 0) {
-           console.log("❌ Extension already exists in pjsip_aors:", userData.extension);
-           return res.status(400).json({ 
-             message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`, 
-             error: "Extension already exists in pjsip_aors",
-             field: "extension",
-             value: userData.extension
-           });
-         }
-       } catch (pjsipAorsError) {
-         console.log("ℹ️ Could not check pjsip_aors table:", pjsipAorsError.message);
-       }
 
-       // Check in pjsip_auths table
-       try {
-         const pjsipAuths = await sequelize.query(
-           "SELECT id FROM pjsip_auths WHERE id = :extension",
-           {
-             replacements: { extension: userData.extension },
-             type: Sequelize.QueryTypes.SELECT,
-           }
-         );
-         
-         if (pjsipAuths && pjsipAuths.length > 0) {
-           console.log("❌ Extension already exists in pjsip_auths:", userData.extension);
-           return res.status(400).json({ 
-             message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`, 
-             error: "Extension already exists in pjsip_auths",
-             field: "extension",
-             value: userData.extension
-           });
-         }
-       } catch (pjsipAuthsError) {
-         console.log("ℹ️ Could not check pjsip_auths table:", pjsipAuthsError.message);
-       }
-      
+      // Check in pjsip_endpoints table
+      try {
+        const pjsipEndpoint = await sequelize.query(
+          "SELECT id FROM pjsip_endpoints WHERE id = :extension",
+          {
+            replacements: { extension: userData.extension },
+            type: Sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        if (pjsipEndpoint && pjsipEndpoint.length > 0) {
+          console.log(
+            "❌ Extension already exists in pjsip_endpoints:",
+            userData.extension
+          );
+          return res.status(400).json({
+            message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`,
+            error: "Extension already exists in pjsip_endpoints",
+            field: "extension",
+            value: userData.extension,
+          });
+        }
+      } catch (pjsipError) {
+        console.log(
+          "ℹ️ Could not check pjsip_endpoints table:",
+          pjsipError.message
+        );
+      }
+
+      // Check in pjsip_aors table
+      try {
+        const pjsipAors = await sequelize.query(
+          "SELECT id FROM pjsip_aors WHERE id = :extension",
+          {
+            replacements: { extension: userData.extension },
+            type: Sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        if (pjsipAors && pjsipAors.length > 0) {
+          console.log(
+            "❌ Extension already exists in pjsip_aors:",
+            userData.extension
+          );
+          return res.status(400).json({
+            message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`,
+            error: "Extension already exists in pjsip_aors",
+            field: "extension",
+            value: userData.extension,
+          });
+        }
+      } catch (pjsipAorsError) {
+        console.log(
+          "ℹ️ Could not check pjsip_aors table:",
+          pjsipAorsError.message
+        );
+      }
+
+      // Check in pjsip_auths table
+      try {
+        const pjsipAuths = await sequelize.query(
+          "SELECT id FROM pjsip_auths WHERE id = :extension",
+          {
+            replacements: { extension: userData.extension },
+            type: Sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        if (pjsipAuths && pjsipAuths.length > 0) {
+          console.log(
+            "❌ Extension already exists in pjsip_auths:",
+            userData.extension
+          );
+          return res.status(400).json({
+            message: `Extension ${userData.extension} is already configured in the system. Please choose a different extension.`,
+            error: "Extension already exists in pjsip_auths",
+            field: "extension",
+            value: userData.extension,
+          });
+        }
+      } catch (pjsipAuthsError) {
+        console.log(
+          "ℹ️ Could not check pjsip_auths table:",
+          pjsipAuthsError.message
+        );
+      }
+
       console.log("✅ Extension is available:", userData.extension);
     }
 
@@ -237,83 +271,94 @@ const createUser = async (req, res) => {
     console.error("Error name:", error.name);
     console.error("Error errors:", error.errors);
     console.error("Full error stack:", error.stack);
-    
+
     // Check for specific validation errors
-    if (error.name === 'SequelizeValidationError') {
+    if (error.name === "SequelizeValidationError") {
       console.error("🔍 Validation errors found:");
       error.errors.forEach((err, index) => {
-        console.error(`  ${index + 1}. Field: ${err.path}, Message: ${err.message}, Value: ${err.value}`);
+        console.error(
+          `  ${index + 1}. Field: ${err.path}, Message: ${
+            err.message
+          }, Value: ${err.value}`
+        );
       });
-      
+
       // Create user-friendly validation messages
-      const validationMessages = error.errors.map(err => {
+      const validationMessages = error.errors.map((err) => {
         let userMessage = err.message;
-        
+
         // Customize messages for better UX
-        if (err.path === 'email' && err.message.includes('isEmail')) {
-          userMessage = 'Please enter a valid email address.';
-        } else if (err.path === 'role' && err.message.includes('ENUM')) {
-          userMessage = 'Please select a valid role from the dropdown.';
-        } else if (err.path === 'extension' && err.message.includes('INTEGER')) {
-          userMessage = 'Extension must be a number.';
+        if (err.path === "email" && err.message.includes("isEmail")) {
+          userMessage = "Please enter a valid email address.";
+        } else if (err.path === "role" && err.message.includes("ENUM")) {
+          userMessage = "Please select a valid role from the dropdown.";
+        } else if (
+          err.path === "extension" &&
+          err.message.includes("INTEGER")
+        ) {
+          userMessage = "Extension must be a number.";
         }
-        
+
         return {
           field: err.path,
           message: userMessage,
-          value: err.value
+          value: err.value,
         };
       });
-      
-      return res.status(400).json({ 
-        message: "Please fix the following errors:", 
+
+      return res.status(400).json({
+        message: "Please fix the following errors:",
         error: "Validation error",
-        validationErrors: validationMessages
+        validationErrors: validationMessages,
       });
     }
-    
+
     // Check for unique constraint violations
-    if (error.name === 'SequelizeUniqueConstraintError') {
+    if (error.name === "SequelizeUniqueConstraintError") {
       console.error("🔍 Unique constraint violation:");
       error.errors.forEach((err, index) => {
-        console.error(`  ${index + 1}. Field: ${err.path}, Message: ${err.message}, Value: ${err.value}`);
+        console.error(
+          `  ${index + 1}. Field: ${err.path}, Message: ${
+            err.message
+          }, Value: ${err.value}`
+        );
       });
-      
+
       // Create user-friendly constraint messages
-      const constraintMessages = error.errors.map(err => {
+      const constraintMessages = error.errors.map((err) => {
         let userMessage = err.message;
-        
+
         // Customize messages for better UX
-        if (err.path === 'email') {
+        if (err.path === "email") {
           userMessage = `Email ${err.value} is already registered. Please use a different email address.`;
-        } else if (err.path === 'extension') {
+        } else if (err.path === "extension") {
           userMessage = `Extension ${err.value} is already assigned to another user. Please choose a different extension.`;
-        } else if (err.path === 'username') {
+        } else if (err.path === "username") {
           userMessage = `Username ${err.value} is already taken. Please choose a different username.`;
         }
-        
+
         return {
           field: err.path,
           message: userMessage,
-          value: err.value
+          value: err.value,
         };
       });
-      
-      return res.status(400).json({ 
-        message: "Duplicate entry found", 
+
+      return res.status(400).json({
+        message: "Duplicate entry found",
         error: "Unique constraint violation",
-        constraintErrors: constraintMessages
+        constraintErrors: constraintMessages,
       });
     }
-    
-    res.status(500).json({ 
-      message: "Server error", 
+
+    res.status(500).json({
+      message: "Server error",
       error: error.message,
       details: {
         code: error.code,
         sql: error.sql,
-        sqlMessage: error.sqlMessage
-      }
+        sqlMessage: error.sqlMessage,
+      },
     });
   }
 };
@@ -364,15 +409,15 @@ const getCRMUsers = async (req, res) => {
             "claim-focal-person",
             "compliance-focal-person",
             "admin",
-            "super-admin"
-          ]
+            "super-admin",
+          ],
         },
         full_name: {
-          [Op.ne]: null
-        }
+          [Op.ne]: null,
+        },
       },
-      attributes: ['id', 'full_name', 'email', 'role'],
-      order: [['full_name', 'ASC']]
+      attributes: ["id", "full_name", "email", "role"],
+      order: [["full_name", "ASC"]],
     });
 
     res.status(200).json({
@@ -440,29 +485,34 @@ const getConversations = async (req, res) => {
     // Get all messages where user is sender or receiver
     const allMessages = await ChatMassage.findAll({
       where: {
-        [Op.or]: [
-          { senderId: userId },
-          { receiverId: userId }
-        ]
+        [Op.or]: [{ senderId: userId }, { receiverId: userId }],
       },
-      order: [['createdAt', 'DESC']],
-      attributes: ['id', 'senderId', 'receiverId', 'message', 'isRead', 'createdAt']
+      order: [["createdAt", "DESC"]],
+      attributes: [
+        "id",
+        "senderId",
+        "receiverId",
+        "message",
+        "isRead",
+        "createdAt",
+      ],
     });
 
     // Group by other user ID
     const userMap = new Map();
-    
+
     for (const msg of allMessages) {
-      const otherUserId = msg.senderId === userId ? msg.receiverId : msg.senderId;
-      
+      const otherUserId =
+        msg.senderId === userId ? msg.receiverId : msg.senderId;
+
       if (!userMap.has(otherUserId)) {
         // Get unread count for this conversation
         const unreadCount = await ChatMassage.count({
           where: {
             senderId: otherUserId,
             receiverId: userId,
-            isRead: false
-          }
+            isRead: false,
+          },
         });
 
         userMap.set(otherUserId, {
@@ -472,9 +522,9 @@ const getConversations = async (req, res) => {
             text: msg.message,
             senderId: msg.senderId,
             time: msg.createdAt,
-            isRead: msg.isRead
+            isRead: msg.isRead,
           },
-          unreadCount: unreadCount
+          unreadCount: unreadCount,
         });
       }
     }
@@ -510,25 +560,37 @@ const getMessage = async (req, res) => {
         ],
       },
       order: [["createdAt", "ASC"]], // Sort messages by time
-      attributes: ["id", "senderId", "receiverId", "message", "isRead", "createdAt", "updatedAt"], // Include all necessary fields
+      attributes: [
+        "id",
+        "senderId",
+        "receiverId",
+        "message",
+        "isRead",
+        "status",
+        "deliveredAt",
+        "readAt",
+        "createdAt",
+        "updatedAt",
+      ], // Include all necessary fields
     });
 
     // Format messages for frontend
-    const formattedMessages = messages.map(msg => ({
+    const formattedMessages = messages.map((msg) => ({
       id: msg.id,
       senderId: msg.senderId,
       receiverId: msg.receiverId,
       message: msg.message,
       isRead: msg.isRead,
+      status: msg.status || "sent",
+      deliveredAt: msg.deliveredAt,
+      readAt: msg.readAt,
       timestamp: msg.createdAt,
-      createdAt: msg.createdAt
+      createdAt: msg.createdAt,
     }));
 
     // Check if there are no messages
     if (formattedMessages.length === 0) {
-      return res
-        .status(200)
-        .json([]); // Return empty array instead of 404
+      return res.status(200).json([]); // Return empty array instead of 404
     }
 
     res.json(formattedMessages);
@@ -599,20 +661,20 @@ const createMessage = async (req, res) => {
   try {
     // Validate input
     if (!senderId || !receiverId || !message || !message.trim()) {
-      return res.status(400).json({ 
-        message: "senderId, receiverId, and message are required" 
+      return res.status(400).json({
+        message: "senderId, receiverId, and message are required",
       });
     }
 
     // Fetch sender and receiver details for email
     const [sender, receiver] = await Promise.all([
-      User.findByPk(senderId, { attributes: ['id', 'full_name', 'email'] }),
-      User.findByPk(receiverId, { attributes: ['id', 'full_name', 'email'] })
+      User.findByPk(senderId, { attributes: ["id", "full_name", "email"] }),
+      User.findByPk(receiverId, { attributes: ["id", "full_name", "email"] }),
     ]);
 
     if (!sender || !receiver) {
-      return res.status(404).json({ 
-        message: "Sender or receiver not found" 
+      return res.status(404).json({
+        message: "Sender or receiver not found",
       });
     }
 
@@ -629,33 +691,44 @@ const createMessage = async (req, res) => {
     // Send email notification to receiver (non-blocking)
     if (receiver.email) {
       try {
-        const senderName = sender.full_name || 'User';
+        const senderName = sender.full_name || "User";
         const subject = `From CRM Chat: You have received a new CRM chat message from ${senderName}`;
         const bodyHtml = `
-          <p>Hello ${receiver.full_name || 'User'},</p>
+          <p>Hello ${receiver.full_name || "User"},</p>
           <p>You have received a new CRM chat message from <b>${senderName}</b>:</p>
         `;
         const detailsHtml = `
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
-            <p style="margin: 0; font-style: italic; color: #666;">"${message.trim().substring(0, 300)}${message.trim().length > 300 ? '...' : ''}"</p>
+            <p style="margin: 0; font-style: italic; color: #666;">"${message
+              .trim()
+              .substring(0, 300)}${
+          message.trim().length > 300 ? "..." : ""
+        }"</p>
           </div>
           <p>Please log into the CRM system to view and reply to this message.</p>
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
-        
+
         sendEmailNonBlocking({
           to: receiver.email,
           subject: subject,
-          htmlBody: htmlBody
+          htmlBody: htmlBody,
         });
-        
-        console.log(`✅ [Chat Email] Email sending initiated to: ${receiver.email} (will be sent to test email: rehema.said3@ttcl.co.tz)`);
+
+        console.log(
+          `✅ [Chat Email] Email sending initiated to: ${receiver.email} (will be sent to test email: rehema.said3@ttcl.co.tz)`
+        );
       } catch (emailError) {
-        console.error(`❌ [Chat Email] Error sending email to ${receiver.email}:`, emailError);
+        console.error(
+          `❌ [Chat Email] Error sending email to ${receiver.email}:`,
+          emailError
+        );
         // Don't fail the request if email fails
       }
     } else {
-      console.log(`⚠️ [Chat Email] Receiver ${receiver.full_name} has no email address`);
+      console.log(
+        `⚠️ [Chat Email] Receiver ${receiver.full_name} has no email address`
+      );
     }
 
     // Return the created message
@@ -673,9 +746,9 @@ const createMessage = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error creating message:", error);
-    res.status(500).json({ 
-      message: "Failed to send message", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to send message",
+      error: error.message,
     });
   }
 };
@@ -950,103 +1023,131 @@ const deleteUser = async (req, res) => {
           type: Sequelize.QueryTypes.SELECT,
         }
       );
-      
+
       console.log("📊 Found pjsip_endpoints records:", pjsipEndpoints);
-      
-             if (pjsipEndpoints && pjsipEndpoints.length > 0) {
-         console.log("🔗 Found related pjsip_endpoints record, deleting it first...");
-         
-         // Get the extension number before deleting
-         const extensionToClean = pjsipEndpoints[0].id;
-         console.log("🔍 Extension to clean up:", extensionToClean);
-         
-         // STEP 1: Delete from pjsip_endpoints by user_id
-         const deleteResult = await sequelize.query(
-           "DELETE FROM pjsip_endpoints WHERE user_id = :userId",
-           {
-             replacements: { userId },
-             type: Sequelize.QueryTypes.DELETE,
-           }
-         );
-         console.log("✅ pjsip_endpoints record deleted by user_id. Result:", deleteResult);
-         
-         // STEP 2: Delete from pjsip_endpoints by extension ID (primary key)
-         const deleteByExtensionResult = await sequelize.query(
-           "DELETE FROM pjsip_endpoints WHERE id = :extension",
-           {
-             replacements: { extension: extensionToClean },
-             type: Sequelize.QueryTypes.DELETE,
-           }
-         );
-         console.log("✅ pjsip_endpoints records with extension ID deleted. Result:", deleteByExtensionResult);
-         
-         // STEP 3: Clean up pjsip_aors table (extension acts as primary key)
-         try {
-           console.log("🗑️ Cleaning up pjsip_aors table for extension:", extensionToClean);
-           const deleteAorsResult = await sequelize.query(
-             "DELETE FROM pjsip_aors WHERE id = :extension",
-             {
-               replacements: { extension: extensionToClean },
-               type: Sequelize.QueryTypes.DELETE,
-             }
-           );
-           console.log("✅ pjsip_aors records deleted. Result:", deleteAorsResult);
-         } catch (aorsError) {
-           console.log("❌ Error deleting from pjsip_aors:", aorsError.message);
-         }
-         
-         // STEP 4: Clean up pjsip_auths table (extension acts as primary key)
-         try {
-           console.log("🗑️ Cleaning up pjsip_auths table for extension:", extensionToClean);
-           const deleteAuthsResult = await sequelize.query(
-             "DELETE FROM pjsip_auths WHERE id = :extension",
-             {
-               replacements: { extension: extensionToClean },
-               type: Sequelize.QueryTypes.DELETE,
-             }
-           );
-           console.log("✅ pjsip_auths records deleted. Result:", deleteAuthsResult);
-         } catch (authsError) {
-           console.log("❌ Error deleting from pjsip_auths:", authsError.message);
-         }
-         
-         // Double-check that the extension is completely removed from pjsip_endpoints
-         console.log("🔍 Double-checking extension cleanup...");
-         const remainingEndpoints = await sequelize.query(
-           "SELECT id FROM pjsip_endpoints WHERE id = :extension",
-           {
-             replacements: { extension: extensionToClean },
-             type: Sequelize.QueryTypes.SELECT,
-           }
-         );
-         console.log("📊 Remaining pjsip_endpoints with extension:", remainingEndpoints);
-         
-         if (remainingEndpoints && remainingEndpoints.length > 0) {
-           console.log("⚠️ Extension still exists in pjsip_endpoints, forcing deletion...");
-           const forceDeleteResult = await sequelize.query(
-             "DELETE FROM pjsip_endpoints WHERE id = :extension",
-             {
-               replacements: { extension: extensionToClean },
-               type: Sequelize.QueryTypes.DELETE,
-             }
-           );
-           console.log("✅ Force deletion result:", forceDeleteResult);
-         }
-       } else {
-         console.log("ℹ️ No pjsip_endpoints records found for this user");
-       }
+
+      if (pjsipEndpoints && pjsipEndpoints.length > 0) {
+        console.log(
+          "🔗 Found related pjsip_endpoints record, deleting it first..."
+        );
+
+        // Get the extension number before deleting
+        const extensionToClean = pjsipEndpoints[0].id;
+        console.log("🔍 Extension to clean up:", extensionToClean);
+
+        // STEP 1: Delete from pjsip_endpoints by user_id
+        const deleteResult = await sequelize.query(
+          "DELETE FROM pjsip_endpoints WHERE user_id = :userId",
+          {
+            replacements: { userId },
+            type: Sequelize.QueryTypes.DELETE,
+          }
+        );
+        console.log(
+          "✅ pjsip_endpoints record deleted by user_id. Result:",
+          deleteResult
+        );
+
+        // STEP 2: Delete from pjsip_endpoints by extension ID (primary key)
+        const deleteByExtensionResult = await sequelize.query(
+          "DELETE FROM pjsip_endpoints WHERE id = :extension",
+          {
+            replacements: { extension: extensionToClean },
+            type: Sequelize.QueryTypes.DELETE,
+          }
+        );
+        console.log(
+          "✅ pjsip_endpoints records with extension ID deleted. Result:",
+          deleteByExtensionResult
+        );
+
+        // STEP 3: Clean up pjsip_aors table (extension acts as primary key)
+        try {
+          console.log(
+            "🗑️ Cleaning up pjsip_aors table for extension:",
+            extensionToClean
+          );
+          const deleteAorsResult = await sequelize.query(
+            "DELETE FROM pjsip_aors WHERE id = :extension",
+            {
+              replacements: { extension: extensionToClean },
+              type: Sequelize.QueryTypes.DELETE,
+            }
+          );
+          console.log(
+            "✅ pjsip_aors records deleted. Result:",
+            deleteAorsResult
+          );
+        } catch (aorsError) {
+          console.log("❌ Error deleting from pjsip_aors:", aorsError.message);
+        }
+
+        // STEP 4: Clean up pjsip_auths table (extension acts as primary key)
+        try {
+          console.log(
+            "🗑️ Cleaning up pjsip_auths table for extension:",
+            extensionToClean
+          );
+          const deleteAuthsResult = await sequelize.query(
+            "DELETE FROM pjsip_auths WHERE id = :extension",
+            {
+              replacements: { extension: extensionToClean },
+              type: Sequelize.QueryTypes.DELETE,
+            }
+          );
+          console.log(
+            "✅ pjsip_auths records deleted. Result:",
+            deleteAuthsResult
+          );
+        } catch (authsError) {
+          console.log(
+            "❌ Error deleting from pjsip_auths:",
+            authsError.message
+          );
+        }
+
+        // Double-check that the extension is completely removed from pjsip_endpoints
+        console.log("🔍 Double-checking extension cleanup...");
+        const remainingEndpoints = await sequelize.query(
+          "SELECT id FROM pjsip_endpoints WHERE id = :extension",
+          {
+            replacements: { extension: extensionToClean },
+            type: Sequelize.QueryTypes.SELECT,
+          }
+        );
+        console.log(
+          "📊 Remaining pjsip_endpoints with extension:",
+          remainingEndpoints
+        );
+
+        if (remainingEndpoints && remainingEndpoints.length > 0) {
+          console.log(
+            "⚠️ Extension still exists in pjsip_endpoints, forcing deletion..."
+          );
+          const forceDeleteResult = await sequelize.query(
+            "DELETE FROM pjsip_endpoints WHERE id = :extension",
+            {
+              replacements: { extension: extensionToClean },
+              type: Sequelize.QueryTypes.DELETE,
+            }
+          );
+          console.log("✅ Force deletion result:", forceDeleteResult);
+        }
+      } else {
+        console.log("ℹ️ No pjsip_endpoints records found for this user");
+      }
 
       // Check for other potential foreign key relationships
       console.log("🔍 Checking for other foreign key relationships...");
-      
+
       // Check if there are any other tables that might reference this user
       const tablesToCheck = [
-        'tickets',
-        'agent_activity_logs', 
-        'chart_message',
-        'agent_assignments'
+        "tickets",
+        "agent_activity_logs",
+        "chart_message",
+        "agent_assignments",
       ];
-      
+
       for (const tableName of tablesToCheck) {
         try {
           const result = await sequelize.query(
@@ -1062,56 +1163,65 @@ const deleteUser = async (req, res) => {
         }
       }
 
-             // Now delete the user using direct SQL to bypass any ORM issues
-       console.log("🗑️ Deleting user using direct SQL...");
-       const deleteUserResult = await sequelize.query(
-         "DELETE FROM Users WHERE id = :userId",
-         {
-           replacements: { userId },
-           type: Sequelize.QueryTypes.DELETE,
-         }
-       );
-       console.log("✅ User deleted successfully using direct SQL. Result:", deleteUserResult);
-       
-       // Final verification - check if any traces of the extension remain
-       console.log("🔍 Final verification - checking for remaining extension traces...");
-       
-       // Check if extension still exists in Users table
-       const remainingUserExtension = await sequelize.query(
-         "SELECT id, full_name, extension FROM Users WHERE extension = :extension",
-         {
-           replacements: { extension: user.extension },
-           type: Sequelize.QueryTypes.SELECT,
-         }
-       );
-       console.log("📊 Remaining Users with extension:", remainingUserExtension);
-       
-       // Check if extension still exists in pjsip_endpoints table
-       if (user.extension) {
-         const remainingPjsipExtension = await sequelize.query(
-           "SELECT id FROM pjsip_endpoints WHERE id = :extension",
-           {
-             replacements: { extension: user.extension },
-             type: Sequelize.QueryTypes.SELECT,
-           }
-         );
-         console.log("📊 Remaining pjsip_endpoints with extension:", remainingPjsipExtension);
-       }
+      // Now delete the user using direct SQL to bypass any ORM issues
+      console.log("🗑️ Deleting user using direct SQL...");
+      const deleteUserResult = await sequelize.query(
+        "DELETE FROM Users WHERE id = :userId",
+        {
+          replacements: { userId },
+          type: Sequelize.QueryTypes.DELETE,
+        }
+      );
+      console.log(
+        "✅ User deleted successfully using direct SQL. Result:",
+        deleteUserResult
+      );
+
+      // Final verification - check if any traces of the extension remain
+      console.log(
+        "🔍 Final verification - checking for remaining extension traces..."
+      );
+
+      // Check if extension still exists in Users table
+      const remainingUserExtension = await sequelize.query(
+        "SELECT id, full_name, extension FROM Users WHERE extension = :extension",
+        {
+          replacements: { extension: user.extension },
+          type: Sequelize.QueryTypes.SELECT,
+        }
+      );
+      console.log("📊 Remaining Users with extension:", remainingUserExtension);
+
+      // Check if extension still exists in pjsip_endpoints table
+      if (user.extension) {
+        const remainingPjsipExtension = await sequelize.query(
+          "SELECT id FROM pjsip_endpoints WHERE id = :extension",
+          {
+            replacements: { extension: user.extension },
+            type: Sequelize.QueryTypes.SELECT,
+          }
+        );
+        console.log(
+          "📊 Remaining pjsip_endpoints with extension:",
+          remainingPjsipExtension
+        );
+      }
     } catch (destroyError) {
       console.error("❌ Error during user.destroy():", destroyError);
-      
+
       // Check if it's a foreign key constraint error
-      if (destroyError.name === 'SequelizeForeignKeyConstraintError') {
-        return res.status(400).json({ 
-          message: "Cannot delete user. This user has related data (tickets, assignments, etc.) that must be removed first.",
+      if (destroyError.name === "SequelizeForeignKeyConstraintError") {
+        return res.status(400).json({
+          message:
+            "Cannot delete user. This user has related data (tickets, assignments, etc.) that must be removed first.",
           error: "Foreign key constraint violation",
-          details: destroyError.message
+          details: destroyError.message,
         });
       }
-      
+
       throw destroyError; // Re-throw other errors
     }
-    
+
     console.log("✅ User deleted successfully");
     res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
@@ -1121,15 +1231,15 @@ const deleteUser = async (req, res) => {
     console.error("Error sql:", error.sql);
     console.error("Error sqlMessage:", error.sqlMessage);
     console.error("Full error stack:", error.stack);
-    
-    res.status(500).json({ 
-      message: "Server error", 
+
+    res.status(500).json({
+      message: "Server error",
       error: error.message,
       details: {
         code: error.code,
         sql: error.sql,
-        sqlMessage: error.sqlMessage
-      }
+        sqlMessage: error.sqlMessage,
+      },
     });
   }
 };
@@ -1257,20 +1367,24 @@ const updateUser = async (req, res) => {
     // For units, sub-section is not required
     // Check if role is being updated to focal-person or if user is already focal-person
     const newRole = role || user.role;
-    const newUnitSection = unit_section !== undefined ? unit_section : user.unit_section;
-    
+    const newUnitSection =
+      unit_section !== undefined ? unit_section : user.unit_section;
+
     if (newRole === "focal-person") {
       const unitSectionLower = (newUnitSection || "").toLowerCase();
       const isDirectorate = unitSectionLower.includes("directorate");
-      
+
       // Only require sub-section if it's a directorate
       if (isDirectorate && (!newUnitSection || newUnitSection.trim() === "")) {
-        console.log("❌ Focal person for directorate missing unit_section (sub-section)");
-        return res.status(400).json({ 
-          message: "Focal person for directorate must have a sub-section (unit_section)", 
+        console.log(
+          "❌ Focal person for directorate missing unit_section (sub-section)"
+        );
+        return res.status(400).json({
+          message:
+            "Focal person for directorate must have a sub-section (unit_section)",
           error: "Missing required field for focal-person role in directorate",
           field: "unit_section",
-          role: newRole
+          role: newRole,
         });
       }
     }

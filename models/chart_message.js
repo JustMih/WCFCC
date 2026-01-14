@@ -37,6 +37,19 @@ const ChatMassage = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    status: {
+      type: DataTypes.ENUM('sent', 'delivered', 'read'),
+      allowNull: false,
+      defaultValue: 'sent',
+    },
+    deliveredAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    readAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     sequelize,

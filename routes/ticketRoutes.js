@@ -251,6 +251,8 @@ router.post(
   '/:ticketId/forward-to-dg',
   authMiddleware,
   roleMiddleware(['director', 'head-of-unit']),
+  uploadSingle,
+  handleMulterError,
   forwardToDirectorGeneral
 );
 

@@ -140,17 +140,38 @@ const listNotifications = async (req, res) => {
       order: [["created_at", "DESC"]],
     });
     
-    // Filter out notifications for reversed tickets, BUT include reversal notifications for the recipient
+    // Filter out notifications for reversed tickets, BUT include:
+    // 1. Reversal notifications for the recipient
+    // 2. Tagged/mentioned notifications (always include, even if ticket is reversed)
     const notifications = allNotifications.filter(n => {
       if (!n.ticket) return false;
       
+      const messageText = (n.message || '').toLowerCase();
+      
+      // Always include tagged/mentioned notifications, regardless of ticket status
+      // Tagged notifications have "mentioned you" in the message
+      const isTaggedNotification = messageText.includes('mentioned you');
+      
+      if (isTaggedNotification) {
+        return true; // Always include tagged notifications
+      }
+      
       // If ticket is reversed, only include if it's a reversal notification for this user
-      if (n.ticket.status === 'Reversed') {
-        const messageText = (n.message || '').toLowerCase();
-        // Include if message indicates ticket was reversed back to this user
-        return messageText.includes('reversed back to you') || 
-               messageText.includes('reversed to you') ||
-               (messageText.includes('has been reversed') && messageText.includes('to'));
+      const ticketStatus = n.ticket.status || '';
+      const isReversedTicket = ticketStatus.toLowerCase() === 'reversed';
+      
+      if (isReversedTicket) {
+        const recipientId = n.recipient_id;
+        const isForCurrentUser = String(recipientId) === String(userId);
+        const isUnread = n.status === 'unread' || n.status === ' ';
+        
+        // Include if it's for current user, unread, and message indicates ticket was reversed back to this user
+        return isForCurrentUser && isUnread && (
+          messageText.includes('reversed back to you') || 
+          messageText.includes('reversed to you') ||
+          messageText.includes('reassigned to focal person') ||
+          (messageText.includes('has been reversed') && messageText.includes('to'))
+        );
       }
       
       // For non-reversed tickets, include all

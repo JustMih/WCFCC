@@ -190,6 +190,13 @@ io.on("connection", (socket) => {
   socket.on("register", (userId) => {
     users[userId] = socket.id;
     console.log(`User ${userId} registered with socket ID ${socket.id}`);
+
+    // Notify all other users that this user is now online
+    socket.broadcast.emit("user_online", userId);
+
+    // Send list of currently online users to the newly connected user
+    const onlineUserIds = Object.keys(users);
+    socket.emit("online_users_list", onlineUserIds);
   });
 
   socket.on("private_message", async ({ senderId, receiverId, message }) => {
@@ -200,6 +207,7 @@ io.on("connection", (socket) => {
         receiverId,
         message,
         isRead: false,
+        status: "sent",
       });
 
       const messageData = {
@@ -208,16 +216,59 @@ io.on("connection", (socket) => {
         receiverId,
         message,
         isRead: false,
+        status: "sent",
         timestamp: newMessage.createdAt,
+        createdAt: newMessage.createdAt,
       };
 
-      [receiverId, senderId].forEach((id) => {
-        if (users[id]) {
-          io.to(users[id]).emit("private_message", messageData);
+      // Emit to sender first (optimistic update)
+      if (users[senderId]) {
+        io.to(users[senderId]).emit("private_message", messageData);
+      }
+
+      // Emit to receiver and mark as delivered if online
+      if (users[receiverId]) {
+        // Mark as delivered
+        await ChatMassage.update(
+          { status: "delivered", deliveredAt: new Date() },
+          { where: { id: newMessage.id } }
+        );
+
+        const deliveredMessage = {
+          ...messageData,
+          status: "delivered",
+        };
+
+        io.to(users[receiverId]).emit("private_message", deliveredMessage);
+
+        // Notify sender that message was delivered
+        if (users[senderId]) {
+          io.to(users[senderId]).emit("message_status_update", {
+            messageId: newMessage.id,
+            status: "delivered",
+          });
         }
-      });
+      } else {
+        // Receiver is offline, mark as delivered anyway (they'll see it when they come online)
+        await ChatMassage.update(
+          { status: "delivered", deliveredAt: new Date() },
+          { where: { id: newMessage.id } }
+        );
+      }
     } catch (error) {
       console.error("❌ Failed to store or emit message:", error);
+    }
+  });
+
+  // Handle message delivered confirmation
+  socket.on("message_delivered", async (messageId) => {
+    try {
+      await ChatMassage.update(
+        { status: "delivered", deliveredAt: new Date() },
+        { where: { id: messageId } }
+      );
+    } catch (error) {
+      console.error("❌ Error updating message delivery status:", error);
     }
   });
 
@@ -236,8 +287,8 @@ io.on("connection", (socket) => {
   socket.on("messagesRead", async ({ senderId, receiverId }) => {
     try {
       // Update all unread messages from sender to receiver as read
-      await ChatMassage.update(
-        { isRead: true },
+      const [updatedCount] = await ChatMassage.update(
+        { isRead: true, status: "read", readAt: new Date() },
         {
           where: {
             senderId: senderId,
@@ -247,9 +298,31 @@ io.on("connection", (socket) => {
         }
       );
 
+      // Get updated message IDs to notify sender
+      const updatedMessages = await ChatMassage.findAll({
+        where: {
+          senderId: senderId,
+          receiverId: receiverId,
+          status: "read",
+        },
+        attributes: ["id"],
+      });
+
       // Notify the sender that their messages have been read
-      if (users[senderId]) {
-        io.to(users[senderId]).emit("messagesRead", { senderId, receiverId });
+      if (users[senderId] && updatedMessages.length > 0) {
+        io.to(users[senderId]).emit("messagesRead", {
+          senderId,
+          receiverId,
+          messageIds: updatedMessages.map((m) => m.id),
+        });
+
+        // Also send individual status updates
+        updatedMessages.forEach((msg) => {
+          io.to(users[senderId]).emit("message_status_update", {
+            messageId: msg.id,
+            status: "read",
+          });
+        });
       }
 
       console.log(`Messages from ${senderId} to ${receiverId} marked as read`);
@@ -281,6 +354,8 @@ io.on("connection", (socket) => {
       if (users[id] === socket.id) {
         console.log(`🛑 User ${id} disconnected`);
         delete users[id];
+        // Notify all other users that this user is now offline
+        socket.broadcast.emit("user_offline", id);
       }
     }
   });
