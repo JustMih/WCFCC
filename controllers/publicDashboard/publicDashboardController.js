@@ -252,7 +252,7 @@ const getPublicDashboardData = async (req, res) => {
     );
 
     // Get queue status
-    let queueStatus = [];
+    
     if (QueueStatus) {
       queueStatus = await QueueStatus.findAll({
         order: [["queue", "ASC"]],
