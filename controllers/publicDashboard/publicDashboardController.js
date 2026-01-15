@@ -144,11 +144,20 @@ const updateMissedCallOnCallback = async ({
 ====================================================== */
 
 const getPublicDashboardData = async (req, res) => {
+  // Initialize all variables at the top to prevent "not defined" errors
+  let onlineCount = 0;
+  let offlineCount = 0;
+  let events = [];
+  let totalCounts = [];
+  let monthlyCounts = [];
+  let dailyCounts = [];
+  let totalRows = [{ total: 0 }];
+  let lostCallsCountToday = 0;
+  let queueStatus = [];
+  let liveCalls = [];
+
   try {
     /* ---------- AGENT STATUS ---------- */
-
-    let onlineCount = 0;
-    let offlineCount = 0;
 
     try {
       onlineCount = await User.count({
@@ -171,7 +180,6 @@ const getPublicDashboardData = async (req, res) => {
 
     /* ---------- CEL EVENTS ---------- */
 
-    let events = [];
     try {
       events = await CEL.findAll({
         where: {
@@ -282,46 +290,60 @@ const getPublicDashboardData = async (req, res) => {
         );
     }
 
-    const liveCalls = Object.values(calls).sort((a, b) => {
+    liveCalls = Object.values(calls).sort((a, b) => {
       if (a.status === "active" && b.status !== "active") return -1;
       if (b.status === "active" && a.status !== "active") return 1;
       return new Date(b.call_start || 0) - new Date(a.call_start || 0);
     });
 
     // Get call statistics
-    let totalCounts = [];
-    let monthlyCounts = [];
-    let dailyCounts = [];
-    let totalRows = [{ total: 0 }];
-
     try {
-      totalCounts = await sequelize.query(
+      const totalCountsResult = await sequelize.query(
         "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
       );
+      // sequelize.query returns [results, metadata], so we need the first element
+      totalCounts = Array.isArray(totalCountsResult)
+        ? totalCountsResult[0]
+        : [];
     } catch (err) {
       console.error("Error fetching total counts:", err.message);
+      totalCounts = [];
     }
 
     try {
-      monthlyCounts = await sequelize.query(
+      const monthlyCountsResult = await sequelize.query(
         "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
       );
+      monthlyCounts = Array.isArray(monthlyCountsResult)
+        ? monthlyCountsResult[0]
+        : [];
     } catch (err) {
       console.error("Error fetching monthly counts:", err.message);
+      monthlyCounts = [];
     }
 
     try {
-      dailyCounts = await sequelize.query(
+      const dailyCountsResult = await sequelize.query(
         "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
       );
+      dailyCounts = Array.isArray(dailyCountsResult)
+        ? dailyCountsResult[0]
+        : [];
     } catch (err) {
       console.error("Error fetching daily counts:", err.message);
+      dailyCounts = [];
     }
 
     try {
-      totalRows = await sequelize.query("SELECT COUNT(*) AS total FROM cdr");
+      const totalRowsResult = await sequelize.query(
+        "SELECT COUNT(*) AS total FROM cdr"
+      );
+      totalRows = Array.isArray(totalRowsResult)
+        ? totalRowsResult
+        : [{ total: 0 }];
     } catch (err) {
       console.error("Error fetching total rows:", err.message);
+      totalRows = [{ total: 0 }];
     }
 
     // Categorize calls by status
@@ -356,7 +378,6 @@ const getPublicDashboardData = async (req, res) => {
 
     // Get lost calls count from CDR for today
     // Lost = calls that were in queue (lastapp = 'Queue') but not answered (disposition = 'NO ANSWER')
-    let lostCallsCountToday = 0;
     try {
       const lostCallsToday = await sequelize.query(
         `SELECT COUNT(*) AS count 
@@ -374,7 +395,6 @@ const getPublicDashboardData = async (req, res) => {
 
     /* ---------- QUEUE STATUS ---------- */
 
-    let queueStatus = [];
     try {
       if (QueueStatus) {
         const queueData = await QueueStatus.findAll({
@@ -401,10 +421,13 @@ const getPublicDashboardData = async (req, res) => {
       },
 
       callStats: {
-        totalCounts: totalCounts[0] || [],
-        monthlyCounts: monthlyCounts[0] || [],
-        dailyCounts: dailyCounts[0] || [],
-        totalRows: totalRows[0]?.[0]?.total || 0,
+        totalCounts: Array.isArray(totalCounts) ? totalCounts : [],
+        monthlyCounts: Array.isArray(monthlyCounts) ? monthlyCounts : [],
+        dailyCounts: Array.isArray(dailyCounts) ? dailyCounts : [],
+        totalRows:
+          Array.isArray(totalRows) && totalRows[0] && totalRows[0][0]
+            ? totalRows[0][0].total || 0
+            : 0,
       },
       queueStatus: queueStatus,
       timestamp: new Date().toISOString(),

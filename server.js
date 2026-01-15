@@ -60,6 +60,7 @@ app.use(
     origin: [
       "http://localhost:3000",
       "http://10.52.0.19:3000",
+      "http://192.168.21.70:3000",
       "http://localhost:5070",
       "http://10.52.0.19:5070",
       "http://127.0.0.1:5070",
@@ -395,6 +396,7 @@ sequelize
           origin: [
             "http://localhost:3000",
             "http://10.52.0.19:3000",
+            "http://192.168.21.70:3000",
             "http://localhost:5070",
             "http://10.52.0.19:5070",
             "http://127.0.0.1:5070",
@@ -464,6 +466,7 @@ sequelize
             origin: [
               "http://localhost:3000",
               "http://10.52.0.19:3000",
+              "http://192.168.21.70:3000",
               "http://localhost:5070",
               "http://10.52.0.19:5070",
               "http://127.0.0.1:5070",
