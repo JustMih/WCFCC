@@ -2612,7 +2612,7 @@ const getInprogressTickets = async (req, res) => {
             as: "RequesterDetail",
           },
         ],
-        order: [["created_at", "ASC"]],
+        order: [["created_at", "DESC"]],
       });
     }
 
@@ -2956,7 +2956,7 @@ const getOverdueTickets = async (req, res) => {
             as: "RequesterDetail"
           }
         ],
-        order: [["created_at", "DESC"]]
+        order: [["created_at", "ASC"]]
       });
     } else {
       // Agent: Find tickets that were escalated FROM this user using TicketAssignment
@@ -3002,7 +3002,7 @@ const getOverdueTickets = async (req, res) => {
             as: "RequesterDetail"
           }
         ],
-        order: [["created_at", "DESC"]]
+        order: [["created_at", "ASC"]]
       });
     }
 
@@ -3585,7 +3585,7 @@ const getTicketById = async (req, res) => {
               attributes: ["id", "full_name", "email"]
             }
           ],
-          order: [["created_at", "ASC"]],
+          order: [["created_at", "DESC"]],
         },
         {
           model: RequesterDetails,
@@ -5596,6 +5596,7 @@ const reassignTicket = async (req, res) => {
   }
 };
 
+
 const getInProgressAssignments = async (req, res) => {
   try {
     // Prefer userId from authenticated user (JWT), fallback to query param
@@ -5657,10 +5658,20 @@ const getInProgressAssignments = async (req, res) => {
     const latestAssignments = Array.from(latestAssignmentsMap.values());
     // Only count assignments where ticket is present (i.e., not closed)
     const filteredAssignments = latestAssignments.filter((a) => a.ticket);
+
+    // Sort newest first for UI tables (by ticket created_at, fallback to assignment created_at)
+    const sortedAssignments = [...filteredAssignments].sort((a, b) => {
+      const aDate = a?.ticket?.created_at ? new Date(a.ticket.created_at).getTime() : 0;
+      const bDate = b?.ticket?.created_at ? new Date(b.ticket.created_at).getTime() : 0;
+      if (bDate !== aDate) return bDate - aDate;
+      const aAssign = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bAssign = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return bAssign - aAssign;
+    });
     res.status(200).json({
       message: "In-progress assignments fetched successfully",
-      count: filteredAssignments.length,
-      assignments: filteredAssignments,
+      count: sortedAssignments.length,
+      assignments: sortedAssignments,
     });
   } catch (error) {
     res.status(500).json({
@@ -7727,7 +7738,7 @@ const getTicketWorkflowAuditTrail = async (req, res) => {
     // Get all assignments for this ticket
     const assignments = await TicketAssignment.findAll({
       where: { ticket_id: ticketId },
-      order: [["created_at", "ASC"]],
+      order: [["created_at", "DESC"]],
       include: [
         {
           model: User,
