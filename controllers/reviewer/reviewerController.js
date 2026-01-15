@@ -172,29 +172,29 @@ const convertOrForwardTicket = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    // Find the ticket
+    // Find the ticket and reload to get fresh data (in case it was reversed)
     const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
       await safeRollback(transaction);
       return res.status(404).json({ message: "Ticket not found" });
     }
+    
+    // Reload ticket to ensure we have the latest data (especially after reverse)
+    await ticket.reload({ transaction });
+
+    const isComplaintTicket = String(ticket.category || "").toLowerCase() === "complaint";
+    const isConvertingToInquiry = String(category || "").toLowerCase() === "inquiry";
+    const isForwarding = Boolean(responsible_unit_name);
 
     // Check if any action parameters are provided
     if (!category && !responsible_unit_name && !complaintType) {
       await safeRollback(transaction);
       return res.status(400).json({
-        message: "Please provide a rating (complaintType) and select a unit to forward to. Category conversion is optional."
+        message: "Please select a unit to forward to, or choose a category to convert to."
       });
     }
 
-    // Check if required parameters are provided
-    if (!complaintType) {
-      await safeRollback(transaction);
-      return res.status(400).json({
-        message: "Rating is required. Please provide complaintType (Minor or Major)."
-      });
-    }
-
+    // Forwarding requires a target unit/section
     if (!responsible_unit_name) {
       await safeRollback(transaction);
       return res.status(400).json({
@@ -202,28 +202,42 @@ const convertOrForwardTicket = async (req, res) => {
       });
     }
 
-    // Validate that comment/description is provided when rating and forwarding
-    if (complaintType && responsible_unit_name && (!ratingComment || !ratingComment.trim())) {
+    // Rating rules:
+    // - Required ONLY when forwarding a Complaint ticket as a complaint (i.e., not converting to Inquiry)
+    // - Not required for non-Complaint tickets (Compliment/Suggestion/Inquiry/etc.)
+    // - Not required when converting to Inquiry
+    const effectiveComplaintType = complaintType || ticket.complaint_type;
+    if (isForwarding && isComplaintTicket && !isConvertingToInquiry && !effectiveComplaintType) {
       await safeRollback(transaction);
       return res.status(400).json({
-        message: "Comment/Description is required when rating and forwarding a complaint. Please provide a comment before forwarding."
+        message: "Rating is required. Please provide complaintType (Minor or Major)."
+      });
+    }
+
+    // Comment is required when forwarding a complaint (as a complaint)
+    if (isForwarding && isComplaintTicket && !isConvertingToInquiry && (!ratingComment || !ratingComment.trim())) {
+      await safeRollback(transaction);
+      return res.status(400).json({
+        message: "Comment/Description is required when forwarding a complaint. Please provide a comment before forwarding."
       });
     }
 
     let conversionDone = false;
     let forwardingDone = false;
     let ratingDone = false;
+    let assignedRole = null; // Store the role of the user the ticket was assigned to
 
-    // Handle rating (if provided)
-    if (complaintType) {
-      if (!["Minor", "Major"].includes(complaintType)) {
+    // Handle rating (only if provided OR required)
+    if (complaintType || (isForwarding && isComplaintTicket && !isConvertingToInquiry && ticket.complaint_type)) {
+      const complaintTypeToApply = complaintType || ticket.complaint_type;
+      if (!["Minor", "Major"].includes(complaintTypeToApply)) {
         await safeRollback(transaction);
         return res.status(400).json({ 
           message: "Invalid complaint type. Use 'Minor' or 'Major'." 
         });
       }
 
-      ticket.complaint_type = complaintType;
+      ticket.complaint_type = complaintTypeToApply;
       ticket.rated_by_id = userId;
       ticket.rated_at = new Date();
       ratingDone = true;
@@ -299,6 +313,7 @@ const convertOrForwardTicket = async (req, res) => {
         ticket.assigned_to_role = focalPerson.role;
         ticket.assigned_to_id = focalPerson.id;
         ticket.status = "Assigned";
+        assignedRole = focalPerson.role; // Store role for success message
         console.log(`✅ Inquiry conversion: Assigned to focal-person: ${focalPerson.full_name} using responsible_unit_name: "${searchField}"`);
         
         // Create notification for the focal person
@@ -336,16 +351,11 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
-      // Check if ticket was already forwarded previously
-      if (ticket.forwarded_at && ticket.responsible_unit_name) {
-        await safeRollback(transaction);
-        return res.status(400).json({
-          message: `Ticket is already forwarded to '${ticket.responsible_unit_name}' on ${new Date(ticket.forwarded_at).toLocaleDateString()}. Cannot forward again.`
-        });
-      }
+      // Allow forwarding again - removed restriction to allow re-forwarding tickets
 
-      // Validate that ticket is rated before forwarding
-      if (!ticket.complaint_type && !ratingDone) {
+      // Validate that ticket is rated before forwarding (Complaint tickets only)
+      // If converting to Inquiry in this request, rating is not required.
+      if (isComplaintTicket && !conversionDone && !ticket.complaint_type && !ratingDone) {
         await safeRollback(transaction);
         return res.status(400).json({
           message: "Ticket must be rated (Minor or Major) before it can be forwarded"
@@ -486,6 +496,7 @@ const convertOrForwardTicket = async (req, res) => {
       if (unitUser) {
         ticket.assigned_to_role = unitUser.role;
         ticket.assigned_to_id = unitUser.id; // Assign to the target role user
+        assignedRole = unitUser.role; // Store role for success message
         console.log(`DEBUG: Assigned to ${targetRole}: ${unitUser.full_name} (${unitUser.id})`);
       } else {
         // If target role (director or head-of-unit) not found, return error - no fallback
@@ -600,11 +611,31 @@ const convertOrForwardTicket = async (req, res) => {
       ]
     });
 
-    // Build dynamic message
+    // Build dynamic message (include the actual user name the ticket was forwarded/assigned to)
+    let assignedToUser = null;
+    try {
+      if (updatedTicket && updatedTicket.assigned_to_id) {
+        assignedToUser = await User.findByPk(updatedTicket.assigned_to_id, {
+          attributes: ["id", "full_name", "username", "role"],
+        });
+      }
+    } catch (e) {
+      assignedToUser = null;
+    }
+
     const messageParts = [];
     if (ratingDone) messageParts.push(`rated as '${complaintType}'`);
     if (conversionDone) messageParts.push(`converted to Inquiry`);
-    if (forwardingDone) messageParts.push(`forwarded to '${responsible_unit_name}'`);
+    if (forwardingDone) {
+      // Format role name for display (capitalize and add spaces)
+      const formattedRole = assignedRole 
+        ? assignedRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+        : 'user';
+      const assignedToLabel = assignedToUser
+        ? `${assignedToUser.full_name || assignedToUser.username || assignedToUser.id}`
+        : `${formattedRole}`;
+      messageParts.push(`forwarded to '${responsible_unit_name}' → ${assignedToLabel} (${formattedRole})`);
+    }
     const message = `Ticket successfully ${messageParts.join(" and ")}`;
 
     return res.status(200).json({

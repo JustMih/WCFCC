@@ -1892,11 +1892,18 @@ const createTicket = async (req, res) => {
       }
     }
     // --- Respond to client immediately ---
+    const assignedToLabel = assignedUser
+      ? `${assignedUser.full_name || assignedUser.username || assignedUser.id} (${assignedUser.role || "user"})`
+      : "Unassigned";
+
     res.status(201).json({
       message: `Ticket created successfully${
         shouldClose ? " and closed" : ""
-      }${emailWarning}`,
+      }${emailWarning}${shouldClose ? "" : ` and assigned to ${assignedToLabel}`}`,
       ticket: newTicket,
+      assigned_to: assignedUser
+        ? { id: assignedUser.id, full_name: assignedUser.full_name, role: assignedUser.role }
+        : null,
     });
     // --- Send email to assignee in background ---
     if (assignedUser.email && !shouldClose) {
@@ -2612,7 +2619,7 @@ const getInprogressTickets = async (req, res) => {
             as: "RequesterDetail",
           },
         ],
-        order: [["created_at", "ASC"]],
+        order: [["created_at", "DESC"]],
       });
     }
 
@@ -2956,7 +2963,7 @@ const getOverdueTickets = async (req, res) => {
             as: "RequesterDetail"
           }
         ],
-        order: [["created_at", "DESC"]]
+        order: [["created_at", "ASC"]]
       });
     } else {
       // Agent: Find tickets that were escalated FROM this user using TicketAssignment
@@ -3002,7 +3009,7 @@ const getOverdueTickets = async (req, res) => {
             as: "RequesterDetail"
           }
         ],
-        order: [["created_at", "DESC"]]
+        order: [["created_at", "ASC"]]
       });
     }
 
@@ -3585,7 +3592,7 @@ const getTicketById = async (req, res) => {
               attributes: ["id", "full_name", "email"]
             }
           ],
-          order: [["created_at", "ASC"]],
+          order: [["created_at", "DESC"]],
         },
         {
           model: RequesterDetails,
@@ -4468,7 +4475,7 @@ const assignTicket = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Ticket assigned successfully"
+      message: `Ticket assigned successfully to ${assignedTo.full_name || assignedTo.username || assignedTo.id} (${assignedTo.role || "user"})`
     });
 
   } catch (error) {
@@ -4532,7 +4539,7 @@ const getAllAttendee = async (req, res) => {
       whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
     } else if (targetRole === "manager") {
       // For managers/directors, show both managers and focal-persons in attendees list
-      whereClause.role = { [Op.in]: ["manager", "focal-person"] };
+      whereClause.role = { [Op.in]: ["manager", "reviewer"] };
     } else {
       whereClause.role = targetRole;
     }
@@ -4628,19 +4635,32 @@ const getAllAttendee = async (req, res) => {
         }
       }
     } else if (currentUser.role === "head-of-unit") {
-      // For head-of-unit, filter by unit_section AND role = "attendee" (unless directorate shows managers)
+      // For head-of-unit:
+      // - Managers/attendees are filtered by unit_section/report_to as before
+      // - Reviewers should NOT depend on unit_section/report_to, so include them via OR
       if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
-        whereClause.unit_section = currentUser.unit_section;
-        // Ensure we're filtering by attendee/agent/focal-person roles (unless directorate which shows managers and focal-persons)
-        if (targetRole === "attendee") {
-          whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
-        } else if (targetRole === "manager") {
-          // For head-of-unit with directorate, show both managers and focal-persons
-          whereClause.role = { [Op.in]: ["manager", "focal-person"] };
-        } else {
-          whereClause.role = targetRole;
-        }
-        console.log(`DEBUG: Head of Unit filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
+        const unitSection = currentUser.unit_section;
+        const roleFilter =
+          targetRole === "manager"
+            ? { [Op.in]: ["manager"] }
+            : { [Op.in]: ["attendee", "agent", "focal-person"] };
+
+        // IMPORTANT: remove top-level role/unit_section filters (they would AND with Op.or and hide reviewers)
+        const baseWhere = { ...whereClause };
+        delete baseWhere.role;
+        delete baseWhere.unit_section;
+        delete baseWhere.report_to;
+        delete baseWhere[Op.and];
+
+        whereClause = {
+          ...baseWhere,
+          [Op.or]: [
+            { role: "reviewer" },
+            { unit_section: unitSection, role: roleFilter },
+          ],
+        };
+
+        console.log(`DEBUG: Head of Unit filtering ${targetRole}s by unit_section: ${unitSection} (and including all reviewers)`);
         console.log(`DEBUG: Where clause for head-of-unit:`, JSON.stringify(whereClause, null, 2));
       } else {
         // Fallback to designation-based report_to mapping if no unit_section
@@ -4655,12 +4675,65 @@ const getAllAttendee = async (req, res) => {
       
       if (currentUser.designation && designationMapping[currentUser.designation]) {
         const targetReportTo = designationMapping[currentUser.designation];
-        whereClause.report_to = targetReportTo;
-        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+        const roleFilter =
+          targetRole === "manager"
+            ? { [Op.in]: ["manager"] }
+            : { [Op.in]: ["attendee", "agent", "focal-person"] };
+
+        // IMPORTANT: remove top-level role/report_to filters (they would AND with Op.or and hide reviewers)
+        const baseWhere = { ...whereClause };
+        delete baseWhere.role;
+        delete baseWhere.unit_section;
+        delete baseWhere.report_to;
+        delete baseWhere[Op.and];
+
+        whereClause = {
+          ...baseWhere,
+          [Op.or]: [
+            { role: "reviewer" },
+            { report_to: targetReportTo, role: roleFilter },
+          ],
+        };
+        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo} (and including all reviewers)`);
       } else {
           console.log(`DEBUG: No unit_section or valid designation mapping found for head-of-unit, showing all ${targetRole}s`);
           console.log(`DEBUG: Current user designation: "${currentUser.designation}", unit_section: "${currentUser.unit_section}"`);
         }
+      }
+    } else if (currentUser.role === "director") {
+      // For director:
+      // - If directorate => targetRole is manager
+      // - Always include reviewers regardless of unit_section/report_to
+      if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
+        const unitSection = currentUser.unit_section;
+        const roleFilter =
+          targetRole === "manager"
+            ? { [Op.in]: ["manager"] }
+            : { [Op.in]: ["attendee", "agent", "focal-person"] };
+
+        // IMPORTANT: remove top-level role/unit_section filters (they would AND with Op.or and hide reviewers)
+        const baseWhere = { ...whereClause };
+        delete baseWhere.role;
+        delete baseWhere.unit_section;
+        delete baseWhere.report_to;
+        delete baseWhere[Op.and];
+
+        whereClause = {
+          ...baseWhere,
+          [Op.or]: [
+            { role: "reviewer" },
+            { unit_section: unitSection, role: roleFilter },
+          ],
+        };
+
+        console.log(`DEBUG: Director filtering ${targetRole}s by unit_section: ${unitSection} (and including all reviewers)`);
+      } else {
+        // If director has no unit_section, still include reviewers (and fall back to role filter if any)
+        whereClause = {
+          ...whereClause,
+          role: { [Op.in]: ["reviewer"] }
+        };
+        console.log(`DEBUG: Director has no unit_section; returning reviewers`);
       }
     } else if (currentUser.role === "manager") {
       // For manager, filter by designation-based report_to mapping
@@ -5551,9 +5624,11 @@ const reassignTicket = async (req, res) => {
       status: "unread",
     });
 
+    // Resolve new assignee for response message
+    const newAssignee = await User.findByPk(assigned_to_id);
+
     // Send notification to the new assignee (optional)
     try {
-      const newAssignee = await User.findByPk(assigned_to_id);
       if (newAssignee && newAssignee.email) {
         const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
         const bodyHtml = `
@@ -5584,7 +5659,7 @@ const reassignTicket = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Ticket reassigned successfully",
+      message: `Ticket reassigned successfully to ${newAssignee?.full_name || newAssignee?.username || assigned_to_id} (${newAssignee?.role || assigned_to_role || "user"})`,
     });
   } catch (error) {
     console.error("Error in reassignTicket:", error);
@@ -5595,6 +5670,7 @@ const reassignTicket = async (req, res) => {
     });
   }
 };
+
 
 const getInProgressAssignments = async (req, res) => {
   try {
@@ -5657,10 +5733,20 @@ const getInProgressAssignments = async (req, res) => {
     const latestAssignments = Array.from(latestAssignmentsMap.values());
     // Only count assignments where ticket is present (i.e., not closed)
     const filteredAssignments = latestAssignments.filter((a) => a.ticket);
+
+    // Sort newest first for UI tables (by ticket created_at, fallback to assignment created_at)
+    const sortedAssignments = [...filteredAssignments].sort((a, b) => {
+      const aDate = a?.ticket?.created_at ? new Date(a.ticket.created_at).getTime() : 0;
+      const bDate = b?.ticket?.created_at ? new Date(b.ticket.created_at).getTime() : 0;
+      if (bDate !== aDate) return bDate - aDate;
+      const aAssign = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bAssign = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return bAssign - aAssign;
+    });
     res.status(200).json({
       message: "In-progress assignments fetched successfully",
-      count: filteredAssignments.length,
-      assignments: filteredAssignments,
+      count: sortedAssignments.length,
+      assignments: sortedAssignments,
     });
   } catch (error) {
     res.status(500).json({
@@ -5813,7 +5899,8 @@ const reverseTicket = async (req, res) => {
     if (!currentUser) {
       return res.status(404).json({ message: "Reversing user not found" });
     }
-    const isDirectorReversing = currentUser.role === "director";
+    // NOTE: Reverse should behave the same for all roles (like agent reverse):
+    // go back to the previous assignment in history (assignments[1]), unless the user was explicitly reassigned.
 
     // If current user was reassigned, return to the reassigned_by (assigned_by_id of current assignment)
     if (currentUserAssignment && currentUserAssignment.action === "Reassigned") {
@@ -5827,88 +5914,37 @@ const reverseTicket = async (req, res) => {
         targetUserRole = reassignedBy.role;
         console.log(`DEBUG: User was reassigned - returning to reassigned_by: ${reassignedBy.full_name} (${reassignedBy.role})`);
       }
-    } else if (isDirectorReversing) {
-      // If director is reversing, find last manager to send ticket to
-      const managerAssignment = assignments.find(assignment => 
-        assignment.assigned_to_role === "manager"
+    } else if (assignments.length >= 1) {
+      // Normal reverse (like attendee): return to the user who assigned this ticket to the current user.
+      // IMPORTANT: Skip "self-assignments" where assigned_by_id === assigned_to_id (these would bounce back to self).
+      const senderAssignment = assignments.find(a =>
+        a.assigned_to_id === userId &&
+        a.assigned_by_id &&
+        a.assigned_by_id !== userId
       );
-      
-      if (managerAssignment) {
-        prevAssignment = managerAssignment;
-        targetUserId = managerAssignment.assigned_to_id;
-        targetUserRole = managerAssignment.assigned_to_role;
-        console.log(`DEBUG: Director reversing - returning to last manager: ${targetUserId}`);
-      } else {
-        // If no manager assignment found, fall back to second most recent assignment
-    if (assignments.length >= 2) {
-          prevAssignment = assignments[1];
-          targetUserId = prevAssignment.assigned_to_id;
-          targetUserRole = prevAssignment.assigned_to_role;
-          console.log(`DEBUG: Director reversing - no manager found, using second most recent: ${targetUserId}`);
+
+      if (senderAssignment) {
+        const senderUser = await User.findByPk(senderAssignment.assigned_by_id);
+        if (senderUser) {
+          prevAssignment = { assigned_to_id: senderUser.id, assigned_to_role: senderUser.role };
+          targetUserId = senderUser.id;
+          targetUserRole = senderUser.role;
+          console.log(`DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`);
         }
       }
-    } else if (assignments.length >= 2) {
-      // If not reassigned, use the second most recent assignment
-      prevAssignment = assignments[1];
-      targetUserId = prevAssignment.assigned_to_id;
-      targetUserRole = prevAssignment.assigned_to_role;
-      
-      // Check if ticket was directly forwarded to head-of-unit (currently or in history)
-      const isCurrentlyAssignedToHeadOfUnit = ticket.assigned_to_role === "head-of-unit";
-      const headOfUnitAssignment = assignments.find(assignment => 
-        assignment.assigned_to_role === "head-of-unit"
-      );
-      const wasForwardedToHeadOfUnit = isCurrentlyAssignedToHeadOfUnit || !!headOfUnitAssignment;
-      
-      // For tickets forwarded to head of unit reversed by attendee/agent, skip reviewer and go back to head of unit
-      // This applies to ALL tickets (not just Minor complaints) that were forwarded to head-of-unit
-      if (wasForwardedToHeadOfUnit && (isAttendeeReversing || isAgentReversing) && targetUserRole === "reviewer") {
-        console.log(`DEBUG: Ticket forwarded to head-of-unit - attendee/agent reversing, skipping reviewer and returning to head-of-unit`);
-        
-        // If head of unit was assigned to in history, use that assignment
-        if (headOfUnitAssignment && headOfUnitAssignment.assigned_to_role === "head-of-unit") {
-          prevAssignment = headOfUnitAssignment;
-          targetUserId = headOfUnitAssignment.assigned_to_id;
-          targetUserRole = headOfUnitAssignment.assigned_to_role;
-          console.log(`DEBUG: Found head-of-unit assignment in history - returning to head of unit: ${targetUserId}`);
-        } else if (isCurrentlyAssignedToHeadOfUnit && ticket.assigned_to_id) {
-          // If currently assigned to head-of-unit, use current assignment
-          prevAssignment = {
-            assigned_to_id: ticket.assigned_to_id,
-            assigned_to_role: "head-of-unit"
-          };
-          targetUserId = ticket.assigned_to_id;
-          targetUserRole = "head-of-unit";
-          console.log(`DEBUG: Currently assigned to head-of-unit - returning to current head of unit: ${targetUserId}`);
-        } else {
-          // If head of unit forwarded it but not found in assignments, find the head of unit user by responsible_unit_name
-          const headOfUnitUser = await User.findOne({
-            where: { 
-              role: "head-of-unit",
-              unit_section: ticket.responsible_unit_name
-            }
-          });
-          if (headOfUnitUser) {
-            prevAssignment = {
-              assigned_to_id: headOfUnitUser.id,
-              assigned_to_role: "head-of-unit"
-            };
-            targetUserId = headOfUnitUser.id;
-            targetUserRole = "head-of-unit";
-            console.log(`DEBUG: Found head-of-unit by responsible_unit_name - returning to head of unit: ${targetUserId}`);
-          }
-        }
+
+      if (!targetUserId) {
+        console.log(`No previous assignments found - cannot reverse ticket`);
+        return res.status(400).json({ 
+          message: "Cannot reverse ticket: No previous assignments found. Ticket must have assignment history to be reversed." 
+        });
       }
     } else {
-      // If no previous assignments, reverse to the ticket creator
-      console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
-      targetUserId = ticket.creator.id;
-      targetUserRole = ticket.creator.role;
-      // Create a mock assignment object for consistency
-      prevAssignment = {
-        assigned_to_id: ticket.creator.id,
-        assigned_to_role: ticket.creator.role
-      };
+      // If no previous assignments, cannot reverse - return error
+      console.log(`No previous assignments found - cannot reverse ticket`);
+      return res.status(400).json({ 
+        message: "Cannot reverse ticket: No previous assignments found. Ticket must have assignment history to be reversed." 
+      });
     }
 
     // Handle file upload if present
@@ -5940,7 +5976,7 @@ const reverseTicket = async (req, res) => {
         "Reversed",
         assignedBy,
         { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
-        description || reason || "Ticket reversed to previous user",
+        reason || "Ticket reversed to previous user",
         null // No transaction needed here
       );
 
@@ -5990,31 +6026,36 @@ const reverseTicket = async (req, res) => {
       let attended_by_name = assignedBy.full_name;
       let attended_by_role = assignedBy.role;
 
-      // Fetch previous user details - try assignment first, then fall back to creator
+      // Fetch previous user details
       let prevUser = await User.findByPk(targetUserId);
       
-      // If previous user not found, try to use the ticket creator as fallback
-      if (!prevUser && ticket.creator) {
-        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
-        prevUser = ticket.creator;
-      }
-      
-      // If still no user found, return an error
+      // If previous user not found, return an error (no fallback)
       if (!prevUser) {
-        console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+        console.warn(`No user found for target user ID: ${targetUserId}`);
         return res.status(404).json({ 
           message: "Cannot reverse ticket: Previous user not found. Please contact administrator." 
         });
       }
 
+      // Clear forwarded_at and forwarded_by_id to allow forwarding again after reverse
+      await ticket.update({
+        forwarded_at: null,
+        forwarded_by_id: null
+      });
+
       // Send emails in background (non-blocking)
-      const reversalReason = description || reason;
+      const reversalReason = reason;
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
 
+      // Format role name for display (capitalize and add spaces)
+      const formattedRole = targetUserRole 
+        ? targetUserRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+        : 'user';
+
       return res.json({
-        message: "Ticket reversed successfully with workflow tracking",
+        message: `Ticket reversed successfully to ${prevUser.full_name || prevUser.username || prevUser.id} (${formattedRole})`,
         workflow: result.workflow,
         assignment: result.assignment
       });
@@ -6026,7 +6067,9 @@ const reverseTicket = async (req, res) => {
         assigned_to_role: targetUserRole,
         status: "Reversed",
         attachment_path: attachmentPath,
-        attended_by_id: userId
+        attended_by_id: userId,
+        forwarded_at: null, // Clear forwarded_at to allow forwarding again
+        forwarded_by_id: null // Clear forwarded_by_id to allow forwarding again
       });
 
       // Add a new assignment record for the reversal
@@ -6036,7 +6079,7 @@ const reverseTicket = async (req, res) => {
         assigned_to_id: targetUserId,
         assigned_to_role: targetUserRole,
         action: "Reversed",
-        reason: description || reason || "Ticket reversed to previous user",
+        reason: reason || "Ticket reversed to previous user",
         attachment_path: attachmentPath,
         created_at: new Date()
       });
@@ -6071,30 +6114,29 @@ const reverseTicket = async (req, res) => {
         attended_by_role = attendedByUser ? attendedByUser.role : null;
       }
 
-      // Fetch previous user details - try assignment first, then fall back to creator
+      // Fetch previous user details
       let prevUser = await User.findByPk(targetUserId);
       
-      // If previous user not found, try to use the ticket creator as fallback
-      if (!prevUser && ticket.creator) {
-        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
-        prevUser = ticket.creator;
-      }
-      
-      // If still no user found, return an error
+      // If previous user not found, return an error (no fallback)
       if (!prevUser) {
-        console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+        console.warn(`No user found for target user ID: ${targetUserId}`);
         return res.status(404).json({ 
           message: "Cannot reverse ticket: Previous user not found. Please contact administrator." 
         });
       }
 
       // Send emails in background (non-blocking)
-      const reversalReason = description || reason;
+      const reversalReason = reason;
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
 
-      return res.json({ message: "Ticket reversed successfully" });
+      // Format role name for display (capitalize and add spaces)
+      const formattedRole = targetUserRole 
+        ? targetUserRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+        : 'user';
+
+      return res.json({ message: `Ticket reversed successfully to ${prevUser.full_name || prevUser.username || prevUser.id} (${formattedRole})` });
     }
 
   } catch (error) {
@@ -6814,7 +6856,7 @@ const forwardToDirectorGeneral = async (req, res) => {
     }
 
     res.status(200).json({
-      message: `${isMajorComplaint ? "Major complaint" : "Reversed ticket"} assigned to Director General for review`,
+      message: `${isMajorComplaint ? "Major complaint" : "Reversed ticket"} forwarded to ${directorGeneral.full_name || directorGeneral.username || directorGeneral.id} (${directorGeneral.role || "director-general"}) for review`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: directorGeneral.full_name,
@@ -7502,7 +7544,7 @@ const approveAndForwardToReviewer = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Ticket approved and forwarded to reviewer successfully",
+      message: `Ticket approved and forwarded to ${reviewer.full_name || reviewer.username || reviewer.id} (${reviewer.role || "reviewer"}) successfully`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: reviewer.full_name
@@ -7626,7 +7668,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Ticket reversed and assigned to reviewer successfully",
+      message: `Ticket reversed and assigned to ${reviewer.full_name || reviewer.username || reviewer.id} (${reviewer.role || "reviewer"}) successfully`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: reviewer.full_name
@@ -7771,7 +7813,7 @@ const getTicketWorkflowAuditTrail = async (req, res) => {
     // Get all assignments for this ticket
     const assignments = await TicketAssignment.findAll({
       where: { ticket_id: ticketId },
-      order: [["created_at", "ASC"]],
+      order: [["created_at", "DESC"]],
       include: [
         {
           model: User,
@@ -7940,7 +7982,7 @@ const managerAttendMajor = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Major complaint attended and assigned to Head of Unit successfully",
+      message: `Major complaint attended and assigned to ${headOfUnit.full_name || headOfUnit.username || headOfUnit.id} (${headOfUnit.role || "head-of-unit"}) successfully`,
       data: {
         ticket,
         assignedTo: {
