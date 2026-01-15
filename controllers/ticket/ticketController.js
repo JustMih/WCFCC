@@ -1892,11 +1892,18 @@ const createTicket = async (req, res) => {
       }
     }
     // --- Respond to client immediately ---
+    const assignedToLabel = assignedUser
+      ? `${assignedUser.full_name || assignedUser.username || assignedUser.id} (${assignedUser.role || "user"})`
+      : "Unassigned";
+
     res.status(201).json({
       message: `Ticket created successfully${
         shouldClose ? " and closed" : ""
-      }${emailWarning}`,
+      }${emailWarning}${shouldClose ? "" : ` and assigned to ${assignedToLabel}`}`,
       ticket: newTicket,
+      assigned_to: assignedUser
+        ? { id: assignedUser.id, full_name: assignedUser.full_name, role: assignedUser.role }
+        : null,
     });
     // --- Send email to assignee in background ---
     if (assignedUser.email && !shouldClose) {
@@ -4468,7 +4475,7 @@ const assignTicket = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Ticket assigned successfully"
+      message: `Ticket assigned successfully to ${assignedTo.full_name || assignedTo.username || assignedTo.id} (${assignedTo.role || "user"})`
     });
 
   } catch (error) {
@@ -5617,9 +5624,11 @@ const reassignTicket = async (req, res) => {
       status: "unread",
     });
 
+    // Resolve new assignee for response message
+    const newAssignee = await User.findByPk(assigned_to_id);
+
     // Send notification to the new assignee (optional)
     try {
-      const newAssignee = await User.findByPk(assigned_to_id);
       if (newAssignee && newAssignee.email) {
         const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
         const bodyHtml = `
@@ -5650,7 +5659,7 @@ const reassignTicket = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Ticket reassigned successfully",
+      message: `Ticket reassigned successfully to ${newAssignee?.full_name || newAssignee?.username || assigned_to_id} (${newAssignee?.role || assigned_to_role || "user"})`,
     });
   } catch (error) {
     console.error("Error in reassignTicket:", error);
@@ -6046,7 +6055,7 @@ const reverseTicket = async (req, res) => {
         : 'user';
 
       return res.json({
-        message: `Ticket reversed successfully to ${formattedRole}`,
+        message: `Ticket reversed successfully to ${prevUser.full_name || prevUser.username || prevUser.id} (${formattedRole})`,
         workflow: result.workflow,
         assignment: result.assignment
       });
@@ -6127,7 +6136,7 @@ const reverseTicket = async (req, res) => {
         ? targetUserRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
         : 'user';
 
-      return res.json({ message: `Ticket reversed successfully to ${formattedRole}` });
+      return res.json({ message: `Ticket reversed successfully to ${prevUser.full_name || prevUser.username || prevUser.id} (${formattedRole})` });
     }
 
   } catch (error) {
@@ -6847,7 +6856,7 @@ const forwardToDirectorGeneral = async (req, res) => {
     }
 
     res.status(200).json({
-      message: `${isMajorComplaint ? "Major complaint" : "Reversed ticket"} assigned to Director General for review`,
+      message: `${isMajorComplaint ? "Major complaint" : "Reversed ticket"} forwarded to ${directorGeneral.full_name || directorGeneral.username || directorGeneral.id} (${directorGeneral.role || "director-general"}) for review`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: directorGeneral.full_name,
@@ -7535,7 +7544,7 @@ const approveAndForwardToReviewer = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Ticket approved and forwarded to reviewer successfully",
+      message: `Ticket approved and forwarded to ${reviewer.full_name || reviewer.username || reviewer.id} (${reviewer.role || "reviewer"}) successfully`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: reviewer.full_name
@@ -7659,7 +7668,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Ticket reversed and assigned to reviewer successfully",
+      message: `Ticket reversed and assigned to ${reviewer.full_name || reviewer.username || reviewer.id} (${reviewer.role || "reviewer"}) successfully`,
       ticket: {
         ...ticket.toJSON(),
         assigned_to_name: reviewer.full_name
@@ -7973,7 +7982,7 @@ const managerAttendMajor = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Major complaint attended and assigned to Head of Unit successfully",
+      message: `Major complaint attended and assigned to ${headOfUnit.full_name || headOfUnit.username || headOfUnit.id} (${headOfUnit.role || "head-of-unit"}) successfully`,
       data: {
         ticket,
         assignedTo: {

@@ -600,7 +600,18 @@ const convertOrForwardTicket = async (req, res) => {
       ]
     });
 
-    // Build dynamic message
+    // Build dynamic message (include the actual user name the ticket was forwarded/assigned to)
+    let assignedToUser = null;
+    try {
+      if (updatedTicket && updatedTicket.assigned_to_id) {
+        assignedToUser = await User.findByPk(updatedTicket.assigned_to_id, {
+          attributes: ["id", "full_name", "username", "role"],
+        });
+      }
+    } catch (e) {
+      assignedToUser = null;
+    }
+
     const messageParts = [];
     if (ratingDone) messageParts.push(`rated as '${complaintType}'`);
     if (conversionDone) messageParts.push(`converted to Inquiry`);
@@ -609,7 +620,10 @@ const convertOrForwardTicket = async (req, res) => {
       const formattedRole = assignedRole 
         ? assignedRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
         : 'user';
-      messageParts.push(`forwarded to '${responsible_unit_name}' (${formattedRole})`);
+      const assignedToLabel = assignedToUser
+        ? `${assignedToUser.full_name || assignedToUser.username || assignedToUser.id}`
+        : `${formattedRole}`;
+      messageParts.push(`forwarded to '${responsible_unit_name}' → ${assignedToLabel} (${formattedRole})`);
     }
     const message = `Ticket successfully ${messageParts.join(" and ")}`;
 
