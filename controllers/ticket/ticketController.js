@@ -4532,7 +4532,7 @@ const getAllAttendee = async (req, res) => {
       whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
     } else if (targetRole === "manager") {
       // For managers/directors, show both managers and focal-persons in attendees list
-      whereClause.role = { [Op.in]: ["manager"] };
+      whereClause.role = { [Op.in]: ["manager", "reviewer"] };
     } else {
       whereClause.role = targetRole;
     }
@@ -4633,10 +4633,10 @@ const getAllAttendee = async (req, res) => {
         whereClause.unit_section = currentUser.unit_section;
         // Ensure we're filtering by attendee/agent/focal-person roles (unless directorate which shows managers and focal-persons)
         if (targetRole === "attendee") {
-          whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
+          whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person", "reviewer"] };
         } else if (targetRole === "manager") {
           // For head-of-unit with directorate, show both managers and focal-persons
-          whereClause.role = { [Op.in]: ["manager"] };
+          whereClause.role = { [Op.in]: ["manager", "reviewer"] };
         } else {
           whereClause.role = targetRole;
         }
