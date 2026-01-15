@@ -77,32 +77,66 @@ const updateMissedCallOnCallback = async ({
 }) => {
   if (!agentExt || !caller || !callbackTime) return;
 
-  await sequelize.query(
-    `
-    UPDATE MissedCalls
-    SET
-      status = 'called_back',
-      called_back_by = :agentExt,
-      called_back_at = :callbackTime,
-      billsec = :billsec,
-      updatedAt = NOW()
-    WHERE
-      status = 'pending'
-      AND archived = 0
-      AND caller = :caller
-      AND time < :callbackTime
-    ORDER BY time DESC
-    LIMIT 1
-    `,
-    {
-      replacements: {
-        agentExt,
-        caller,
-        callbackTime,
-        billsec: billsec || 0,
-      },
+  try {
+    // Check if columns exist by trying a simpler update first
+    // If called_back_by column doesn't exist, just update status
+    await sequelize.query(
+      `
+      UPDATE MissedCalls
+      SET
+        status = 'called_back',
+        updatedAt = NOW()
+      WHERE
+        status = 'pending'
+        AND caller = :caller
+        AND time < :callbackTime
+      ORDER BY time DESC
+      LIMIT 1
+      `,
+      {
+        replacements: {
+          caller,
+          callbackTime,
+        },
+      }
+    );
+
+    // Try to update additional columns if they exist
+    try {
+      await sequelize.query(
+        `
+        UPDATE MissedCalls
+        SET
+          called_back_by = :agentExt,
+          called_back_at = :callbackTime,
+          billsec = :billsec
+        WHERE
+          status = 'called_back'
+          AND caller = :caller
+          AND time < :callbackTime
+        ORDER BY time DESC
+        LIMIT 1
+        `,
+        {
+          replacements: {
+            agentExt,
+            caller,
+            callbackTime,
+            billsec: billsec || 0,
+          },
+        }
+      );
+    } catch (colError) {
+      // Columns don't exist, that's okay - we already updated status
+      console.log(
+        "Optional columns (called_back_by, called_back_at, billsec) not available:",
+        colError.message
+      );
     }
-  );
+  } catch (error) {
+    // Log but don't throw - this shouldn't break the dashboard
+    console.error("Error updating missed call on callback:", error.message);
+  }
 };
 
 /* ======================================================
@@ -113,33 +147,50 @@ const getPublicDashboardData = async (req, res) => {
   try {
     /* ---------- AGENT STATUS ---------- */
 
-    const onlineCount = await User.count({
-      where: { status: "online", role: "agent" },
-    });
+    let onlineCount = 0;
+    let offlineCount = 0;
 
-    const offlineCount = await User.count({
-      where: {
-        role: "agent",
-        [Op.or]: [{ status: "offline" }, { status: null }],
-      },
-    });
+    try {
+      onlineCount = await User.count({
+        where: { status: "online", role: "agent" },
+      });
+    } catch (err) {
+      console.error("Error fetching online agents count:", err.message);
+    }
+
+    try {
+      offlineCount = await User.count({
+        where: {
+          role: "agent",
+          [Op.or]: [{ status: "offline" }, { status: null }],
+        },
+      });
+    } catch (err) {
+      console.error("Error fetching offline agents count:", err.message);
+    }
 
     /* ---------- CEL EVENTS ---------- */
 
-    const events = await CEL.findAll({
-      where: {
-        eventtype: [
-          "CHAN_START",
-          "ANSWER",
-          "HANGUP",
-          "APP_START",
-          "BRIDGE_ENTER",
-        ],
-        eventtime: { [Op.gte]: moment().subtract(5, "minutes").toDate() },
-      },
-      order: [["eventtime", "ASC"]],
-      limit: 1000,
-    });
+    let events = [];
+    try {
+      events = await CEL.findAll({
+        where: {
+          eventtype: [
+            "CHAN_START",
+            "ANSWER",
+            "HANGUP",
+            "APP_START",
+            "BRIDGE_ENTER",
+          ],
+          eventtime: { [Op.gte]: moment().subtract(5, "minutes").toDate() },
+        },
+        order: [["eventtime", "ASC"]],
+        limit: 1000,
+      });
+    } catch (err) {
+      console.error("Error fetching CEL events:", err.message);
+      events = []; // Default to empty array
+    }
 
     const calls = {};
 
@@ -238,18 +289,40 @@ const getPublicDashboardData = async (req, res) => {
     });
 
     // Get call statistics
-    const totalCounts = await sequelize.query(
-      "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
-    );
-    const monthlyCounts = await sequelize.query(
-      "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
-    );
-    const dailyCounts = await sequelize.query(
-      "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
-    );
-    const totalRows = await sequelize.query(
-      "SELECT COUNT(*) AS total FROM cdr"
-    );
+    let totalCounts = [];
+    let monthlyCounts = [];
+    let dailyCounts = [];
+    let totalRows = [{ total: 0 }];
+
+    try {
+      totalCounts = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
+      );
+    } catch (err) {
+      console.error("Error fetching total counts:", err.message);
+    }
+
+    try {
+      monthlyCounts = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
+      );
+    } catch (err) {
+      console.error("Error fetching monthly counts:", err.message);
+    }
+
+    try {
+      dailyCounts = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
+      );
+    } catch (err) {
+      console.error("Error fetching daily counts:", err.message);
+    }
+
+    try {
+      totalRows = await sequelize.query("SELECT COUNT(*) AS total FROM cdr");
+    } catch (err) {
+      console.error("Error fetching total rows:", err.message);
+    }
 
     // Categorize calls by status
     // Active calls: Currently being handled (BRIDGE_ENTER occurred)
@@ -283,24 +356,36 @@ const getPublicDashboardData = async (req, res) => {
 
     // Get lost calls count from CDR for today
     // Lost = calls that were in queue (lastapp = 'Queue') but not answered (disposition = 'NO ANSWER')
-    const lostCallsToday = await sequelize.query(
-      `SELECT COUNT(*) AS count 
-       FROM cdr 
-       WHERE DATE(cdrstarttime) = CURDATE() 
-         AND disposition = 'NO ANSWER' 
-         AND lastapp = 'Queue'`,
-      { type: sequelize.QueryTypes.SELECT }
-    );
-
-    const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
+    let lostCallsCountToday = 0;
+    try {
+      const lostCallsToday = await sequelize.query(
+        `SELECT COUNT(*) AS count 
+         FROM cdr 
+         WHERE DATE(cdrstarttime) = CURDATE() 
+           AND disposition = 'NO ANSWER' 
+           AND lastapp = 'Queue'`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+      lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
+    } catch (err) {
+      console.error("Error fetching lost calls count:", err.message);
+      lostCallsCountToday = 0;
+    }
 
     /* ---------- QUEUE STATUS ---------- */
 
-    const queueStatus = QueueStatus
-      ? (await QueueStatus.findAll({ order: [["queue", "ASC"]] })).map((q) =>
-          q.toJSON()
-        )
-      : [];
+    let queueStatus = [];
+    try {
+      if (QueueStatus) {
+        const queueData = await QueueStatus.findAll({
+          order: [["queue", "ASC"]],
+        });
+        queueStatus = queueData.map((q) => q.toJSON());
+      }
+    } catch (queueError) {
+      console.error("Error fetching queue status:", queueError.message);
+      queueStatus = []; // Default to empty array
+    }
 
     /* ---------- RESPONSE ---------- */
 
@@ -329,7 +414,18 @@ const getPublicDashboardData = async (req, res) => {
     res.json(dashboardData);
   } catch (err) {
     console.error("Dashboard error:", err);
-    res.status(500).json({ error: "Dashboard failed" });
+    console.error("Error stack:", err.stack);
+    console.error("Error details:", {
+      message: err.message,
+      name: err.name,
+      sql: err.sql,
+      original: err.original,
+    });
+    res.status(500).json({
+      error: "Dashboard failed",
+      message: err.message,
+      details: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    });
   }
 };
 
