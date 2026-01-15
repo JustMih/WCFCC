@@ -182,22 +182,19 @@ const convertOrForwardTicket = async (req, res) => {
     // Reload ticket to ensure we have the latest data (especially after reverse)
     await ticket.reload({ transaction });
 
+    const isComplaintTicket = String(ticket.category || "").toLowerCase() === "complaint";
+    const isConvertingToInquiry = String(category || "").toLowerCase() === "inquiry";
+    const isForwarding = Boolean(responsible_unit_name);
+
     // Check if any action parameters are provided
     if (!category && !responsible_unit_name && !complaintType) {
       await safeRollback(transaction);
       return res.status(400).json({
-        message: "Please provide a rating (complaintType) and select a unit to forward to. Category conversion is optional."
+        message: "Please select a unit to forward to, or choose a category to convert to."
       });
     }
 
-    // Check if required parameters are provided
-    if (!complaintType) {
-      await safeRollback(transaction);
-      return res.status(400).json({
-        message: "Rating is required. Please provide complaintType (Minor or Major)."
-      });
-    }
-
+    // Forwarding requires a target unit/section
     if (!responsible_unit_name) {
       await safeRollback(transaction);
       return res.status(400).json({
@@ -205,11 +202,23 @@ const convertOrForwardTicket = async (req, res) => {
       });
     }
 
-    // Validate that comment/description is provided when rating and forwarding
-    if (complaintType && responsible_unit_name && (!ratingComment || !ratingComment.trim())) {
+    // Rating rules:
+    // - Required ONLY when forwarding a Complaint ticket as a complaint (i.e., not converting to Inquiry)
+    // - Not required for non-Complaint tickets (Compliment/Suggestion/Inquiry/etc.)
+    // - Not required when converting to Inquiry
+    const effectiveComplaintType = complaintType || ticket.complaint_type;
+    if (isForwarding && isComplaintTicket && !isConvertingToInquiry && !effectiveComplaintType) {
       await safeRollback(transaction);
       return res.status(400).json({
-        message: "Comment/Description is required when rating and forwarding a complaint. Please provide a comment before forwarding."
+        message: "Rating is required. Please provide complaintType (Minor or Major)."
+      });
+    }
+
+    // Comment is required when forwarding a complaint (as a complaint)
+    if (isForwarding && isComplaintTicket && !isConvertingToInquiry && (!ratingComment || !ratingComment.trim())) {
+      await safeRollback(transaction);
+      return res.status(400).json({
+        message: "Comment/Description is required when forwarding a complaint. Please provide a comment before forwarding."
       });
     }
 
@@ -218,16 +227,17 @@ const convertOrForwardTicket = async (req, res) => {
     let ratingDone = false;
     let assignedRole = null; // Store the role of the user the ticket was assigned to
 
-    // Handle rating (if provided)
-    if (complaintType) {
-      if (!["Minor", "Major"].includes(complaintType)) {
+    // Handle rating (only if provided OR required)
+    if (complaintType || (isForwarding && isComplaintTicket && !isConvertingToInquiry && ticket.complaint_type)) {
+      const complaintTypeToApply = complaintType || ticket.complaint_type;
+      if (!["Minor", "Major"].includes(complaintTypeToApply)) {
         await safeRollback(transaction);
         return res.status(400).json({ 
           message: "Invalid complaint type. Use 'Minor' or 'Major'." 
         });
       }
 
-      ticket.complaint_type = complaintType;
+      ticket.complaint_type = complaintTypeToApply;
       ticket.rated_by_id = userId;
       ticket.rated_at = new Date();
       ratingDone = true;
@@ -343,8 +353,9 @@ const convertOrForwardTicket = async (req, res) => {
 
       // Allow forwarding again - removed restriction to allow re-forwarding tickets
 
-      // Validate that ticket is rated before forwarding
-      if (!ticket.complaint_type && !ratingDone) {
+      // Validate that ticket is rated before forwarding (Complaint tickets only)
+      // If converting to Inquiry in this request, rating is not required.
+      if (isComplaintTicket && !conversionDone && !ticket.complaint_type && !ratingDone) {
         await safeRollback(transaction);
         return res.status(400).json({
           message: "Ticket must be rated (Minor or Major) before it can be forwarded"
