@@ -147,19 +147,7 @@ const getAgentCdrStatsToday = async (req, res) => {
 const getLostCallsToday = async (req, res) => {
   try {
     const lostCalls = await sequelize.query(
-      `SELECT 
-        clid AS caller,
-        cdrstarttime AS call_time,
-        disposition,
-        duration,
-        src AS agent_extension
-      FROM cdr 
-      WHERE DATE(cdrstarttime) = CURDATE() 
-        AND (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND clid IS NOT NULL
-        AND clid != ''
-      ORDER BY cdrstarttime DESC
-      LIMIT 500`,
+      `SELECT mc.caller, mc.time AS call_time, mc.status, mc.called_back_by AS callback_agent_extension, u.full_name AS callback_agent_name, mc.called_back_at AS callback_time, mc.billsec AS callback_duration FROM MissedCalls mc LEFT JOIN Users u ON u.extension = mc.called_back_by WHERE DATE(mc.time) = CURDATE() AND mc.archived = 0 ORDER BY mc.time DESC`,
       {
         type: sequelize.QueryTypes.SELECT,
       }

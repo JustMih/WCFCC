@@ -300,7 +300,7 @@ const getPublicDashboardData = async (req, res) => {
       { type: sequelize.QueryTypes.SELECT }
     );
 
-    const lostCount = parseInt(lostResult[0]?.count || 0);
+   const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
 
     /* ---------- QUEUE STATUS ---------- */
 
@@ -315,13 +315,14 @@ const getPublicDashboardData = async (req, res) => {
     const dashboardData = {
       agentStatus: { onlineCount, offlineCount },
       liveCalls,
-      callStatusSummary: {
-        active: activeCalls.length,
-        inQueue: inQueueCalls.length, // Currently waiting in queue
-        answered: answeredCalls.length,
-        dropped: droppedCalls.length,
-        lost: lostCallsCountToday, // Total lost calls today (from CDR)
-      },
+     callStatusSummary: {
+      active: activeCalls.length,
+      inQueue: inQueueCalls.length,
+      answered: answeredCalls.length,
+      dropped: droppedCalls.length,
+      lost: lostCallsCountToday,
+    },
+
       callStats: {
         totalCounts: totalCounts[0] || [],
         monthlyCounts: monthlyCounts[0] || [],
