@@ -1,4 +1,4 @@
- const sequelize = require("../../config/mysql_connection");
+const sequelize = require("../../config/mysql_connection");
 const { Op } = require("sequelize");
 const User = require("../../models/User");
 const CEL = require("../../models/CEL")(
@@ -251,14 +251,6 @@ const getPublicDashboardData = async (req, res) => {
       "SELECT COUNT(*) AS total FROM cdr"
     );
 
-    // Get queue status
-    
-    if (QueueStatus) {
-      queueStatus = await QueueStatus.findAll({
-        order: [["queue", "ASC"]],
-      });
-    }
-
     // Categorize calls by status
     // Active calls: Currently being handled (BRIDGE_ENTER occurred)
     const activeCalls = liveCalls.filter((call) => call.status === "active");
@@ -300,10 +292,9 @@ const getPublicDashboardData = async (req, res) => {
       { type: sequelize.QueryTypes.SELECT }
     );
 
-   const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
+    const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
 
     /* ---------- QUEUE STATUS ---------- */
-    
 
     const queueStatus = QueueStatus
       ? (await QueueStatus.findAll({ order: [["queue", "ASC"]] })).map((q) =>
@@ -316,13 +307,13 @@ const getPublicDashboardData = async (req, res) => {
     const dashboardData = {
       agentStatus: { onlineCount, offlineCount },
       liveCalls,
-     callStatusSummary: {
-      active: activeCalls.length,
-      inQueue: inQueueCalls.length,
-      answered: answeredCalls.length,
-      dropped: droppedCalls.length,
-      lost: lostCallsCountToday,
-    },
+      callStatusSummary: {
+        active: activeCalls.length,
+        inQueue: inQueueCalls.length,
+        answered: answeredCalls.length,
+        dropped: droppedCalls.length,
+        lost: lostCallsCountToday,
+      },
 
       callStats: {
         totalCounts: totalCounts[0] || [],
@@ -330,7 +321,7 @@ const getPublicDashboardData = async (req, res) => {
         dailyCounts: dailyCounts[0] || [],
         totalRows: totalRows[0]?.[0]?.total || 0,
       },
-      queueStatus: queueStatus.map((q) => q.toJSON()),
+      queueStatus: queueStatus,
       timestamp: new Date().toISOString(),
     };
 
