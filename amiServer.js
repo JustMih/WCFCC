@@ -2,13 +2,13 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 const AsteriskManager = require('asterisk-manager');
-
+const { baseURL } = require('./config');
 const app = express();
 app.use(cors());
 
 // ✅ Connect to Asterisk AMI
 
-const ami = new AsteriskManager(5038, '10.52.0.19', 'admin', '@Ttcl123', true);
+const ami = new AsteriskManager(5038, baseURL, 'admin', '@Ttcl123', true);
 
 ami.keepConnected();
 

@@ -10,122 +10,259 @@ const db = require("../../models");
 
 const QueueStatus = db.QueueStatus;
 
-// Socket.IO instance for real-time updates
+/* ======================================================
+   SOCKET.IO
+====================================================== */
+
 let ioInstance = null;
 
-// Setup socket instance
 const setSocketInstance = (io) => {
   ioInstance = io;
 };
 
-// Emit dashboard update to all connected clients
-const emitDashboardUpdate = (dashboardData) => {
+const emitDashboardUpdate = (data) => {
   if (ioInstance) {
-    ioInstance.emit("public_dashboard_update", dashboardData);
+    ioInstance.emit("public_dashboard_update", data);
   }
 };
 
-// Public dashboard data aggregator - No authentication required
-const getPublicDashboardData = async (req, res) => {
+/* ======================================================
+   HELPERS
+====================================================== */
+
+const normalizeNumber = (val) => {
+  if (!val) return null;
+  const match = val.toString().match(/\d+/g);
+  return match ? match.join("") : null;
+};
+
+/* ======================================================
+   MISSED CALL INSERT
+====================================================== */
+
+const insertMissedCall = async ({ caller, time, linkedid }) => {
+  const normalizedCaller = normalizeNumber(caller);
+  if (!normalizedCaller || !time || !linkedid) return;
+
+  await sequelize.query(
+    `
+    INSERT INTO MissedCalls
+      (caller, time, status, linkedid, createdAt, updatedAt)
+    SELECT
+      :caller, :time, 'pending', :linkedid, NOW(), NOW()
+    FROM DUAL
+    WHERE NOT EXISTS (
+      SELECT 1 FROM MissedCalls WHERE linkedid = :linkedid
+    )
+    `,
+    {
+      replacements: {
+        caller: normalizedCaller,
+        time,
+        linkedid,
+      },
+    }
+  );
+};
+
+/* ======================================================
+   MISSED CALL UPDATE (CALLBACK)
+====================================================== */
+
+const updateMissedCallOnCallback = async ({
+  agentExt,
+  caller,
+  callbackTime,
+  billsec,
+}) => {
+  if (!agentExt || !caller || !callbackTime) return;
+
   try {
-    // Get agent status counts
-    const onlineCount = await User.count({
-      where: {
-        status: "online",
-        role: "agent",
-      },
-    });
+    // Check if columns exist by trying a simpler update first
+    // If called_back_by column doesn't exist, just update status
+    await sequelize.query(
+      `
+      UPDATE MissedCalls
+      SET
+        status = 'called_back',
+        updatedAt = NOW()
+      WHERE
+        status = 'pending'
+        AND caller = :caller
+        AND time < :callbackTime
+      ORDER BY time DESC
+      LIMIT 1
+      `,
+      {
+        replacements: {
+          caller,
+          callbackTime,
+        },
+      }
+    );
 
-    const offlineCount = await User.count({
-      where: {
-        role: "agent",
-        [Op.or]: [{ status: "offline" }, { status: null }],
-      },
-    });
+    // Try to update additional columns if they exist
+    try {
+      await sequelize.query(
+        `
+        UPDATE MissedCalls
+        SET
+          called_back_by = :agentExt,
+          called_back_at = :callbackTime,
+          billsec = :billsec
+        WHERE
+          status = 'called_back'
+          AND caller = :caller
+          AND time < :callbackTime
+        ORDER BY time DESC
+        LIMIT 1
+        `,
+        {
+          replacements: {
+            agentExt,
+            caller,
+            callbackTime,
+            billsec: billsec || 0,
+          },
+        }
+      );
+    } catch (colError) {
+      // Columns don't exist, that's okay - we already updated status
+      console.log(
+        "Optional columns (called_back_by, called_back_at, billsec) not available:",
+        colError.message
+      );
+    }
+  } catch (error) {
+    // Log but don't throw - this shouldn't break the dashboard
+    console.error("Error updating missed call on callback:", error.message);
+  }
+};
 
-    // Get live calls
-    const events = await CEL.findAll({
-      where: {
-        eventtype: [
-          "CHAN_START",
-          "ANSWER",
-          "HANGUP",
-          "APP_START",
-          "APP_END",
-          "BRIDGE_ENTER",
-        ],
-        eventtime: { [Op.gte]: moment().subtract(5, "minutes").toDate() },
-      },
-      order: [["eventtime", "ASC"]],
-      limit: 1000,
-    });
+/* ======================================================
+   PUBLIC DASHBOARD CONTROLLER
+====================================================== */
+
+const getPublicDashboardData = async (req, res) => {
+  // Initialize all variables at the top to prevent "not defined" errors
+  let onlineCount = 0;
+  let offlineCount = 0;
+  let events = [];
+  let totalCounts = [];
+  let monthlyCounts = [];
+  let dailyCounts = [];
+  let totalRows = [{ total: 0 }];
+  let lostCallsCountToday = 0;
+  let queueStatus = [];
+  let liveCalls = [];
+
+  try {
+    /* ---------- AGENT STATUS ---------- */
+
+    try {
+      onlineCount = await User.count({
+        where: { status: "online", role: "agent" },
+      });
+    } catch (err) {
+      console.error("Error fetching online agents count:", err.message);
+    }
+
+    try {
+      offlineCount = await User.count({
+        where: {
+          role: "agent",
+          [Op.or]: [{ status: "offline" }, { status: null }],
+        },
+      });
+    } catch (err) {
+      console.error("Error fetching offline agents count:", err.message);
+    }
+
+    /* ---------- CEL EVENTS ---------- */
+
+    try {
+      events = await CEL.findAll({
+        where: {
+          eventtype: [
+            "CHAN_START",
+            "ANSWER",
+            "HANGUP",
+            "APP_START",
+            "BRIDGE_ENTER",
+          ],
+          eventtime: { [Op.gte]: moment().subtract(5, "minutes").toDate() },
+        },
+        order: [["eventtime", "ASC"]],
+        limit: 1000,
+      });
+    } catch (err) {
+      console.error("Error fetching CEL events:", err.message);
+      events = []; // Default to empty array
+    }
 
     const calls = {};
+
     for (const row of events) {
       const key = row.linkedid || row.uniqueid;
+
       if (!calls[key]) {
         calls[key] = {
-          caller: row.cid_num || "-",
-          cid_dnid: row.cid_dnid || "-",
-          callee: row.cid_dnid || row.peer || row.exten || "-",
-          channel: row.channame || "-",
           linkedid: key,
+          caller: row.cid_num || null,
+          channel: row.channame || null,
           call_start: null,
           call_answered: null,
           call_end: null,
-          status: "calling",
-          duration_secs: null,
           queue_entry_time: null,
-          estimated_wait_time: null,
-          voicemail_path: null,
-          missed: false,
+          status: "calling",
         };
       }
 
       const c = calls[key];
+
       switch (row.eventtype) {
         case "CHAN_START":
-          if (!c.call_start) {
-            c.call_start = row.eventtime;
-            // Don't set queue_entry_time here - only set it when APP_START with Queue occurs
-            console.log(`📞 CHAN_START: ${key} at ${row.eventtime}`);
-          }
-          c.status = "calling";
+          if (!c.call_start) c.call_start = row.eventtime;
           break;
+
+        case "APP_START":
+          if (row.appname === "Queue" && !c.queue_entry_time) {
+            c.queue_entry_time = row.eventtime;
+          }
+          break;
+
         case "ANSWER":
           if (!c.call_answered) {
             c.call_answered = row.eventtime;
-            c.status = "calling";
-            console.log(`✅ ANSWER: ${key} at ${row.eventtime}`);
+
+            await updateMissedCallOnCallback({
+              agentExt: row.src || row.peer,
+              caller: normalizeNumber(row.exten || row.cid_num),
+              callbackTime: row.eventtime,
+              billsec: row.billsec,
+            });
           }
           break;
+
         case "BRIDGE_ENTER":
-          // If call has not been answered and Bridge Enter event occurs, mark it as answered and active
-          c.status = "active"; // Set status to active since the call is bridged
-          console.log(`🔗 BRIDGE_ENTER: ${key} at ${row.eventtime}`);
+          c.status = "active";
           break;
+
         case "HANGUP":
           c.call_end = row.eventtime;
+
           if (!c.call_answered && c.queue_entry_time) {
             c.status = "lost";
-          } else if (!c.call_answered && !c.queue_entry_time) {
+
+            await insertMissedCall({
+              caller: c.caller,
+              time: row.eventtime,
+              linkedid: c.linkedid,
+            });
+          } else if (!c.call_answered) {
             c.status = "dropped";
           } else {
             c.status = "ended";
-          }
-          console.log(`📴 HANGUP: ${key} => ${c.status} at ${row.eventtime}`);
-          break;
-        case "APP_START":
-          if (row.appname === "Queue") {
-            if (!c.queue_entry_time) {
-              c.queue_entry_time = row.eventtime;
-            }
-            // Keep status as "calling" when in queue - don't change it
-            console.log(`📥 Queue Entered: ${key} at ${row.eventtime}`);
-          }
-          if (row.appname === "VoiceMail") {
-            c.voicemail_path = `/recorded/voicemails/${key}.wav`;
-            console.log(`🗣️ Voicemail triggered for ${key}`);
           }
           break;
       }
@@ -153,32 +290,60 @@ const getPublicDashboardData = async (req, res) => {
         );
     }
 
-    const liveCalls = Object.values(calls).sort((a, b) => {
+    liveCalls = Object.values(calls).sort((a, b) => {
       if (a.status === "active" && b.status !== "active") return -1;
       if (b.status === "active" && a.status !== "active") return 1;
       return new Date(b.call_start || 0) - new Date(a.call_start || 0);
     });
 
     // Get call statistics
-    const totalCounts = await sequelize.query(
-      "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
-    );
-    const monthlyCounts = await sequelize.query(
-      "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
-    );
-    const dailyCounts = await sequelize.query(
-      "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
-    );
-    const totalRows = await sequelize.query(
-      "SELECT COUNT(*) AS total FROM cdr"
-    );
+    try {
+      const totalCountsResult = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr GROUP BY disposition"
+      );
+      // sequelize.query returns [results, metadata], so we need the first element
+      totalCounts = Array.isArray(totalCountsResult)
+        ? totalCountsResult[0]
+        : [];
+    } catch (err) {
+      console.error("Error fetching total counts:", err.message);
+      totalCounts = [];
+    }
 
-    // Get queue status
-    let queueStatus = [];
-    if (QueueStatus) {
-      queueStatus = await QueueStatus.findAll({
-        order: [["queue", "ASC"]],
-      });
+    try {
+      const monthlyCountsResult = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr WHERE YEAR(cdrstarttime) = YEAR(CURDATE()) AND MONTH(cdrstarttime) = MONTH(CURDATE()) GROUP BY disposition"
+      );
+      monthlyCounts = Array.isArray(monthlyCountsResult)
+        ? monthlyCountsResult[0]
+        : [];
+    } catch (err) {
+      console.error("Error fetching monthly counts:", err.message);
+      monthlyCounts = [];
+    }
+
+    try {
+      const dailyCountsResult = await sequelize.query(
+        "SELECT disposition, COUNT(*) AS count FROM cdr WHERE DATE(cdrstarttime) = CURDATE() GROUP BY disposition"
+      );
+      dailyCounts = Array.isArray(dailyCountsResult)
+        ? dailyCountsResult[0]
+        : [];
+    } catch (err) {
+      console.error("Error fetching daily counts:", err.message);
+      dailyCounts = [];
+    }
+
+    try {
+      const totalRowsResult = await sequelize.query(
+        "SELECT COUNT(*) AS total FROM cdr"
+      );
+      totalRows = Array.isArray(totalRowsResult)
+        ? totalRowsResult
+        : [{ total: 0 }];
+    } catch (err) {
+      console.error("Error fetching total rows:", err.message);
+      totalRows = [{ total: 0 }];
     }
 
     // Categorize calls by status
@@ -213,54 +378,84 @@ const getPublicDashboardData = async (req, res) => {
 
     // Get lost calls count from CDR for today
     // Lost = calls that were in queue (lastapp = 'Queue') but not answered (disposition = 'NO ANSWER')
-    const lostCallsToday = await sequelize.query(
-      `SELECT COUNT(*) AS count 
-       FROM cdr 
-       WHERE DATE(cdrstarttime) = CURDATE() 
-         AND disposition = 'NO ANSWER' 
-         AND lastapp = 'Queue'`,
-      { type: sequelize.QueryTypes.SELECT }
-    );
-    const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
+    try {
+      const lostCallsToday = await sequelize.query(
+        `SELECT COUNT(*) AS count 
+         FROM cdr 
+         WHERE DATE(cdrstarttime) = CURDATE() 
+           AND disposition = 'NO ANSWER' 
+           AND lastapp = 'Queue'`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+      lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
+    } catch (err) {
+      console.error("Error fetching lost calls count:", err.message);
+      lostCallsCountToday = 0;
+    }
 
-    // Aggregate response
+    /* ---------- QUEUE STATUS ---------- */
+
+    try {
+      if (QueueStatus) {
+        const queueData = await QueueStatus.findAll({
+          order: [["queue", "ASC"]],
+        });
+        queueStatus = queueData.map((q) => q.toJSON());
+      }
+    } catch (queueError) {
+      console.error("Error fetching queue status:", queueError.message);
+      queueStatus = []; // Default to empty array
+    }
+
+    /* ---------- RESPONSE ---------- */
+
     const dashboardData = {
-      agentStatus: {
-        onlineCount,
-        offlineCount,
-      },
-      liveCalls: activeCalls, // Only show active calls in main display
+      agentStatus: { onlineCount, offlineCount },
+      liveCalls,
       callStatusSummary: {
         active: activeCalls.length,
-        inQueue: inQueueCalls.length, // Currently waiting in queue
+        inQueue: inQueueCalls.length,
         answered: answeredCalls.length,
         dropped: droppedCalls.length,
-        lost: lostCallsCountToday, // Total lost calls today (from CDR)
+        lost: lostCallsCountToday,
       },
+
       callStats: {
-        totalCounts: totalCounts[0] || [],
-        monthlyCounts: monthlyCounts[0] || [],
-        dailyCounts: dailyCounts[0] || [],
-        totalRows: totalRows[0]?.[0]?.total || 0,
+        totalCounts: Array.isArray(totalCounts) ? totalCounts : [],
+        monthlyCounts: Array.isArray(monthlyCounts) ? monthlyCounts : [],
+        dailyCounts: Array.isArray(dailyCounts) ? dailyCounts : [],
+        totalRows:
+          Array.isArray(totalRows) && totalRows[0] && totalRows[0][0]
+            ? totalRows[0][0].total || 0
+            : 0,
       },
-      queueStatus: queueStatus.map((q) => q.toJSON()),
+      queueStatus: queueStatus,
       timestamp: new Date().toISOString(),
     };
 
-    // Emit real-time update via Socket.IO
     emitDashboardUpdate(dashboardData);
-
-    res.status(200).json(dashboardData);
-  } catch (error) {
-    console.error("Error fetching public dashboard data:", error);
+    res.json(dashboardData);
+  } catch (err) {
+    console.error("Dashboard error:", err);
+    console.error("Error stack:", err.stack);
+    console.error("Error details:", {
+      message: err.message,
+      name: err.name,
+      sql: err.sql,
+      original: err.original,
+    });
     res.status(500).json({
-      error: "Failed to fetch dashboard data",
-      message: error.message,
+      error: "Dashboard failed",
+      message: err.message,
+      details: process.env.NODE_ENV === "development" ? err.stack : undefined,
     });
   }
 };
 
-// Start periodic updates (call this from server.js after socket setup)
+/* ======================================================
+   PERIODIC UPDATES
+====================================================== */
+
 const startPeriodicUpdates = () => {
   setInterval(async () => {
     try {

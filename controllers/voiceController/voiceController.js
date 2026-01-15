@@ -49,7 +49,61 @@ const getVoiceById = async (req, res) => {
     res.status(500).json({ error: error.message });
   } 
 };
+// Serve audio file by voice ID
+const getVoiceAudio = async (req, res) => {
+  const { id } = req.params;
 
+  try {
+    const voice = await IVRVoice.findByPk(id);
+    if (!voice) {
+      return res.status(404).json({ message: "Voice not found" });
+    }
+
+    // Construct the actual file path on disk
+    // Assuming files are saved in /uploads/voice/ or similar
+    const uploadDir = path.join(__dirname, "..", "..", "uploads", "voice"); // Adjust path as needed
+    const possibleExtensions = [".wav", ".mp3", ".ogg"];
+
+    let filePath = null;
+    for (const ext of possibleExtensions) {
+      const testPath = path.join(uploadDir, `${path.basename(voice.file_path)}${ext}`);
+      if (fs.existsSync(testPath)) {
+        filePath = testPath;
+        break;
+      }
+    }
+
+    if (!filePath) {
+      return res.status(404).json({ message: "Audio file not found on server" });
+    }
+
+    // Set proper headers
+    const stat = fs.statSync(filePath);
+    res.writeHead(200, {
+      "Content-Type": getMimeType(filePath),
+      "Content-Length": stat.size,
+      "Accept-Ranges": "bytes",
+    });
+
+    // Stream the file
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (error) {
+    console.error("Error serving audio:", error);
+    res.status(500).json({ message: "Error playing audio" });
+  }
+};
+
+// Helper to detect MIME type
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+  };
+  return mimeTypes[ext] || "application/octet-stream";
+}
 // Update Voice
 const updateVoice = async (req, res) => {
   const { file_name, file_path,language } = req.body;
