@@ -486,9 +486,9 @@ exports.getTicketReport = async (req, res) => {
         last_name: lastName,
         phone_number: getValue(ticket.phone_number),
         nida_number: getValue(ticket.nida_number),
-        ticket_number:
-          ticket.ticket_id ||
-          `TKT-${ticket.id ? ticket.id.substring(0, 8) : "N/A"}`,
+      ticket_number:
+        ticket.ticket_id ||
+        `TKT-${ticket.id ? ticket.id.substring(0, 8) : "N/A"}`,
         requester_name: requesterName,
         full_name: fullName || requesterName,
       };
