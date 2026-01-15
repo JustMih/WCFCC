@@ -4628,19 +4628,32 @@ const getAllAttendee = async (req, res) => {
         }
       }
     } else if (currentUser.role === "head-of-unit") {
-      // For head-of-unit, filter by unit_section AND role = "attendee" (unless directorate shows managers)
+      // For head-of-unit:
+      // - Managers/attendees are filtered by unit_section/report_to as before
+      // - Reviewers should NOT depend on unit_section/report_to, so include them via OR
       if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
-        whereClause.unit_section = currentUser.unit_section;
-        // Ensure we're filtering by attendee/agent/focal-person roles (unless directorate which shows managers and focal-persons)
-        if (targetRole === "attendee") {
-          whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person", "reviewer"] };
-        } else if (targetRole === "manager") {
-          // For head-of-unit with directorate, show both managers and focal-persons
-          whereClause.role = { [Op.in]: ["manager", "reviewer"] };
-        } else {
-          whereClause.role = targetRole;
-        }
-        console.log(`DEBUG: Head of Unit filtering ${targetRole}s by unit_section: ${currentUser.unit_section}`);
+        const unitSection = currentUser.unit_section;
+        const roleFilter =
+          targetRole === "manager"
+            ? { [Op.in]: ["manager"] }
+            : { [Op.in]: ["attendee", "agent", "focal-person"] };
+
+        // IMPORTANT: remove top-level role/unit_section filters (they would AND with Op.or and hide reviewers)
+        const baseWhere = { ...whereClause };
+        delete baseWhere.role;
+        delete baseWhere.unit_section;
+        delete baseWhere.report_to;
+        delete baseWhere[Op.and];
+
+        whereClause = {
+          ...baseWhere,
+          [Op.or]: [
+            { role: "reviewer" },
+            { unit_section: unitSection, role: roleFilter },
+          ],
+        };
+
+        console.log(`DEBUG: Head of Unit filtering ${targetRole}s by unit_section: ${unitSection} (and including all reviewers)`);
         console.log(`DEBUG: Where clause for head-of-unit:`, JSON.stringify(whereClause, null, 2));
       } else {
         // Fallback to designation-based report_to mapping if no unit_section
@@ -4655,12 +4668,65 @@ const getAllAttendee = async (req, res) => {
       
       if (currentUser.designation && designationMapping[currentUser.designation]) {
         const targetReportTo = designationMapping[currentUser.designation];
-        whereClause.report_to = targetReportTo;
-        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo}`);
+        const roleFilter =
+          targetRole === "manager"
+            ? { [Op.in]: ["manager"] }
+            : { [Op.in]: ["attendee", "agent", "focal-person"] };
+
+        // IMPORTANT: remove top-level role/report_to filters (they would AND with Op.or and hide reviewers)
+        const baseWhere = { ...whereClause };
+        delete baseWhere.role;
+        delete baseWhere.unit_section;
+        delete baseWhere.report_to;
+        delete baseWhere[Op.and];
+
+        whereClause = {
+          ...baseWhere,
+          [Op.or]: [
+            { role: "reviewer" },
+            { report_to: targetReportTo, role: roleFilter },
+          ],
+        };
+        console.log(`DEBUG: Head of Unit with designation ${currentUser.designation}, filtering ${targetRole}s by report_to: ${targetReportTo} (and including all reviewers)`);
       } else {
           console.log(`DEBUG: No unit_section or valid designation mapping found for head-of-unit, showing all ${targetRole}s`);
           console.log(`DEBUG: Current user designation: "${currentUser.designation}", unit_section: "${currentUser.unit_section}"`);
         }
+      }
+    } else if (currentUser.role === "director") {
+      // For director:
+      // - If directorate => targetRole is manager
+      // - Always include reviewers regardless of unit_section/report_to
+      if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
+        const unitSection = currentUser.unit_section;
+        const roleFilter =
+          targetRole === "manager"
+            ? { [Op.in]: ["manager"] }
+            : { [Op.in]: ["attendee", "agent", "focal-person"] };
+
+        // IMPORTANT: remove top-level role/unit_section filters (they would AND with Op.or and hide reviewers)
+        const baseWhere = { ...whereClause };
+        delete baseWhere.role;
+        delete baseWhere.unit_section;
+        delete baseWhere.report_to;
+        delete baseWhere[Op.and];
+
+        whereClause = {
+          ...baseWhere,
+          [Op.or]: [
+            { role: "reviewer" },
+            { unit_section: unitSection, role: roleFilter },
+          ],
+        };
+
+        console.log(`DEBUG: Director filtering ${targetRole}s by unit_section: ${unitSection} (and including all reviewers)`);
+      } else {
+        // If director has no unit_section, still include reviewers (and fall back to role filter if any)
+        whereClause = {
+          ...whereClause,
+          role: { [Op.in]: ["reviewer"] }
+        };
+        console.log(`DEBUG: Director has no unit_section; returning reviewers`);
       }
     } else if (currentUser.role === "manager") {
       // For manager, filter by designation-based report_to mapping
