@@ -172,12 +172,15 @@ const convertOrForwardTicket = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    // Find the ticket
+    // Find the ticket and reload to get fresh data (in case it was reversed)
     const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
       await safeRollback(transaction);
       return res.status(404).json({ message: "Ticket not found" });
     }
+    
+    // Reload ticket to ensure we have the latest data (especially after reverse)
+    await ticket.reload({ transaction });
 
     // Check if any action parameters are provided
     if (!category && !responsible_unit_name && !complaintType) {
@@ -213,6 +216,7 @@ const convertOrForwardTicket = async (req, res) => {
     let conversionDone = false;
     let forwardingDone = false;
     let ratingDone = false;
+    let assignedRole = null; // Store the role of the user the ticket was assigned to
 
     // Handle rating (if provided)
     if (complaintType) {
@@ -299,6 +303,7 @@ const convertOrForwardTicket = async (req, res) => {
         ticket.assigned_to_role = focalPerson.role;
         ticket.assigned_to_id = focalPerson.id;
         ticket.status = "Assigned";
+        assignedRole = focalPerson.role; // Store role for success message
         console.log(`✅ Inquiry conversion: Assigned to focal-person: ${focalPerson.full_name} using responsible_unit_name: "${searchField}"`);
         
         // Create notification for the focal person
@@ -336,13 +341,7 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
-      // Check if ticket was already forwarded previously
-      if (ticket.forwarded_at && ticket.responsible_unit_name) {
-        await safeRollback(transaction);
-        return res.status(400).json({
-          message: `Ticket is already forwarded to '${ticket.responsible_unit_name}' on ${new Date(ticket.forwarded_at).toLocaleDateString()}. Cannot forward again.`
-        });
-      }
+      // Allow forwarding again - removed restriction to allow re-forwarding tickets
 
       // Validate that ticket is rated before forwarding
       if (!ticket.complaint_type && !ratingDone) {
@@ -486,6 +485,7 @@ const convertOrForwardTicket = async (req, res) => {
       if (unitUser) {
         ticket.assigned_to_role = unitUser.role;
         ticket.assigned_to_id = unitUser.id; // Assign to the target role user
+        assignedRole = unitUser.role; // Store role for success message
         console.log(`DEBUG: Assigned to ${targetRole}: ${unitUser.full_name} (${unitUser.id})`);
       } else {
         // If target role (director or head-of-unit) not found, return error - no fallback
@@ -604,7 +604,13 @@ const convertOrForwardTicket = async (req, res) => {
     const messageParts = [];
     if (ratingDone) messageParts.push(`rated as '${complaintType}'`);
     if (conversionDone) messageParts.push(`converted to Inquiry`);
-    if (forwardingDone) messageParts.push(`forwarded to '${responsible_unit_name}'`);
+    if (forwardingDone) {
+      // Format role name for display (capitalize and add spaces)
+      const formattedRole = assignedRole 
+        ? assignedRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+        : 'user';
+      messageParts.push(`forwarded to '${responsible_unit_name}' (${formattedRole})`);
+    }
     const message = `Ticket successfully ${messageParts.join(" and ")}`;
 
     return res.status(200).json({

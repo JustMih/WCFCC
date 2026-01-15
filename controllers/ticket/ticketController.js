@@ -5813,7 +5813,8 @@ const reverseTicket = async (req, res) => {
     if (!currentUser) {
       return res.status(404).json({ message: "Reversing user not found" });
     }
-    const isDirectorReversing = currentUser.role === "director";
+    // NOTE: Reverse should behave the same for all roles (like agent reverse):
+    // go back to the previous assignment in history (assignments[1]), unless the user was explicitly reassigned.
 
     // If current user was reassigned, return to the reassigned_by (assigned_by_id of current assignment)
     if (currentUserAssignment && currentUserAssignment.action === "Reassigned") {
@@ -5827,88 +5828,37 @@ const reverseTicket = async (req, res) => {
         targetUserRole = reassignedBy.role;
         console.log(`DEBUG: User was reassigned - returning to reassigned_by: ${reassignedBy.full_name} (${reassignedBy.role})`);
       }
-    } else if (isDirectorReversing) {
-      // If director is reversing, find last manager to send ticket to
-      const managerAssignment = assignments.find(assignment => 
-        assignment.assigned_to_role === "manager"
+    } else if (assignments.length >= 1) {
+      // Normal reverse (like attendee): return to the user who assigned this ticket to the current user.
+      // IMPORTANT: Skip "self-assignments" where assigned_by_id === assigned_to_id (these would bounce back to self).
+      const senderAssignment = assignments.find(a =>
+        a.assigned_to_id === userId &&
+        a.assigned_by_id &&
+        a.assigned_by_id !== userId
       );
-      
-      if (managerAssignment) {
-        prevAssignment = managerAssignment;
-        targetUserId = managerAssignment.assigned_to_id;
-        targetUserRole = managerAssignment.assigned_to_role;
-        console.log(`DEBUG: Director reversing - returning to last manager: ${targetUserId}`);
-      } else {
-        // If no manager assignment found, fall back to second most recent assignment
-    if (assignments.length >= 2) {
-          prevAssignment = assignments[1];
-          targetUserId = prevAssignment.assigned_to_id;
-          targetUserRole = prevAssignment.assigned_to_role;
-          console.log(`DEBUG: Director reversing - no manager found, using second most recent: ${targetUserId}`);
+
+      if (senderAssignment) {
+        const senderUser = await User.findByPk(senderAssignment.assigned_by_id);
+        if (senderUser) {
+          prevAssignment = { assigned_to_id: senderUser.id, assigned_to_role: senderUser.role };
+          targetUserId = senderUser.id;
+          targetUserRole = senderUser.role;
+          console.log(`DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`);
         }
       }
-    } else if (assignments.length >= 2) {
-      // If not reassigned, use the second most recent assignment
-      prevAssignment = assignments[1];
-      targetUserId = prevAssignment.assigned_to_id;
-      targetUserRole = prevAssignment.assigned_to_role;
-      
-      // Check if ticket was directly forwarded to head-of-unit (currently or in history)
-      const isCurrentlyAssignedToHeadOfUnit = ticket.assigned_to_role === "head-of-unit";
-      const headOfUnitAssignment = assignments.find(assignment => 
-        assignment.assigned_to_role === "head-of-unit"
-      );
-      const wasForwardedToHeadOfUnit = isCurrentlyAssignedToHeadOfUnit || !!headOfUnitAssignment;
-      
-      // For tickets forwarded to head of unit reversed by attendee/agent, skip reviewer and go back to head of unit
-      // This applies to ALL tickets (not just Minor complaints) that were forwarded to head-of-unit
-      if (wasForwardedToHeadOfUnit && (isAttendeeReversing || isAgentReversing) && targetUserRole === "reviewer") {
-        console.log(`DEBUG: Ticket forwarded to head-of-unit - attendee/agent reversing, skipping reviewer and returning to head-of-unit`);
-        
-        // If head of unit was assigned to in history, use that assignment
-        if (headOfUnitAssignment && headOfUnitAssignment.assigned_to_role === "head-of-unit") {
-          prevAssignment = headOfUnitAssignment;
-          targetUserId = headOfUnitAssignment.assigned_to_id;
-          targetUserRole = headOfUnitAssignment.assigned_to_role;
-          console.log(`DEBUG: Found head-of-unit assignment in history - returning to head of unit: ${targetUserId}`);
-        } else if (isCurrentlyAssignedToHeadOfUnit && ticket.assigned_to_id) {
-          // If currently assigned to head-of-unit, use current assignment
-          prevAssignment = {
-            assigned_to_id: ticket.assigned_to_id,
-            assigned_to_role: "head-of-unit"
-          };
-          targetUserId = ticket.assigned_to_id;
-          targetUserRole = "head-of-unit";
-          console.log(`DEBUG: Currently assigned to head-of-unit - returning to current head of unit: ${targetUserId}`);
-        } else {
-          // If head of unit forwarded it but not found in assignments, find the head of unit user by responsible_unit_name
-          const headOfUnitUser = await User.findOne({
-            where: { 
-              role: "head-of-unit",
-              unit_section: ticket.responsible_unit_name
-            }
-          });
-          if (headOfUnitUser) {
-            prevAssignment = {
-              assigned_to_id: headOfUnitUser.id,
-              assigned_to_role: "head-of-unit"
-            };
-            targetUserId = headOfUnitUser.id;
-            targetUserRole = "head-of-unit";
-            console.log(`DEBUG: Found head-of-unit by responsible_unit_name - returning to head of unit: ${targetUserId}`);
-          }
-        }
+
+      if (!targetUserId) {
+        console.log(`No previous assignments found - cannot reverse ticket`);
+        return res.status(400).json({ 
+          message: "Cannot reverse ticket: No previous assignments found. Ticket must have assignment history to be reversed." 
+        });
       }
     } else {
-      // If no previous assignments, reverse to the ticket creator
-      console.log(`No previous assignments found, reversing to ticket creator: ${ticket.creator.id}`);
-      targetUserId = ticket.creator.id;
-      targetUserRole = ticket.creator.role;
-      // Create a mock assignment object for consistency
-      prevAssignment = {
-        assigned_to_id: ticket.creator.id,
-        assigned_to_role: ticket.creator.role
-      };
+      // If no previous assignments, cannot reverse - return error
+      console.log(`No previous assignments found - cannot reverse ticket`);
+      return res.status(400).json({ 
+        message: "Cannot reverse ticket: No previous assignments found. Ticket must have assignment history to be reversed." 
+      });
     }
 
     // Handle file upload if present
@@ -5940,7 +5890,7 @@ const reverseTicket = async (req, res) => {
         "Reversed",
         assignedBy,
         { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
-        description || reason || "Ticket reversed to previous user",
+        reason || "Ticket reversed to previous user",
         null // No transaction needed here
       );
 
@@ -5990,31 +5940,36 @@ const reverseTicket = async (req, res) => {
       let attended_by_name = assignedBy.full_name;
       let attended_by_role = assignedBy.role;
 
-      // Fetch previous user details - try assignment first, then fall back to creator
+      // Fetch previous user details
       let prevUser = await User.findByPk(targetUserId);
       
-      // If previous user not found, try to use the ticket creator as fallback
-      if (!prevUser && ticket.creator) {
-        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
-        prevUser = ticket.creator;
-      }
-      
-      // If still no user found, return an error
+      // If previous user not found, return an error (no fallback)
       if (!prevUser) {
-        console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+        console.warn(`No user found for target user ID: ${targetUserId}`);
         return res.status(404).json({ 
           message: "Cannot reverse ticket: Previous user not found. Please contact administrator." 
         });
       }
 
+      // Clear forwarded_at and forwarded_by_id to allow forwarding again after reverse
+      await ticket.update({
+        forwarded_at: null,
+        forwarded_by_id: null
+      });
+
       // Send emails in background (non-blocking)
-      const reversalReason = description || reason;
+      const reversalReason = reason;
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
 
+      // Format role name for display (capitalize and add spaces)
+      const formattedRole = targetUserRole 
+        ? targetUserRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+        : 'user';
+
       return res.json({
-        message: "Ticket reversed successfully with workflow tracking",
+        message: `Ticket reversed successfully to ${formattedRole}`,
         workflow: result.workflow,
         assignment: result.assignment
       });
@@ -6026,7 +5981,9 @@ const reverseTicket = async (req, res) => {
         assigned_to_role: targetUserRole,
         status: "Reversed",
         attachment_path: attachmentPath,
-        attended_by_id: userId
+        attended_by_id: userId,
+        forwarded_at: null, // Clear forwarded_at to allow forwarding again
+        forwarded_by_id: null // Clear forwarded_by_id to allow forwarding again
       });
 
       // Add a new assignment record for the reversal
@@ -6036,7 +5993,7 @@ const reverseTicket = async (req, res) => {
         assigned_to_id: targetUserId,
         assigned_to_role: targetUserRole,
         action: "Reversed",
-        reason: description || reason || "Ticket reversed to previous user",
+        reason: reason || "Ticket reversed to previous user",
         attachment_path: attachmentPath,
         created_at: new Date()
       });
@@ -6071,30 +6028,29 @@ const reverseTicket = async (req, res) => {
         attended_by_role = attendedByUser ? attendedByUser.role : null;
       }
 
-      // Fetch previous user details - try assignment first, then fall back to creator
+      // Fetch previous user details
       let prevUser = await User.findByPk(targetUserId);
       
-      // If previous user not found, try to use the ticket creator as fallback
-      if (!prevUser && ticket.creator) {
-        console.log(`Previous user not found for ID: ${targetUserId}, falling back to ticket creator: ${ticket.creator.id}`);
-        prevUser = ticket.creator;
-      }
-      
-      // If still no user found, return an error
+      // If previous user not found, return an error (no fallback)
       if (!prevUser) {
-        console.warn(`No user found for target user ID: ${targetUserId} or ticket creator ID: ${ticket.userId}`);
+        console.warn(`No user found for target user ID: ${targetUserId}`);
         return res.status(404).json({ 
           message: "Cannot reverse ticket: Previous user not found. Please contact administrator." 
         });
       }
 
       // Send emails in background (non-blocking)
-      const reversalReason = description || reason;
+      const reversalReason = reason;
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
 
-      return res.json({ message: "Ticket reversed successfully" });
+      // Format role name for display (capitalize and add spaces)
+      const formattedRole = targetUserRole 
+        ? targetUserRole.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+        : 'user';
+
+      return res.json({ message: `Ticket reversed successfully to ${formattedRole}` });
     }
 
   } catch (error) {
