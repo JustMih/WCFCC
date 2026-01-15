@@ -48,7 +48,14 @@
 // };
 
 // Safely require models with error handling
-let VoiceNote, CDR, IVRDTMFMapping, IVRAction, IVRVoice, Ticket, User;
+let VoiceNote,
+  CDR,
+  IVRDTMFMapping,
+  IVRAction,
+  IVRVoice,
+  Ticket,
+  User,
+  IVRDTMFLog;
 try {
   console.log("Loading VoiceNote model...");
   VoiceNote = require("../../models/voice_notes.model");
@@ -65,10 +72,11 @@ try {
   try {
     models = require("../../models");
     console.log("Models loaded, available keys:", Object.keys(models || {}));
-    // Safely get IVRAction and IVRVoice with fallback
+    // Safely get IVRAction, IVRVoice, and IVRDTMFLog with fallback
     if (models) {
       IVRAction = models.IVRAction;
       IVRVoice = models.IVRVoice;
+      IVRDTMFLog = models.IVRDTMFLog;
     }
   } catch (modelsError) {
     console.error(
@@ -90,6 +98,14 @@ try {
       IVRVoice = require("../../models/IVRVoice");
     } catch (e) {
       console.error("Failed to load IVRVoice:", e.message);
+    }
+  }
+  if (!IVRDTMFLog) {
+    try {
+      const DataTypes = require("sequelize").DataTypes;
+      IVRDTMFLog = require("../../models/IVRDTMFLog")(sequelize, DataTypes);
+    } catch (e) {
+      console.error("Failed to load IVRDTMFLog:", e.message);
     }
   }
   console.log("Model loading complete");
@@ -154,21 +170,155 @@ exports.getCDRReports = async (req, res) => {
   }
 };
 
+// Test endpoint to verify table access
+exports.testIVRTable = async (req, res) => {
+  try {
+    console.log("Testing IVR_DTMF_Logs table access...");
+
+    // Try simple query first
+    const testQuery = `SELECT COUNT(*) as count FROM IVR_DTMF_Logs`;
+    const countResult = await sequelize.query(testQuery, {
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    console.log("Table count result:", countResult);
+
+    // Try to get a few records
+    const sampleQuery = `SELECT * FROM IVR_DTMF_Logs ORDER BY timestamp DESC LIMIT 5`;
+    const sampleResult = await sequelize.query(sampleQuery, {
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    console.log("Sample records:", sampleResult);
+
+    res.json({
+      success: true,
+      tableExists: true,
+      recordCount: countResult[0]?.count || 0,
+      sampleRecords: sampleResult,
+      message: "Table is accessible",
+    });
+  } catch (error) {
+    console.error("Test query error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
+  }
+};
+
 exports.getIVRInteractions = async (req, res) => {
   try {
-    if (!IVRDTMFMapping || !IVRAction || !IVRVoice) {
-      throw new Error("IVR models are not available");
+    console.log("IVR Interactions route hit - Params:", req.params);
+    console.log("IVR Interactions route hit - Query:", req.query);
+
+    const { startDate, endDate } = req.params;
+
+    // Try to load IVRDTMFLog model from models index
+    let IVRDTMFLogModel;
+    try {
+      const models = require("../../models");
+      IVRDTMFLogModel = models.IVRDTMFLog;
+      if (!IVRDTMFLogModel) {
+        // Fallback: load directly
+        const DataTypes = require("sequelize").DataTypes;
+        IVRDTMFLogModel = require("../../models/IVRDTMFLog")(
+          sequelize,
+          DataTypes
+        );
+      }
+    } catch (modelLoadError) {
+      console.error("Error loading IVRDTMFLog model:", modelLoadError);
     }
-    const ivrInteractions = await IVRDTMFMapping.findAll({
-      include: [
-        { model: IVRAction, attributes: ["name"], as: "action" },
-        { model: IVRVoice, attributes: ["file_name"], as: "voice" },
-      ],
+
+    let ivrLogs = [];
+    const whereClause = {};
+
+    // Add date filtering if provided
+    const start = startDate || req.query.startDate;
+    const end = endDate || req.query.endDate;
+
+    if (start && end) {
+      const startDateTime = start.includes(" ") ? start : `${start} 00:00:00`;
+      const endDateTime = end.includes(" ") ? end : `${end} 23:59:59`;
+      whereClause.timestamp = {
+        [Op.between]: [new Date(startDateTime), new Date(endDateTime)],
+      };
+    }
+
+    // Try using the model first
+    if (IVRDTMFLogModel) {
+      try {
+        console.log("Attempting to use IVRDTMFLog model...");
+        ivrLogs = await IVRDTMFLogModel.findAll({
+          where: Object.keys(whereClause).length > 0 ? whereClause : undefined,
+          order: [["timestamp", "DESC"]],
+          limit: 1000,
+          raw: true, // Get plain objects instead of model instances
+        });
+        console.log(`Found ${ivrLogs.length} IVR log records using model`);
+      } catch (modelError) {
+        console.error(
+          "Error using model, falling back to raw query:",
+          modelError
+        );
+        // Fall through to raw query
+      }
+    }
+
+    // Fallback to raw SQL query if model fails or doesn't exist
+    if (!IVRDTMFLogModel || ivrLogs.length === 0) {
+      console.log("Using raw SQL query...");
+      let query = `SELECT * FROM IVR_DTMF_Logs`;
+      const replacements = {};
+
+      if (start && end) {
+        const startDateTime = start.includes(" ") ? start : `${start} 00:00:00`;
+        const endDateTime = end.includes(" ") ? end : `${end} 23:59:59`;
+        query += ` WHERE timestamp BETWEEN :startDate AND :endDate`;
+        replacements.startDate = startDateTime;
+        replacements.endDate = endDateTime;
+      }
+
+      query += ` ORDER BY timestamp DESC LIMIT 1000`;
+
+      console.log("Executing query:", query);
+      console.log("With replacements:", replacements);
+
+      try {
+        ivrLogs = await sequelize.query(query, {
+          replacements,
+          type: sequelize.QueryTypes.SELECT,
+        });
+        console.log(`Found ${ivrLogs.length} IVR log records using raw query`);
+      } catch (queryError) {
+        console.error("Raw query also failed:", queryError);
+        throw queryError;
+      }
+    }
+
+    // Format the response to match expected structure
+    const formattedLogs = ivrLogs.map((log) => {
+      return {
+        id: log.id || log.ID || null,
+        caller_id: log.caller_id || log.caller_ID || "-",
+        digit_pressed: log.digit_pressed || log.digit_Pressed || "-",
+        menu_context: log.menu_context || log.menu_Context || "-",
+        language: log.language || "-",
+        timestamp: log.timestamp || log.Timestamp || null,
+      };
     });
-    res.json(ivrInteractions);
+
+    console.log(`Returning ${formattedLogs.length} formatted log records`);
+    res.json(formattedLogs);
   } catch (error) {
     console.error("Error in getIVRInteractions:", error);
-    res.status(500).json({ error: error.message });
+    console.error("Error stack:", error.stack);
+    res.status(500).json({
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
   }
 };
 
@@ -262,25 +412,27 @@ exports.getTicketReport = async (req, res) => {
   }
 
   try {
-    // Use raw SQL query for better compatibility
+    // Use raw SQL query to get ALL columns from Tickets table
     let query = `
       SELECT 
-        t.id,
-        t.ticket_id,
-        t.subject,
-        t.status,
-        t.category,
-        t.complaint_type,
-        t.first_name,
-        t.last_name,
-        t.created_at,
-        t.date_of_resolution,
-        t.assigned_to_id,
+        t.*,
         u1.full_name as assigned_to_name,
-        u2.full_name as creator_name
+        u1.email as assigned_to_email,
+        u2.full_name as creator_name,
+        u2.email as creator_email,
+        u3.full_name as attended_by_name,
+        u4.full_name as rated_by_name,
+        u5.full_name as converted_by_name,
+        u6.full_name as forwarded_by_name,
+        u7.full_name as assigned_by_name
       FROM Tickets t
       LEFT JOIN Users u1 ON t.assigned_to_id = u1.id
       LEFT JOIN Users u2 ON t.created_by = u2.id
+      LEFT JOIN Users u3 ON t.attended_by_id = u3.id
+      LEFT JOIN Users u4 ON t.rated_by_id = u4.id
+      LEFT JOIN Users u5 ON t.converted_by_id = u5.id
+      LEFT JOIN Users u6 ON t.forwarded_by_id = u6.id
+      LEFT JOIN Users u7 ON t.assigned_by = u7.id
       WHERE t.created_at BETWEEN :startDate AND :endDate
     `;
 
@@ -291,9 +443,6 @@ exports.getTicketReport = async (req, res) => {
       replacements.status = status;
     }
 
-    // Note: Priority filter removed as Tickets table doesn't have a priority column
-    // Using complaint_type or category instead
-
     query += ` ORDER BY t.created_at DESC`;
 
     const tickets = await sequelize.query(query, {
@@ -301,25 +450,50 @@ exports.getTicketReport = async (req, res) => {
       type: sequelize.QueryTypes.SELECT,
     });
 
-    // Format the response
-    const formattedTickets = tickets.map((ticket) => ({
-      id: ticket.id,
-      ticket_number:
-        ticket.ticket_id ||
-        `TKT-${ticket.id ? ticket.id.substring(0, 8) : "N/A"}`,
-      subject: ticket.subject || "No Subject",
-      status: ticket.status || "Open",
-      priority: ticket.complaint_type || ticket.category || "N/A", // Use complaint_type or category as priority
-      category: ticket.category || "N/A",
-      complaint_type: ticket.complaint_type || null,
-      requester_name:
-        ticket.first_name && ticket.last_name
-          ? `${ticket.first_name} ${ticket.last_name}`.trim()
-          : "Unknown",
-      assigned_to_name: ticket.assigned_to_name || "Unassigned",
-      created_at: ticket.created_at,
-      resolved_at: ticket.date_of_resolution || null,
-    }));
+    // Return all ticket data with additional computed fields
+    const formattedTickets = tickets.map((ticket) => {
+      // Helper function to handle null, undefined, and empty strings
+      const getValue = (val) =>
+        val !== null && val !== undefined && val !== "" ? val : null;
+
+      // Get name fields (handle null, undefined, and empty strings)
+      const firstName = getValue(ticket.first_name);
+      const middleName = getValue(ticket.middle_name);
+      const lastName = getValue(ticket.last_name);
+      const requester = getValue(ticket.requester);
+
+      // Build full name if we have first and last name
+      let fullName = null;
+      if (firstName && lastName) {
+        fullName = `${firstName}${
+          middleName ? " " + middleName : ""
+        } ${lastName}`.trim();
+      } else if (requester) {
+        fullName = requester;
+      }
+
+      // Build requester name (simpler version)
+      const requesterName =
+        firstName && lastName
+          ? `${firstName} ${lastName}`.trim()
+          : requester || "Unknown";
+
+      const mappedTicket = {
+        ...ticket, // Include all original ticket fields
+        // Explicitly ensure name fields are available (preserve null/empty for display)
+        first_name: firstName,
+        middle_name: middleName,
+        last_name: lastName,
+        phone_number: getValue(ticket.phone_number),
+        nida_number: getValue(ticket.nida_number),
+        ticket_number:
+          ticket.ticket_id ||
+          `TKT-${ticket.id ? ticket.id.substring(0, 8) : "N/A"}`,
+        requester_name: requesterName,
+        full_name: fullName || requesterName,
+      };
+      return mappedTicket;
+    });
 
     if (formattedTickets.length === 0) {
       return res.status(404).json({ message: "No tickets found" });
@@ -480,6 +654,65 @@ exports.getCallSummaryReport = async (req, res) => {
     res.json(formattedSummary);
   } catch (error) {
     console.error("Error fetching call summary report:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Ticket Assignments Report
+exports.getTicketAssignmentsReport = async (req, res) => {
+  const { startDate, endDate } = req.params;
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  try {
+    // Use raw SQL query to get ALL columns from Ticket_assignments table
+    let query = `
+      SELECT 
+        ta.*,
+        t.ticket_id as ticket_number,
+        t.subject as ticket_subject,
+        t.status as ticket_status,
+        t.category as ticket_category,
+        u1.full_name as assigned_by_name,
+        u1.email as assigned_by_email,
+        u2.full_name as assigned_to_name,
+        u2.email as assigned_to_email
+      FROM Ticket_assignments ta
+      LEFT JOIN Tickets t ON ta.ticket_id = t.id
+      LEFT JOIN Users u1 ON ta.assigned_by_id = u1.id
+      LEFT JOIN Users u2 ON ta.assigned_to_id = u2.id
+      WHERE ta.created_at BETWEEN :startDate AND :endDate
+    `;
+
+    const replacements = { startDate, endDate };
+
+    query += ` ORDER BY ta.created_at DESC`;
+
+    const assignments = await sequelize.query(query, {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    // Format the response
+    const formattedAssignments = assignments.map((assignment) => ({
+      ...assignment, // Include all original assignment fields
+      ticket_number: assignment.ticket_number || "-",
+      ticket_subject: assignment.ticket_subject || "-",
+      ticket_status: assignment.ticket_status || "-",
+      ticket_category: assignment.ticket_category || "-",
+    }));
+
+    if (formattedAssignments.length === 0) {
+      return res.status(404).json({ message: "No ticket assignments found" });
+    }
+
+    res.json(formattedAssignments);
+  } catch (error) {
+    console.error("Error fetching ticket assignments report:", error);
     res.status(500).json({ error: error.message });
   }
 };
