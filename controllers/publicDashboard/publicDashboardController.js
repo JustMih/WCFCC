@@ -1,4 +1,4 @@
-const sequelize = require("../../config/mysql_connection");
+ const sequelize = require("../../config/mysql_connection");
 const { Op } = require("sequelize");
 const User = require("../../models/User");
 const CEL = require("../../models/CEL")(
@@ -10,30 +10,111 @@ const db = require("../../models");
 
 const QueueStatus = db.QueueStatus;
 
-// Socket.IO instance for real-time updates
+/* ======================================================
+   SOCKET.IO
+====================================================== */
+
 let ioInstance = null;
 
-// Setup socket instance
 const setSocketInstance = (io) => {
   ioInstance = io;
 };
 
-// Emit dashboard update to all connected clients
-const emitDashboardUpdate = (dashboardData) => {
+const emitDashboardUpdate = (data) => {
   if (ioInstance) {
-    ioInstance.emit("public_dashboard_update", dashboardData);
+    ioInstance.emit("public_dashboard_update", data);
   }
 };
 
-// Public dashboard data aggregator - No authentication required
+/* ======================================================
+   HELPERS
+====================================================== */
+
+const normalizeNumber = (val) => {
+  if (!val) return null;
+  const match = val.toString().match(/\d+/g);
+  return match ? match.join("") : null;
+};
+
+/* ======================================================
+   MISSED CALL INSERT
+====================================================== */
+
+const insertMissedCall = async ({ caller, time, linkedid }) => {
+  const normalizedCaller = normalizeNumber(caller);
+  if (!normalizedCaller || !time || !linkedid) return;
+
+  await sequelize.query(
+    `
+    INSERT INTO MissedCalls
+      (caller, time, status, linkedid, createdAt, updatedAt)
+    SELECT
+      :caller, :time, 'pending', :linkedid, NOW(), NOW()
+    FROM DUAL
+    WHERE NOT EXISTS (
+      SELECT 1 FROM MissedCalls WHERE linkedid = :linkedid
+    )
+    `,
+    {
+      replacements: {
+        caller: normalizedCaller,
+        time,
+        linkedid,
+      },
+    }
+  );
+};
+
+/* ======================================================
+   MISSED CALL UPDATE (CALLBACK)
+====================================================== */
+
+const updateMissedCallOnCallback = async ({
+  agentExt,
+  caller,
+  callbackTime,
+  billsec,
+}) => {
+  if (!agentExt || !caller || !callbackTime) return;
+
+  await sequelize.query(
+    `
+    UPDATE MissedCalls
+    SET
+      status = 'called_back',
+      called_back_by = :agentExt,
+      called_back_at = :callbackTime,
+      billsec = :billsec,
+      updatedAt = NOW()
+    WHERE
+      status = 'pending'
+      AND archived = 0
+      AND caller = :caller
+      AND time < :callbackTime
+    ORDER BY time DESC
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        agentExt,
+        caller,
+        callbackTime,
+        billsec: billsec || 0,
+      },
+    }
+  );
+};
+
+/* ======================================================
+   PUBLIC DASHBOARD CONTROLLER
+====================================================== */
+
 const getPublicDashboardData = async (req, res) => {
   try {
-    // Get agent status counts
+    /* ---------- AGENT STATUS ---------- */
+
     const onlineCount = await User.count({
-      where: {
-        status: "online",
-        role: "agent",
-      },
+      where: { status: "online", role: "agent" },
     });
 
     const offlineCount = await User.count({
@@ -43,7 +124,8 @@ const getPublicDashboardData = async (req, res) => {
       },
     });
 
-    // Get live calls
+    /* ---------- CEL EVENTS ---------- */
+
     const events = await CEL.findAll({
       where: {
         eventtype: [
@@ -51,7 +133,6 @@ const getPublicDashboardData = async (req, res) => {
           "ANSWER",
           "HANGUP",
           "APP_START",
-          "APP_END",
           "BRIDGE_ENTER",
         ],
         eventtime: { [Op.gte]: moment().subtract(5, "minutes").toDate() },
@@ -61,71 +142,68 @@ const getPublicDashboardData = async (req, res) => {
     });
 
     const calls = {};
+
     for (const row of events) {
       const key = row.linkedid || row.uniqueid;
+
       if (!calls[key]) {
         calls[key] = {
-          caller: row.cid_num || "-",
-          cid_dnid: row.cid_dnid || "-",
-          callee: row.cid_dnid || row.peer || row.exten || "-",
-          channel: row.channame || "-",
           linkedid: key,
+          caller: row.cid_num || null,
+          channel: row.channame || null,
           call_start: null,
           call_answered: null,
           call_end: null,
-          status: "calling",
-          duration_secs: null,
           queue_entry_time: null,
-          estimated_wait_time: null,
-          voicemail_path: null,
-          missed: false,
+          status: "calling",
         };
       }
 
       const c = calls[key];
+
       switch (row.eventtype) {
         case "CHAN_START":
-          if (!c.call_start) {
-            c.call_start = row.eventtime;
-            // Don't set queue_entry_time here - only set it when APP_START with Queue occurs
-            console.log(`📞 CHAN_START: ${key} at ${row.eventtime}`);
-          }
-          c.status = "calling";
+          if (!c.call_start) c.call_start = row.eventtime;
           break;
+
+        case "APP_START":
+          if (row.appname === "Queue" && !c.queue_entry_time) {
+            c.queue_entry_time = row.eventtime;
+          }
+          break;
+
         case "ANSWER":
           if (!c.call_answered) {
             c.call_answered = row.eventtime;
-            c.status = "calling";
-            console.log(`✅ ANSWER: ${key} at ${row.eventtime}`);
+
+            await updateMissedCallOnCallback({
+              agentExt: row.src || row.peer,
+              caller: normalizeNumber(row.exten || row.cid_num),
+              callbackTime: row.eventtime,
+              billsec: row.billsec,
+            });
           }
           break;
+
         case "BRIDGE_ENTER":
-          // If call has not been answered and Bridge Enter event occurs, mark it as answered and active
-          c.status = "active"; // Set status to active since the call is bridged
-          console.log(`🔗 BRIDGE_ENTER: ${key} at ${row.eventtime}`);
+          c.status = "active";
           break;
+
         case "HANGUP":
           c.call_end = row.eventtime;
+
           if (!c.call_answered && c.queue_entry_time) {
             c.status = "lost";
-          } else if (!c.call_answered && !c.queue_entry_time) {
+
+            await insertMissedCall({
+              caller: c.caller,
+              time: row.eventtime,
+              linkedid: c.linkedid,
+            });
+          } else if (!c.call_answered) {
             c.status = "dropped";
           } else {
             c.status = "ended";
-          }
-          console.log(`📴 HANGUP: ${key} => ${c.status} at ${row.eventtime}`);
-          break;
-        case "APP_START":
-          if (row.appname === "Queue") {
-            if (!c.queue_entry_time) {
-              c.queue_entry_time = row.eventtime;
-            }
-            // Keep status as "calling" when in queue - don't change it
-            console.log(`📥 Queue Entered: ${key} at ${row.eventtime}`);
-          }
-          if (row.appname === "VoiceMail") {
-            c.voicemail_path = `/recorded/voicemails/${key}.wav`;
-            console.log(`🗣️ Voicemail triggered for ${key}`);
           }
           break;
       }
@@ -174,7 +252,7 @@ const getPublicDashboardData = async (req, res) => {
     );
 
     // Get queue status
-    let queueStatus = [];
+    
     if (QueueStatus) {
       queueStatus = await QueueStatus.findAll({
         order: [["queue", "ASC"]],
@@ -221,22 +299,31 @@ const getPublicDashboardData = async (req, res) => {
          AND lastapp = 'Queue'`,
       { type: sequelize.QueryTypes.SELECT }
     );
-    const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
 
-    // Aggregate response
+   const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
+
+    /* ---------- QUEUE STATUS ---------- */
+    
+
+    const queueStatus = QueueStatus
+      ? (await QueueStatus.findAll({ order: [["queue", "ASC"]] })).map((q) =>
+          q.toJSON()
+        )
+      : [];
+
+    /* ---------- RESPONSE ---------- */
+
     const dashboardData = {
-      agentStatus: {
-        onlineCount,
-        offlineCount,
-      },
-      liveCalls: activeCalls, // Only show active calls in main display
-      callStatusSummary: {
-        active: activeCalls.length,
-        inQueue: inQueueCalls.length, // Currently waiting in queue
-        answered: answeredCalls.length,
-        dropped: droppedCalls.length,
-        lost: lostCallsCountToday, // Total lost calls today (from CDR)
-      },
+      agentStatus: { onlineCount, offlineCount },
+      liveCalls,
+     callStatusSummary: {
+      active: activeCalls.length,
+      inQueue: inQueueCalls.length,
+      answered: answeredCalls.length,
+      dropped: droppedCalls.length,
+      lost: lostCallsCountToday,
+    },
+
       callStats: {
         totalCounts: totalCounts[0] || [],
         monthlyCounts: monthlyCounts[0] || [],
@@ -247,20 +334,18 @@ const getPublicDashboardData = async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Emit real-time update via Socket.IO
     emitDashboardUpdate(dashboardData);
-
-    res.status(200).json(dashboardData);
-  } catch (error) {
-    console.error("Error fetching public dashboard data:", error);
-    res.status(500).json({
-      error: "Failed to fetch dashboard data",
-      message: error.message,
-    });
+    res.json(dashboardData);
+  } catch (err) {
+    console.error("Dashboard error:", err);
+    res.status(500).json({ error: "Dashboard failed" });
   }
 };
 
-// Start periodic updates (call this from server.js after socket setup)
+/* ======================================================
+   PERIODIC UPDATES
+====================================================== */
+
 const startPeriodicUpdates = () => {
   setInterval(async () => {
     try {

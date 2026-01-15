@@ -353,13 +353,18 @@ const convertOrForwardTicket = async (req, res) => {
       }
 
       // Special case: "Units" is a generic term, always treat as unit and use sub_section
-      const isGenericUnits = responsible_unit_name && responsible_unit_name.trim().toLowerCase() === 'unit';
+      // Match "units" (plural) to be consistent with conversion logic
+      const isGenericUnits = responsible_unit_name && responsible_unit_name.trim().toLowerCase() === 'units';
       
       // Check if it's a Section (directorate) or Function (unit)
-      const section = await Section.findOne({
-        where: { name: responsible_unit_name },
-        transaction
-      });
+      // Skip Section lookup if it's generic "Units" - it's always a unit, not a directorate
+      let section = null;
+      if (!isGenericUnits) {
+        section = await Section.findOne({
+          where: { name: responsible_unit_name },
+          transaction
+        });
+      }
 
       let functionUnit = null;
       // If it's "Units" (generic), always treat as unit, not directorate
@@ -397,10 +402,18 @@ const convertOrForwardTicket = async (req, res) => {
       } else {
         // Not converting to Inquiry - proceed with normal forwarding logic (director/head-of-unit)
         
+        // Debug: Log the values to understand what's happening
+        console.log(`DEBUG: Forwarding logic - isGenericUnits: ${isGenericUnits}, isDirectorate: ${isDirectorate}, responsible_unit_name: "${responsible_unit_name}", ticket.sub_section: "${ticket.sub_section}"`);
+        
         // Determine the appropriate role to assign to based on unit type
         // Both Minor and Major complaints go to director (for directorate) or head-of-unit (for unit)
+        // IMPORTANT: "Units" is always a unit, never a directorate - always use head-of-unit
         let targetRole = null;
-        if (isDirectorate) {
+        if (isGenericUnits) {
+          // Explicitly handle "Units" - always treat as unit and look for head-of-unit
+          targetRole = 'head-of-unit';
+          console.log(`DEBUG: "Units" detected - forcing head-of-unit role (isDirectorate: ${isDirectorate})`);
+        } else if (isDirectorate) {
           targetRole = 'director'; // For directorate, go to Director
         } else {
           targetRole = 'head-of-unit'; // For unit, go to Head of Unit
@@ -408,15 +421,17 @@ const convertOrForwardTicket = async (req, res) => {
 
         // Find a user with the target role in the selected unit/directorate
         // Use responsible_unit_name (the value from forward to input) to find director/head-of-unit
+        // Special case: For "Units", use ticket's sub_section instead of "Units"
         // Both directorates and units use unit_section field
         let unitUser = null;
         if (targetRole) {
         // Use responsible_unit_name (the unit/directorate being forwarded to) to find the target role
-        let searchField = responsible_unit_name;
+        // For "Units" (generic), use ticket's sub_section instead
+        let searchField = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
         
         console.log(`DEBUG: Looking for ${targetRole} in ${isDirectorate ? 'directorate' : 'unit'}: "${searchField}"`);
         console.log(`DEBUG: Forwarding to responsible_unit_name: "${responsible_unit_name}"`);
-        console.log(`DEBUG: Using unit_section field for search`);
+        console.log(`DEBUG: Using ${isGenericUnits ? 'ticket.sub_section' : 'unit_section field'} for search`);
         
         // Both directorates and units: search by unit_section
         if (searchField) {
@@ -449,7 +464,8 @@ const convertOrForwardTicket = async (req, res) => {
         
         // If still not found, list all users with that role to see what values exist
         if (!unitUser) {
-          console.log(`DEBUG: No ${targetRole} found for ${isDirectorate ? 'directorate' : 'unit'} "${responsible_unit_name}"`);
+          const searchFieldUsed = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
+          console.log(`DEBUG: No ${targetRole} found for ${isDirectorate ? 'directorate' : 'unit'} "${searchFieldUsed}"`);
           const allUsersWithRole = await User.findAll({
             where: { role: targetRole },
             attributes: ['id', 'full_name', 'unit_section', 'sub_section', 'role'],
@@ -475,9 +491,14 @@ const convertOrForwardTicket = async (req, res) => {
         // If target role (director or head-of-unit) not found, return error - no fallback
         await safeRollback(transaction);
         const roleName = targetRole === 'director' ? 'director' : 'head of unit';
-        console.error(`ERROR: No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} "${responsible_unit_name}". Cannot forward ticket.`);
+        // Use the search field that was actually used for the search
+        const searchFieldUsed = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
+        console.error(`ERROR: No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} "${searchFieldUsed}". Cannot forward ticket.`);
+        console.error(`ERROR DEBUG: isGenericUnits: ${isGenericUnits}, isDirectorate: ${isDirectorate}, targetRole: "${targetRole}", responsible_unit_name: "${responsible_unit_name}", ticket.sub_section: "${ticket.sub_section}"`);
         return res.status(404).json({ 
-          message: `No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} '${responsible_unit_name}'. Please ensure there is a ${roleName} assigned to this ${isDirectorate ? 'directorate' : 'unit'}.` 
+          message: isGenericUnits
+            ? `No ${roleName} found for unit '${ticket.sub_section || 'N/A'}'. Please ensure there is a ${roleName} assigned to this unit.`
+            : `No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} '${responsible_unit_name}'. Please ensure there is a ${roleName} assigned to this ${isDirectorate ? 'directorate' : 'unit'}.` 
         });
       }
 
