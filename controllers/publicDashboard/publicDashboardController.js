@@ -303,6 +303,7 @@ const getPublicDashboardData = async (req, res) => {
    const lostCallsCountToday = parseInt(lostCallsToday[0]?.count || 0);
 
     /* ---------- QUEUE STATUS ---------- */
+    
 
     const queueStatus = QueueStatus
       ? (await QueueStatus.findAll({ order: [["queue", "ASC"]] })).map((q) =>
