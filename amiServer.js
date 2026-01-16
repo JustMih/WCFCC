@@ -2,30 +2,39 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 const AsteriskManager = require('asterisk-manager');
-const { baseURL } = require('./config');
+require('dotenv').config();
 const app = express();
 app.use(cors());
 
 // ✅ Connect to Asterisk AMI
 
-const ami = new AsteriskManager(5038, baseURL, 'admin', '@Ttcl123', true);
+const AMI_PORT = Number(process.env.AMI_PORT || 5038);
+const AMI_HOST = process.env.AMI_HOST || process.env.DB_HOST || '127.0.0.1';
+const AMI_USER = process.env.AMI_USER || 'admin';
+const AMI_PASS = process.env.AMI_PASS || '';
 
-ami.keepConnected();
+let ami = null;
+if (!AMI_PASS) {
+  console.warn('⚠️ AMI_PASS is not set. Skipping Asterisk AMI connection to allow server to start.');
+} else {
+  ami = new AsteriskManager(AMI_PORT, AMI_HOST, AMI_USER, AMI_PASS, true);
+  ami.keepConnected();
 
-ami.on('connect', () => {
-  console.log('✅ Connected to Asterisk AMI');
-});
+  ami.on('connect', () => {
+    console.log('✅ Connected to Asterisk AMI');
+  });
 
-ami.on('error', (err) => {
-  console.error('❌ AMI connection error:', err);
-});
+  ami.on('error', (err) => {
+    console.error('❌ AMI connection error:', err);
+  });
+}
 
 // ✅ Connect to MySQL (CEL + queue_log)
 const db = mysql.createPool({
-  host: '192.168.21.70',
-  user: 'asterisk',
-  password: "Wcf@1234",
-  database: "asterisk",
+  host: process.env.DB_HOST || '192.168.21.70',
+  user: process.env.DB_USER || 'asterisk',
+  password: process.env.DB_PASS || "Wcf@1234",
+  database: process.env.DB_NAME || "asterisk",
 });
 
 // ✅ Call tracking object
@@ -44,7 +53,7 @@ async function logToQueueLog({ time, callid, queuename, agent, event, data1, dat
 }
 
 // ✅ Handle AMI events
-ami.on('managerevent', async (event) => {
+if (ami) ami.on('managerevent', async (event) => {
   const now = new Date().toISOString().slice(0, 19).replace('T', ' '); // ✅ '2025-06-23 09:16:09'
 
   switch (event.event) {
@@ -133,6 +142,7 @@ ami.on('managerevent', async (event) => {
 
 // ✅ Poll queue status every 10 seconds
 setInterval(() => {
+  if (!ami) return;
   ami.action({ Action: 'QueueStatus' }, (err) => {
     if (err) console.error('❌ QueueStatus action error:', err);
   });
@@ -277,7 +287,16 @@ app.get('/api/queue-call-stats', (req, res) => {
 });
 
 // ✅ Start server
-const PORT = 5075;
-app.listen(PORT, () => {
+const PORT = Number(process.env.AMI_API_PORT || 5075);
+const apiServer = app.listen(PORT, () => {
   console.log(`✅ Backend API running on port ${PORT}`);
+});
+
+// Prevent backend crash when port is already in use (e.g., another instance already running)
+apiServer.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.warn(`⚠️ AMI API port ${PORT} is already in use. Skipping amiServer API listener to keep main backend running.`);
+    return;
+  }
+  console.error('❌ amiServer API failed to start:', err);
 });

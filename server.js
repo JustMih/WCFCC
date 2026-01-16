@@ -14,6 +14,14 @@ const { Server } = require("socket.io");
 /* ------------------------------ CONFIG & DB ------------------------------ */
 const sequelize = require("./config/mysql_connection.js");
 
+// If DB is unreachable in dev environments, you can keep the server running by setting:
+// - ALLOW_NO_DB=true   (recommended for local dev when DB is not reachable)
+// - EXIT_ON_DB_FAILURE=false
+const ALLOW_NO_DB =
+  String(process.env.ALLOW_NO_DB || "").toLowerCase() === "true" ||
+  String(process.env.EXIT_ON_DB_FAILURE || "").toLowerCase() === "false";
+let DB_READY = false;
+
 /* ------------------------------ EXPRESS INIT ------------------------------ */
 const app = express();
 const server = http.createServer(app);
@@ -142,6 +150,29 @@ app.use(
     },
   })
 );
+
+// Health check (always available)
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    dbReady: DB_READY,
+    allowNoDb: ALLOW_NO_DB,
+    time: new Date().toISOString(),
+  });
+});
+
+// If DB isn't ready, block API routes with a clear 503 instead of crashing later.
+app.use("/api", (req, res, next) => {
+  if (DB_READY) return next();
+  if (req.path === "/health") return next();
+
+  return res.status(503).json({
+    success: false,
+    code: "DB_NOT_READY",
+    message:
+      "Database is not connected. Check DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS or set ALLOW_NO_DB=true for local dev.",
+  });
+});
 
 // API routes
 app.use("/api", routes);
@@ -369,6 +400,7 @@ sequelize
   .sync({ force: false, alter: false })
   .then(() => {
     console.log("✅ Database synced");
+    DB_READY = true;
     registerSuperAdmin();
 
     const PORT = process.env.PORT || 5070;
@@ -440,6 +472,7 @@ sequelize
         "⚠️ Foreign key constraint already exists (likely from migration). Continuing..."
       );
       console.log("✅ Database connection established");
+      DB_READY = true;
       registerSuperAdmin();
 
       const PORT = process.env.PORT || 5070;
@@ -494,7 +527,22 @@ sequelize
       }
     } else {
       console.error("❌ Database sync failed:", error);
-      process.exit(1);
+      DB_READY = false;
+
+      // Production: fail fast unless explicitly allowed.
+      const isProduction =
+        String(process.env.NODE_ENV || "").toLowerCase() === "production";
+      const shouldExit = isProduction && !ALLOW_NO_DB;
+      if (shouldExit) process.exit(1);
+
+      console.warn(
+        "⚠️ Continuing without DB. /api/* routes will return 503 until DB is available."
+      );
+
+      const PORT = process.env.PORT || 5070;
+      server.listen(PORT, () => {
+        console.log(`🚀 HTTP Server running on port ${PORT}`);
+      });
     }
   });
 

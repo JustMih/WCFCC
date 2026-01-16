@@ -46,13 +46,19 @@
 const { Sequelize } = require("sequelize");
 require("dotenv").config();
 
+const dbName = process.env.DB_NAME || "asterisk";
+const dbUser = process.env.DB_USER || "asterisk";
+const dbPass = process.env.DB_PASS || "Wcf@1234";
+const dbHost = process.env.DB_HOST || "192.168.21.70";
+const dbPort = process.env.DB_PORT || 3306;
+
 const sequelize = new Sequelize(
-  process.env.DB_NAME || "asterisk",
-  process.env.DB_USER || "asterisk",
-  process.env.DB_PASS || "Wcf@1234",
+  dbName,
+  dbUser,
+  dbPass,
   {
-    host: process.env.DB_HOST || "192.168.21.70",
-    port: process.env.DB_PORT || 3306,
+    host: dbHost,
+    port: dbPort,
     dialect: "mysql",
     logging: false,
     timezone: '+03:00',   
@@ -63,6 +69,11 @@ const sequelize = new Sequelize(
 sequelize
   .authenticate()
   .then(() => console.log("Connected to the live MySQL database..."))
-  .catch((err) => console.error("MySQL Connection Error:", err));
+  .catch((err) => {
+    console.error(
+      `MySQL Connection Error (host=${dbHost}:${dbPort}, db=${dbName}, user=${dbUser}):`,
+      err?.message || err
+    );
+  });
 
 module.exports = sequelize;
