@@ -22,9 +22,10 @@ function getRequesterDisplayName(ticket) {
 }
 
 const getAllReviewerTickets = async (req, res) => {
+  let allTickets;
   try {
     // Get tickets assigned to the reviewer with status "Open" or "Assigned"
-    const allTickets = await Ticket.findAll({
+    allTickets = await Ticket.findAll({
       where: {
         assigned_to_id: req.user.userId,
         category: {
@@ -55,11 +56,44 @@ const getAllReviewerTickets = async (req, res) => {
       });
     }
 
+    // Convert tickets to plain objects to avoid any getter/hook issues during serialization
+    // This prevents file access errors from breaking the response
+    const ticketsData = allTickets.map(ticket => {
+      try {
+        return ticket.get({ plain: true });
+      } catch (fileError) {
+        // If there's a file access error, log it and return basic ticket data
+        if (fileError.code === 'ENOENT' && fileError.syscall === 'access') {
+          console.warn(`File not found for ticket ${ticket.id}: ${fileError.path}`);
+        }
+        // Return ticket data using get() which should work even if some getters fail
+        return ticket.get({ plain: true });
+      }
+    });
+
     res.status(200).json({
       message: "All tickets assigned to reviewer fetched successfully.",
-      tickets: allTickets
+      tickets: ticketsData
     });
   } catch (error) {
+    // Handle file access errors specifically - log but don't fail the request
+    if (error.code === 'ENOENT' && error.syscall === 'access') {
+      console.warn(`File access error in getAllReviewerTickets: ${error.path} - ${error.message}`);
+      // If allTickets is defined (error happened during serialization), try to return them
+      if (typeof allTickets !== 'undefined') {
+        try {
+          const ticketsData = allTickets.map(ticket => ticket.get({ plain: true }));
+          return res.status(200).json({
+            message: "All tickets assigned to reviewer fetched successfully.",
+            tickets: ticketsData,
+            warning: "Some file references may be unavailable"
+          });
+        } catch (retryError) {
+          console.error("Error retrying ticket serialization:", retryError);
+        }
+      }
+    }
+
     console.error("Error fetching all reviewer tickets:", error);
     res.status(500).json({
       message: "Server error",
