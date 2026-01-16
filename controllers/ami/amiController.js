@@ -1,6 +1,14 @@
 const AsteriskManager = require("asterisk-manager");
 
 // AMI connection setup
+// const ami = new AsteriskManager(
+//   5038, // AMI port
+//   "10.52.0.19", // Asterisk server IP
+//   "admin", // AMI username
+//   "@Ttcl123", // AMI password
+//   true // Enable events
+// );
+
 const ami = new AsteriskManager(
   5038, // AMI port
   "10.52.0.19", // Asterisk server IP

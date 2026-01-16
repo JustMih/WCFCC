@@ -651,6 +651,9 @@ exports.getCallSummaryReport = async (req, res) => {
       return res.status(404).json({ message: "No call summary data found" });
     }
 
+
+    
+
     res.json(formattedSummary);
   } catch (error) {
     console.error("Error fetching call summary report:", error);
