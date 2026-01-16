@@ -182,8 +182,12 @@ const convertOrForwardTicket = async (req, res) => {
     // Reload ticket to ensure we have the latest data (especially after reverse)
     await ticket.reload({ transaction });
 
-    const isComplaintTicket = String(ticket.category || "").toLowerCase() === "complaint";
-    const isConvertingToInquiry = String(category || "").toLowerCase() === "inquiry";
+    // Normalize category strings (trim and lowercase) for accurate comparison
+    const ticketCategory = String(ticket.category || "").trim().toLowerCase();
+    const newCategory = String(category || "").trim().toLowerCase();
+    
+    const isComplaintTicket = ticketCategory === "complaint";
+    const isConvertingToInquiry = newCategory === "inquiry";
     const isForwarding = Boolean(responsible_unit_name);
 
     // Check if any action parameters are provided
@@ -203,16 +207,23 @@ const convertOrForwardTicket = async (req, res) => {
     }
 
     // Rating rules:
-    // - Required ONLY when forwarding a Complaint ticket as a complaint (i.e., not converting to Inquiry)
-    // - Not required for non-Complaint tickets (Compliment/Suggestion/Inquiry/etc.)
-    // - Not required when converting to Inquiry
+    // - Required ONLY for Complaint tickets when forwarding as a complaint (not converting to Inquiry)
+    // - NOT required for: Inquiry, Suggestion, Compliment, or any other non-Complaint category
+    // - NOT required when converting any ticket to Inquiry
+    // IMPORTANT: Rating is ONLY for Complaint tickets. All other categories (Inquiry/Suggestion/Compliment) do NOT require rating.
     const effectiveComplaintType = complaintType || ticket.complaint_type;
+    
+    // Only validate rating requirement if this is a Complaint ticket
+    // For Inquiry, Suggestion, Compliment, etc. - skip rating validation entirely
     if (isForwarding && isComplaintTicket && !isConvertingToInquiry && !effectiveComplaintType) {
       await safeRollback(transaction);
       return res.status(400).json({
         message: "Rating is required. Please provide complaintType (Minor or Major)."
       });
     }
+    
+    // For non-Complaint tickets (Inquiry/Suggestion/Compliment), rating is never required
+    // The condition above already handles this by checking isComplaintTicket === true
 
     // Comment is required when forwarding a complaint (as a complaint)
     if (isForwarding && isComplaintTicket && !isConvertingToInquiry && (!ratingComment || !ratingComment.trim())) {
@@ -396,6 +407,7 @@ const convertOrForwardTicket = async (req, res) => {
         }
       }
 
+      
       // Only update responsible_unit_name, do not require section/function/unit head
       ticket.responsible_unit_name = responsible_unit_name;
       
