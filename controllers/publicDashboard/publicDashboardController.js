@@ -44,101 +44,97 @@ const insertMissedCall = async ({ caller, time, linkedid }) => {
   const normalizedCaller = normalizeNumber(caller);
   if (!normalizedCaller || !time || !linkedid) return;
 
-  await sequelize.query(
-    `
-    INSERT INTO MissedCalls
-      (caller, time, status, linkedid, createdAt, updatedAt)
-    SELECT
-      :caller, :time, 'pending', :linkedid, NOW(), NOW()
-    FROM DUAL
-    WHERE NOT EXISTS (
-      SELECT 1 FROM MissedCalls WHERE linkedid = :linkedid
-    )
-    `,
-    {
-      replacements: {
-        caller: normalizedCaller,
-        time,
-        linkedid,
-      },
-    }
-  );
+ await sequelize.query(
+  `
+  INSERT INTO MissedCalls
+    (caller, time, agentId, status, archived, createdAt, updatedAt, linkedid)
+  SELECT
+    :caller,
+    :time,
+    :agentId,
+    'pending',
+    0,
+    NOW(),
+    NOW(),
+    :linkedid
+  FROM DUAL
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM MissedCalls
+    WHERE caller = :caller
+      AND time = :time
+      AND agentId = :agentId
+  )
+  `,
+  {
+    replacements: {
+      caller: normalizedCaller,
+      time,
+      agentId,
+      linkedid: linkedid || null,
+    },
+  }
+);
+
 };
 
 /* ======================================================
    MISSED CALL UPDATE (CALLBACK)
 ====================================================== */
 
-const updateMissedCallOnCallback = async ({
-  agentExt,
-  caller,
-  callbackTime,
-  billsec,
-}) => {
-  if (!agentExt || !caller || !callbackTime) return;
+const updateMissedCallOnCallback = async ({ agentExt, caller, callbackTime, billsec }) => {
+  console.log("[CALLBACK DEBUG] Input received:", {
+    rawCaller: caller,
+    normalizedCaller: normalizeNumber(caller),
+    agentExt,
+    callbackTime,
+    billsec: billsec || 0
+  });
 
-  try {
-    // Check if columns exist by trying a simpler update first
-    // If called_back_by column doesn't exist, just update status
-    await sequelize.query(
-      `
-      UPDATE MissedCalls
-      SET
-        status = 'called_back',
-        updatedAt = NOW()
-      WHERE
-        status = 'pending'
-        AND caller = :caller
-        AND time < :callbackTime
-      ORDER BY time DESC
-      LIMIT 1
-      `,
-      {
-        replacements: {
-          caller,
-          callbackTime,
-        },
-      }
-    );
-
-    // Try to update additional columns if they exist
-    try {
-      await sequelize.query(
-        `
-        UPDATE MissedCalls
-        SET
-          called_back_by = :agentExt,
-          called_back_at = :callbackTime,
-          billsec = :billsec
-        WHERE
-          status = 'called_back'
-          AND caller = :caller
-          AND time < :callbackTime
-        ORDER BY time DESC
-        LIMIT 1
-        `,
-        {
-          replacements: {
-            agentExt,
-            caller,
-            callbackTime,
-            billsec: billsec || 0,
-          },
-        }
-      );
-    } catch (colError) {
-      // Columns don't exist, that's okay - we already updated status
-      console.log(
-        "Optional columns (called_back_by, called_back_at, billsec) not available:",
-        colError.message
-      );
-    }
-  } catch (error) {
-    // Log but don't throw - this shouldn't break the dashboard
-    console.error("Error updating missed call on callback:", error.message);
+  const normalizedCaller = normalizeNumber(caller);
+  if (!normalizedCaller || !callbackTime) {
+    console.log("[CALLBACK DEBUG] Missing caller or time → aborting");
+    return;
   }
-};
 
+  const [rows] = await sequelize.query(
+    `SELECT id, caller, status, time FROM MissedCalls 
+     WHERE caller = :caller 
+       AND status = 'pending' 
+     ORDER BY time DESC 
+     LIMIT 1`,
+    { replacements: { caller: normalizedCaller }, type: sequelize.QueryTypes.SELECT }
+  );
+
+  console.log("[CALLBACK DEBUG] Found rows:", rows || "NONE");
+
+  if (!rows?.length) {
+    console.log(`[CALLBACK DEBUG] No pending missed call for ${normalizedCaller}`);
+    return;
+  }
+
+  const id = rows[0].id;
+
+  console.log(`[CALLBACK DEBUG] Updating ID ${id} for caller ${normalizedCaller}`);
+ // 2. Now safe to updateS
+  await sequelize.query(
+    `UPDATE MissedCalls 
+     SET 
+       status = 'called_back',
+       called_back_by = :agentExt,
+       called_back_at = :callbackTime,
+       billsec = :billsec,
+       updatedAt = NOW()
+     WHERE id = :id`,
+    {
+      replacements: { id, agentExt, callbackTime, billsec: billsec || 0 },
+      type: sequelize.QueryTypes.UPDATE
+    }
+  );
+
+  console.log(`Successfully updated missed call ID ${id}`);
+};
+     
 /* ======================================================
    PUBLIC DASHBOARD CONTROLLER
 ====================================================== */
