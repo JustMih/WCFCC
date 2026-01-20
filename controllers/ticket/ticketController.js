@@ -8633,6 +8633,91 @@ const managerSendToDirector = async (req, res) => {
   }
 };
 
+// Get all workflow tickets (tickets with workflow_path set)
+const getWorkflowTickets = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findByPk(userId, {
+      attributes: ["id", "full_name", "role", "unit_section"]
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Get tickets that have workflow_path set
+    // Filter by user's role and assigned tickets
+    let whereClause = {
+      workflow_path: {
+        [Op.ne]: null
+      }
+    };
+
+    // If not super-admin or supervisor, show only tickets assigned to user or created by user
+    if (user.role !== "super-admin" && user.role !== "supervisor") {
+      whereClause[Op.or] = [
+        { assigned_to_id: userId },
+        { userId: userId },
+        { created_by: userId }
+      ];
+    }
+
+    const tickets = await Ticket.findAll({
+      where: whereClause,
+      attributes: { exclude: ["userId"] },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "full_name", "email", "role"],
+        },
+        {
+          model: User,
+          as: "assignee",
+          attributes: ["id", "full_name", "email", "role"],
+        },
+        {
+          model: Section,
+          as: "responsibleSection",
+          attributes: ["id", "name"],
+        },
+        {
+          model: TicketAssignment,
+          as: "assignments",
+          limit: 5,
+          order: [["created_at", "DESC"]],
+          include: [
+            {
+              model: User,
+              as: "assignedTo",
+              attributes: ["id", "full_name", "email", "role"]
+            }
+          ]
+        }
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    return res.json({
+      success: true,
+      data: tickets,
+      message: "Workflow tickets fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching workflow tickets:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getTicketCounts,
   generateTicketId,
@@ -8689,5 +8774,6 @@ module.exports = {
   managerSendToDirector,
   escalateAndUpdateTicketOnSlaBreach,
   updateReversedTicketDetails,
-  findSupervisorForSection
+  findSupervisorForSection,
+  getWorkflowTickets
 };

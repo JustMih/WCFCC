@@ -10,7 +10,7 @@ const {
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, managerSendToDirector, updateReversedTicketDetails
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, managerSendToDirector, updateReversedTicketDetails, getWorkflowTickets
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -105,6 +105,13 @@ router.get(
   authMiddleware,
   // roleMiddleware(["agent", "attendee", "super-admin", "reviewer", "focal-person", "claim-focal-person", "compliance-focal-person"]),
   getTicketCounts
+);
+
+// Get workflow tickets (tickets with workflow_path set)
+router.get(
+  "/workflow-tickets",
+  authMiddleware,
+  getWorkflowTickets
 );
 
 // Get attachment file
