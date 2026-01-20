@@ -8,6 +8,7 @@ const {
   reverseTicket,
   closeTicket
 } = require('../controllers/workflow/workflowController');
+const { uploadSingle, handleMulterError } = require('../config/multerConfig');
 
 // Apply authentication middleware to all workflow routes
 router.use(authMiddleware);
@@ -15,19 +16,19 @@ router.use(authMiddleware);
 // Get workflow details for a ticket
 router.get('/ticket/:ticketId', getWorkflowDetails);
 
-// Attend to a ticket (mark as in progress)
-router.post('/ticket/:ticketId/attend', attendTicket);
+// Attend to a ticket (mark as in progress) - with optional attachment
+router.post('/ticket/:ticketId/attend', uploadSingle, handleMulterError, attendTicket);
 
-// Recommend ticket to next step
-router.post('/ticket/:ticketId/recommend', recommendTicket);
+// Recommend ticket to next step - with optional attachment
+router.post('/ticket/:ticketId/recommend', uploadSingle, handleMulterError, recommendTicket);
 
 // Attend and recommend in one action (for attendee with Minor/Major complaints from head of unit)
-router.post('/ticket/:ticketId/attend-and-recommend', require('../controllers/workflow/workflowController').attendAndRecommend);
+router.post('/ticket/:ticketId/attend-and-recommend', uploadSingle, handleMulterError, require('../controllers/workflow/workflowController').attendAndRecommend);
 
-// Reverse ticket to previous step
-router.post('/ticket/:ticketId/reverse', reverseTicket);
+// Reverse ticket to previous step - with optional attachment
+router.post('/ticket/:ticketId/reverse', uploadSingle, handleMulterError, reverseTicket);
 
-// Close ticket (final approval)
-router.post('/ticket/:ticketId/close', closeTicket);
+// Close ticket (final approval) - with optional attachment
+router.post('/ticket/:ticketId/close', uploadSingle, handleMulterError, closeTicket);
 
 module.exports = router; 

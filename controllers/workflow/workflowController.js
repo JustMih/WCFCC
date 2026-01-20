@@ -87,6 +87,12 @@ const attendTicket = async (req, res) => {
     ticket.attended_by_id = userId;
     ticket.workflow_notes = notes || ticket.workflow_notes;
     
+    // Handle attachment if provided
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = req.file.path;
+    }
+
     // Create assignment record
     await TicketAssignment.create({
       ticket_id: ticket.id,
@@ -95,6 +101,7 @@ const attendTicket = async (req, res) => {
       assigned_to_role: req.user.role,
       action: 'Attended',
       reason: notes || 'Ticket attended to',
+      attachment_path: attachmentPath,
       created_at: new Date()
     }, { transaction });
 
@@ -174,6 +181,12 @@ const recommendTicket = async (req, res) => {
       }
     }
 
+    // Handle attachment if provided
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = req.file.path;
+    }
+
     // Create assignment record
     await TicketAssignment.create({
       ticket_id: ticket.id,
@@ -182,6 +195,7 @@ const recommendTicket = async (req, res) => {
       assigned_to_role: ticket.assigned_to_role,
       action: 'Recommended',
       reason: recommendation_notes || 'Ticket recommended to next step',
+      attachment_path: attachmentPath,
       created_at: new Date()
     }, { transaction });
 
@@ -405,6 +419,12 @@ const reverseTicket = async (req, res) => {
       }
     }
 
+    // Handle attachment if provided
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = req.file.path;
+    }
+
     // Create assignment record
     await TicketAssignment.create({
       ticket_id: ticket.id,
@@ -413,6 +433,7 @@ const reverseTicket = async (req, res) => {
       assigned_to_role: ticket.assigned_to_role,
       action: 'Reversed',
       reason: reversal_reason || 'Ticket reversed to previous step',
+      attachment_path: attachmentPath,
       created_at: new Date()
     }, { transaction });
 
@@ -464,6 +485,12 @@ const closeTicket = async (req, res) => {
     ticket.resolution_details = closure_notes || 'Ticket closed by workflow completion';
     ticket.workflow_notes = closure_notes || ticket.workflow_notes;
 
+    // Handle attachment if provided
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = req.file.path;
+    }
+
     // Create assignment record
     await TicketAssignment.create({
       ticket_id: ticket.id,
@@ -472,6 +499,7 @@ const closeTicket = async (req, res) => {
       assigned_to_role: req.user.role,
       action: 'Closed',
       reason: closure_notes || 'Ticket closed by workflow completion',
+      attachment_path: attachmentPath,
       created_at: new Date()
     }, { transaction });
 
