@@ -9,6 +9,7 @@ const {
   getLostCalls,
   getDroppedCalls,
   markLostCallAsAnswered,
+  markMissedCallCallback,
 } = require("../controllers/calls/calls");
 
 router.get("/calls-count", getCdrCounts);
@@ -19,5 +20,5 @@ router.get("/received-calls", getReceivedCalls);
 router.get("/lost-calls", getLostCalls);
 router.get("/dropped-calls", getDroppedCalls);
 router.post("/lost-calls/mark-answered", markLostCallAsAnswered);
-
+router.post('/missed-calls/callback', markMissedCallCallback);
 module.exports = router;

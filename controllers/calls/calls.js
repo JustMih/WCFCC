@@ -142,6 +142,37 @@ const getAgentCdrStatsToday = async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 };
+const syncMissedCallsFromCdrToday = async () => {
+  await sequelize.query(
+    `
+    INSERT INTO MissedCalls
+      (caller, time, agentId, status, archived, createdAt, updatedAt, linkedid)
+    SELECT
+      c.clid AS caller,
+      c.cdrstarttime AS time,
+      SUBSTRING_INDEX(c.dstchannel, '/', -1) AS agentId,
+      'pending' AS status,
+      0 AS archived,
+      NOW(),
+      NOW(),
+      c.linkedid
+    FROM cdr c
+    WHERE
+      c.lastapp = 'Queue'
+      AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
+      AND DATE(c.cdrstarttime) = CURDATE()
+      AND c.clid IS NOT NULL
+      AND c.clid != ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM MissedCalls mc
+        WHERE mc.caller = c.clid
+          AND mc.time = c.cdrstarttime
+          AND mc.agentId = SUBSTRING_INDEX(c.dstchannel, '/', -1)
+      )
+    `
+  );
+};
 
 // Get lost calls for today with phone numbers
 const getLostCallsToday = async (req, res) => {
@@ -159,7 +190,113 @@ const getLostCallsToday = async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 };
+/**
+ * Marks a missed call as "called back" when agent explicitly clicks the callback button.
+ * Updates status, agent who called back, and timestamp.
+ * 
+ * @route POST /missed-calls/callback
+ * @body { id?: number, agentExt: string, caller?: string, callbackTime?: string }
+ */
+const markMissedCallCallback = async (req, res) => {
+  const { id, agentExt, caller, callbackTime } = req.body;
 
+  // Validation
+  if (!agentExt) {
+    return res.status(400).json({
+      success: false,
+      error: "agentExt is required (agent extension who performed the callback)",
+    });
+  }
+
+  if (!id && !caller) {
+    return res.status(400).json({
+      success: false,
+      error: "Either 'id' or 'caller' must be provided",
+    });
+  }
+
+  const effectiveTime = callbackTime || new Date().toISOString();
+
+  try {
+    let affectedRows = 0;
+
+    if (id) {
+      // ── Preferred path: update by primary key ──
+      const [result] = await sequelize.query(
+        `
+        UPDATE MissedCalls
+        SET
+          status         = 'called_back',
+          called_back_by = :agentExt,
+          called_back_at = :effectiveTime,
+          updatedAt      = NOW()
+        WHERE id = :id
+          AND status = 'pending'
+        `,
+        {
+          replacements: { id, agentExt, effectiveTime },
+          type: sequelize.QueryTypes.UPDATE,
+        }
+      );
+
+      affectedRows = result?.affectedRows || 0;
+    } else {
+      // ── Fallback: match by caller (last pending record) ──
+      // Using derived table to avoid MySQL "You can't specify target table for update in FROM clause"
+      const [result] = await sequelize.query(
+        `
+        UPDATE MissedCalls mc
+        SET
+          status         = 'called_back',
+          called_back_by = :agentExt,
+          called_back_at = :effectiveTime,
+          updatedAt      = NOW()
+        WHERE mc.id = (
+          SELECT id FROM (
+            SELECT id
+            FROM MissedCalls
+            WHERE caller = :caller
+              AND status = 'pending'
+            ORDER BY time DESC
+            LIMIT 1
+          ) AS tmp
+        )
+        `,
+        {
+          replacements: { caller, agentExt, effectiveTime },
+          type: sequelize.QueryTypes.UPDATE,
+        }
+      );
+
+      affectedRows = result?.affectedRows || 0;
+    }
+
+    if (affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "No pending missed call found matching the provided id or caller",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Missed call successfully marked as called back",
+      updatedRows: affectedRows,
+    });
+  } catch (error) {
+    console.error("Error in markMissedCallCallback:", {
+      message: error.message,
+      stack: error.stack,
+      body: req.body,
+    });
+
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update missed call",
+      detail: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
 // Get all received calls (ANSWERED calls)
 const getReceivedCalls = async (req, res) => {
   try {
@@ -205,11 +342,39 @@ const getReceivedCalls = async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 };
+const syncMissedCallCallbacksFromCdrToday = async () => {
+  try {
+    const [result] = await sequelize.query(`
+      UPDATE MissedCalls mc
+      INNER JOIN cdr c
+         ON  c.clid          = mc.caller
+         AND c.disposition   = 'ANSWERED'
+         AND c.cdrstarttime >= mc.time
+         AND c.cdrstarttime <= DATE_ADD(mc.time, INTERVAL 45 MINUTE)
+      SET
+        mc.status         = 'called_back',
+        mc.called_back_by = SUBSTRING_INDEX(c.src, '/', -1),
+        mc.called_back_at = c.cdrstarttime,
+        mc.billsec        = c.billsec,
+        mc.updatedAt      = NOW()
+      WHERE mc.status = 'pending'
+        AND mc.called_back_at IS NULL
+    `, { type: sequelize.QueryTypes.UPDATE });
+
+    const affected = result?.affectedRows || 0;
+    if (affected > 0) {
+      console.log(`[CDR_SYNC] Updated ${affected} missed calls from answered outbound CDR`);
+    }
+  } catch (err) {
+    console.error("[CDR_SYNC] Failed:", err.message);
+  }
+};
 
 // Get all lost calls (NO ANSWER calls that were in queue)
 const getLostCalls = async (req, res) => {
   try {
     const { limit = 500, offset = 0 } = req.query;
+       await syncMissedCallCallbacksFromCdrToday();
     const lostCalls = await sequelize.query(
       `SELECT 
         clid AS caller,
@@ -231,6 +396,7 @@ const getLostCalls = async (req, res) => {
         type: sequelize.QueryTypes.SELECT,
       }
     );
+
 
     const totalCount = await sequelize.query(
       `SELECT COUNT(*) AS total
@@ -360,4 +526,5 @@ module.exports = {
   getLostCalls,
   getDroppedCalls,
   markLostCallAsAnswered,
+  markMissedCallCallback,
 };
