@@ -71,43 +71,66 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-// ✅ PUT to update missed call status (e.g., mark as called_back)
+ 
 router.put("/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const {
+      status,
+      called_back_by,
+      called_back_at,
+      billsec,
+    } = req.body;
 
-    console.log("🔄 PUT /missed-calls/:id/status called:", { id, status });
+    console.log("🔄 PUT /missed-calls/:id/status:", {
+      id,
+      status,
+      called_back_by,
+      called_back_at,
+      billsec,
+    });
 
-    // Basic validation
     if (!status) {
-      console.warn("⚠️ Missing status in PUT /missed-calls/:id/status");
-      return res.status(400).json({ error: "Missing required field: status" });
+      return res.status(400).json({
+        error: "Missing required field: status",
+      });
     }
 
-    // Validate status value
-    const validStatuses = ['pending', 'called_back', 'ignored'];
+    const validStatuses = ["pending", "called_back", "ignored"];
     if (!validStatuses.includes(status)) {
-      console.warn("⚠️ Invalid status value:", status);
-      return res.status(400).json({ error: "Invalid status value. Must be one of: pending, called_back, ignored" });
+      return res.status(400).json({
+        error: "Invalid status value",
+      });
     }
 
-    // Find and update the missed call
     const missedCall = await MissedCall.findByPk(id);
-    
     if (!missedCall) {
-      console.warn("⚠️ Missed call not found with ID:", id);
-      return res.status(404).json({ error: "Missed call not found" });
+      return res.status(404).json({
+        error: "Missed call not found",
+      });
     }
 
-    // Update the status
-    await missedCall.update({ status });
+    // ✅ Build update payload dynamically
+    const updatePayload = { status };
 
-    console.log("✅ Missed call status updated:", missedCall.toJSON());
+    if (status === "called_back") {
+      updatePayload.called_back_by =
+        called_back_by ?? missedCall.called_back_by;
+
+      updatePayload.called_back_at =
+        called_back_at ? new Date(called_back_at) : new Date();
+
+      updatePayload.billsec =
+        typeof billsec === "number" ? billsec : missedCall.billsec;
+    }
+
+    await missedCall.update(updatePayload);
+
+    console.log("✅ Missed call fully updated:", missedCall.toJSON());
+
     res.json(missedCall);
   } catch (error) {
-    console.error("❌ Error updating missed call status:", error);
+    console.error("❌ Error updating missed call:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
