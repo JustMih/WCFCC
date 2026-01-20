@@ -121,10 +121,14 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     manager: 1,
     director: 1,
     "director-general": 1,
+    "super-admin": { minor: 3, major: 10 },
   };
   function getSlaDaysForRole(role, complaintType) {
     if (role === "attendee") {
       return SLA_ROLE_DAYS.attendee[complaintType] || 3;
+    }
+    if (role === "super-admin") {
+      return SLA_ROLE_DAYS["super-admin"][complaintType] || 3;
     }
     return SLA_ROLE_DAYS[role] || 1;
   }
@@ -168,78 +172,130 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   const breached = workingDays > slaDays;
   if (!breached) return false;
 
-  // Escalation path logic (per your SLA)
-  const ESCALATION_PATH = {
-    inquiry: [
-      "attendee",
-      "focal-person",
-      "head-of-unit",
-      "manager",
-      "director",
-    ],
-    complaint_minor: ["reviewer", "head-of-unit", "manager", "director"],
-    complaint_major: [
-      "reviewer",
-      "head-of-unit",
-      "manager",
-      "director",
-      "director-general",
-    ],
-  };
-  let path;
-  if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
-  else if (ticket.category === "Complaint" && complaintType === "major")
-    path = ESCALATION_PATH.complaint_major;
-  else if (ticket.category === "Complaint")
-    path = ESCALATION_PATH.complaint_minor;
-  else return false;
-
-  const idx = path.indexOf(currentRole);
-  if (idx === -1 || idx === path.length - 1) return false; // Already at top
-  const nextRole = path[idx + 1];
-
-  // Find next user in same unit_section or sub_section
-  let sectionValue;
-  let useSubSection = false;
-  
   // Determine if ticket is for directorate or unit
   const isTicketDirectorate = ticket.section && ticket.section.toLowerCase().includes("directorate");
   const isTicketUnit = ticket.section && ticket.section.toLowerCase() === "unit";
+
+  // Check if current role is one that needs special escalation handling
+  const isEntryLevelRole = ["attendee", "super-admin", "focal-person", "supervisor", "reviewer"].includes(currentRole);
+
+  // Determine escalation path based on ticket type and current role
+  let nextRole;
+  
+  if (isEntryLevelRole) {
+    // For attendee, super-admin, focal-person, supervisor, reviewer
+    if (isTicketDirectorate) {
+      // Directorate path: attendee/super-admin/focal-person/supervisor/reviewer → manager → director → director-general
+      if (currentRole === "attendee" || currentRole === "super-admin" || 
+          currentRole === "focal-person" || currentRole === "supervisor" || currentRole === "reviewer") {
+        nextRole = "manager";
+      } else if (currentRole === "manager") {
+        nextRole = "director";
+      } else if (currentRole === "director") {
+        nextRole = "director-general";
+      } else {
+        return false; // Already at top
+      }
+    } else if (isTicketUnit) {
+      // Unit path: head-of-unit (of that unit) → director-general
+      if (currentRole === "attendee" || currentRole === "super-admin" || 
+          currentRole === "focal-person" || currentRole === "supervisor" || currentRole === "reviewer") {
+        nextRole = "head-of-unit";
+      } else if (currentRole === "head-of-unit") {
+        nextRole = "director-general";
+      } else {
+        return false; // Already at top
+      }
+    } else {
+      // Fallback: use old logic for other cases
+      const ESCALATION_PATH = {
+        inquiry: [
+          "reviewer",
+          "head-of-unit",
+          "director-general",
+        ],
+        complaint_minor: ["reviewer", "head-of-unit", "director-general"],
+        complaint_major: [
+          "reviewer",
+          "head-of-unit",
+          "director-general",
+        ],
+      };
+      let path;
+      if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
+      else if (ticket.category === "Complaint" && complaintType === "major")
+        path = ESCALATION_PATH.complaint_major;
+      else if (ticket.category === "Complaint")
+        path = ESCALATION_PATH.complaint_minor;
+      else return false;
+
+      const idx = path.indexOf(currentRole);
+      if (idx === -1 || idx === path.length - 1) return false;
+      nextRole = path[idx + 1];
+    }
+  } else {
+    // For other roles (reviewer, head-of-unit, manager, director, etc.)
+    // Use standard escalation paths
+    const ESCALATION_PATH = {
+      inquiry: [
+        "reviewer",
+        "head-of-unit",
+        "director-general",
+      ],
+      complaint_minor: ["reviewer", "head-of-unit", "director-general"],
+      complaint_major: [
+        "reviewer",
+        "head-of-unit",
+        "director-general",
+      ],
+    };
+    let path;
+    if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
+    else if (ticket.category === "Complaint" && complaintType === "major")
+      path = ESCALATION_PATH.complaint_major;
+    else if (ticket.category === "Complaint")
+      path = ESCALATION_PATH.complaint_minor;
+    else return false;
+
+    const idx = path.indexOf(currentRole);
+    if (idx === -1 || idx === path.length - 1) return false;
+    nextRole = path[idx + 1];
+  }
+
+  // Find next user in same unit_section or sub_section
+  let sectionValue;
   
   if (isTicketDirectorate) {
-    // For directorate: use sub_section to match focal-person's sub_section
-    sectionValue = ticket.sub_section;
-    useSubSection = true;
+    // For directorate: use section to match user's unit_section
+    sectionValue = ticket.section;
   } else if (isTicketUnit) {
-    // For unit: use sub_section to match focal-person's unit_section (as before)
+    // For unit: use sub_section to match user's unit_section
     sectionValue = ticket.sub_section;
-    useSubSection = false;
   } else {
     // Fallback: use unit_section
     sectionValue = ticket.unit_section;
-    useSubSection = false;
   }
   
   const userWhere = { role: nextRole };
   if (sectionValue) {
-    if (useSubSection && nextRole === "focal-person") {
-      // For directorate focal-person: match by sub_section
-      userWhere.sub_section = sectionValue;
-    } else {
-      // For units or other roles: match by unit_section
-      userWhere.unit_section = sectionValue;
-    }
+    // Both directorate and unit match by unit_section in users table
+    userWhere.unit_section = sectionValue;
   }
   let nextUser = await User.findOne({ where: userWhere });
   if (!nextUser) {
-    // Fallback: find any user with the nextRole
-    nextUser = await User.findOne({ where: { role: nextRole } });
+    // Fallback: if no user found with role and section, escalate to supervisor
+    console.warn(
+      `No user found for role '${nextRole}' with section '${sectionValue}'. Escalating to supervisor instead.`
+    );
+    nextUser = await User.findOne({ where: { role: "supervisor" } });
     if (!nextUser) {
-      console.warn(
-        `Escalation failed: No user found for role '${nextRole}' (section: '${sectionValue}') or any section.`
+      console.error(
+        `Escalation failed: No supervisor found. Cannot escalate ticket ${ticket.id}.`
       );
       return false;
     }
+    // Update nextRole to supervisor for assignment
+    nextRole = "supervisor";
   }
 
   // Update ticket assignment
@@ -8577,6 +8633,91 @@ const managerSendToDirector = async (req, res) => {
   }
 };
 
+// Get all workflow tickets (tickets with workflow_path set)
+const getWorkflowTickets = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findByPk(userId, {
+      attributes: ["id", "full_name", "role", "unit_section"]
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Get tickets that have workflow_path set
+    // Filter by user's role and assigned tickets
+    let whereClause = {
+      workflow_path: {
+        [Op.ne]: null
+      }
+    };
+
+    // If not super-admin or supervisor, show only tickets assigned to user or created by user
+    if (user.role !== "super-admin" && user.role !== "supervisor") {
+      whereClause[Op.or] = [
+        { assigned_to_id: userId },
+        { userId: userId },
+        { created_by: userId }
+      ];
+    }
+
+    const tickets = await Ticket.findAll({
+      where: whereClause,
+      attributes: { exclude: ["userId"] },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "full_name", "email", "role"],
+        },
+        {
+          model: User,
+          as: "assignee",
+          attributes: ["id", "full_name", "email", "role"],
+        },
+        {
+          model: Section,
+          as: "responsibleSection",
+          attributes: ["id", "name"],
+        },
+        {
+          model: TicketAssignment,
+          as: "assignments",
+          limit: 5,
+          order: [["created_at", "DESC"]],
+          include: [
+            {
+              model: User,
+              as: "assignedTo",
+              attributes: ["id", "full_name", "email", "role"]
+            }
+          ]
+        }
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    return res.json({
+      success: true,
+      data: tickets,
+      message: "Workflow tickets fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching workflow tickets:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getTicketCounts,
   generateTicketId,
@@ -8633,5 +8774,6 @@ module.exports = {
   managerSendToDirector,
   escalateAndUpdateTicketOnSlaBreach,
   updateReversedTicketDetails,
-  findSupervisorForSection
+  findSupervisorForSection,
+  getWorkflowTickets
 };
