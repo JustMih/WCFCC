@@ -5904,6 +5904,10 @@ const reverseTicket = async (req, res) => {
     const { ticketId } = req.params;
     const { userId, reason, status, description } = req.body;
 
+    // Log received reason for debugging
+    console.log(`🔍 Reverse request - reason from frontend: "${reason}", description: "${description}"`);
+    console.log(`🔍 Reverse request - req.body keys:`, Object.keys(req.body || {}));
+
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
     }
@@ -6026,13 +6030,22 @@ const reverseTicket = async (req, res) => {
         });
       }
 
+      // Use the reason from frontend (director/head-of-unit's own reason)
+      // If reason is not provided, use default message
+      const reversalReason = reason && String(reason).trim() 
+        ? String(reason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Processing workflow reversal with reason: "${reversalReason}"`);
+
       // Use workflow service to process the reversal
       const result = await workflowService.processWorkflowStepTransition(
         ticketId,
         "Reversed",
         assignedBy,
         { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
-        reason || "Ticket reversed to previous user",
+        reversalReason,
+        attachmentPath, // Pass attachment path - will be saved with assigned_by_id (user aliyetuma)
         null // No transaction needed here
       );
 
@@ -6100,9 +6113,8 @@ const reverseTicket = async (req, res) => {
       });
 
       // Send emails in background (non-blocking)
-      const reversalReason = reason;
       setImmediate(() => {
-        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
       });
 
       // Format role name for display (capitalize and add spaces)
@@ -6128,6 +6140,14 @@ const reverseTicket = async (req, res) => {
         forwarded_by_id: null // Clear forwarded_by_id to allow forwarding again
       });
 
+      // Use the reason from frontend (director/head-of-unit's own reason)
+      // If reason is not provided, use default message
+      const reversalReason = reason && String(reason).trim() 
+        ? String(reason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Creating reversal assignment with reason: "${reversalReason}"`);
+
       // Add a new assignment record for the reversal
       await TicketAssignment.create({
         ticket_id: ticketId,
@@ -6135,7 +6155,7 @@ const reverseTicket = async (req, res) => {
         assigned_to_id: targetUserId,
         assigned_to_role: targetUserRole,
         action: "Reversed",
-        reason: reason || "Ticket reversed to previous user",
+        reason: reversalReason,
         attachment_path: attachmentPath,
         created_at: new Date()
       });
@@ -6182,7 +6202,7 @@ const reverseTicket = async (req, res) => {
       }
 
       // Send emails in background (non-blocking)
-      const reversalReason = reason;
+      // reversalReason is already declared above, so we use it directly
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });

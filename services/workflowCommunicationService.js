@@ -141,7 +141,7 @@ async function updateTicketWorkflowState(ticketId, updates, transaction = null) 
 /**
  * Create comprehensive workflow assignment record
  */
-async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assignedTo, currentStep, nextStep, reason, transaction = null) {
+async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assignedTo, currentStep, nextStep, reason, attachmentPath = null, transaction = null) {
   try {
     const workflow = getWorkflowInfo(ticket);
     if (!workflow) return null;
@@ -151,11 +151,12 @@ async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assign
     
     const assignmentData = {
       ticket_id: ticket.id,
-      assigned_by_id: assignedBy.id,
-      assigned_to_id: assignedTo ? assignedTo.id : null,
+      assigned_by_id: assignedBy.id, // User aliyetuma attachment
+      assigned_to_id: assignedTo ? assignedTo.id : null, // User anayepokea ticket
       assigned_to_role: assignedTo ? assignedTo.role : null,
       action: action,
       reason: reason || `Workflow action: ${action}`,
+      attachment_path: attachmentPath, // Save attachment kwa user aliyetuma (assigned_by_id)
       workflow_path: ticket.workflow_path,
       workflow_step: currentStep,
       workflow_current_role: workflow.currentRole,
@@ -214,7 +215,7 @@ function calculateRemainingSLADays(ticket, currentStep, workflow) {
 /**
  * Process workflow step transition
  */
-async function processWorkflowStepTransition(ticketId, action, assignedBy, assignedTo, reason, transaction = null) {
+async function processWorkflowStepTransition(ticketId, action, assignedBy, assignedTo, reason, attachmentPath = null, transaction = null) {
   try {
     const ticket = await Ticket.findByPk(ticketId);
     if (!ticket || !ticket.workflow_path) {
@@ -268,6 +269,7 @@ async function processWorkflowStepTransition(ticketId, action, assignedBy, assig
       workflow.currentStep,
       nextRole,
       reason,
+      attachmentPath, // Pass attachment path to save with assignment
       transaction
     );
     
