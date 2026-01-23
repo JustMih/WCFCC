@@ -384,10 +384,14 @@ const reverseTicket = async (req, res) => {
     const { ticketId } = req.params;
     // Handle both FormData and JSON body
     // FormData sends as 'reason' or 'reversal_reason', JSON sends as 'reversal_reason'
-    const reversal_reason = req.body.reversal_reason || req.body.reason || req.body.reversalReason;
+    // IMPORTANT: Always use reason from frontend (director/head-of-unit's own reason)
+    // Do NOT use reason from previous assignment or reviewer
+    const reversal_reason = req.body.reason || req.body.reversalReason;
     const userId = req.user.userId;
     
-    console.log(`🔍 Workflow reverse - received reversal_reason: "${reversal_reason}", req.body keys:`, Object.keys(req.body || {}));
+    console.log(`🔍 Workflow reverse - received reversal_reason from frontend: "${reversal_reason}"`);
+    console.log(`🔍 Workflow reverse - req.body keys:`, Object.keys(req.body || {}));
+    console.log(`🔍 Workflow reverse - Using reason from frontend, NOT from previous assignment`);
 
     const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
@@ -448,13 +452,21 @@ const reverseTicket = async (req, res) => {
     }
 
     // Create assignment record
+    // IMPORTANT: Always use reason from frontend (director/head-of-unit's own reason)
+    // Do NOT use reason from previous assignment or reviewer
+    const assignmentReason = reversal_reason && String(reversal_reason).trim() 
+      ? String(reversal_reason).trim() 
+      : 'Ticket reversed to previous step';
+    
+    console.log(`🔍 Workflow reverse - Creating assignment with reason from frontend: "${assignmentReason}"`);
+    
     await TicketAssignment.create({
       ticket_id: ticket.id,
       assigned_by_id: userId,
       assigned_to_id: ticket.assigned_to_id,
       assigned_to_role: ticket.assigned_to_role,
       action: 'Reversed',
-      reason: reversal_reason || 'Ticket reversed to previous step',
+      reason: assignmentReason, // Use reason from frontend, NOT from previous assignment
       attachment_path: attachmentPath,
       created_at: new Date()
     }, { transaction });
