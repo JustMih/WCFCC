@@ -154,5 +154,6 @@ module.exports = {
   getAllVoices,
   getVoiceById,
   updateVoice,
+  getVoiceAudio,
   deleteVoice,
 };
