@@ -130,8 +130,12 @@ const recommendTicket = async (req, res) => {
   
   try {
     const { ticketId } = req.params;
-    const { recommendation_notes, evidence_url } = req.body;
+    // Handle both FormData and JSON body
+    const recommendation_notes = req.body.recommendation_notes || req.body.recommendationNotes || req.body.notes;
+    const evidence_url = req.body.evidence_url || req.body.evidenceUrl;
     const userId = req.user.userId;
+    
+    console.log(`🔍 Workflow recommend - received recommendation_notes: "${recommendation_notes}", req.body keys:`, Object.keys(req.body || {}));
 
     const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
@@ -378,8 +382,16 @@ const reverseTicket = async (req, res) => {
   
   try {
     const { ticketId } = req.params;
-    const { reversal_reason } = req.body;
+    // Handle both FormData and JSON body
+    // FormData sends as 'reason' or 'reversal_reason', JSON sends as 'reversal_reason'
+    // IMPORTANT: Always use reason from frontend (director/head-of-unit's own reason)
+    // Do NOT use reason from previous assignment or reviewer
+    const reversal_reason = req.body.reason || req.body.reversalReason;
     const userId = req.user.userId;
+    
+    console.log(`🔍 Workflow reverse - received reversal_reason from frontend: "${reversal_reason}"`);
+    console.log(`🔍 Workflow reverse - req.body keys:`, Object.keys(req.body || {}));
+    console.log(`🔍 Workflow reverse - Using reason from frontend, NOT from previous assignment`);
 
     const ticket = await Ticket.findByPk(ticketId, { transaction });
     if (!ticket) {
@@ -401,7 +413,21 @@ const reverseTicket = async (req, res) => {
 
     // Go back one step
     ticket.current_workflow_step -= 1;
-    ticket.workflow_notes = reversal_reason || ticket.workflow_notes;
+
+    // Always store latest reversal reason in workflow_notes
+    // so workflow history shows what the *current* user wrote
+    if (reversal_reason && reversal_reason.trim()) {
+      ticket.workflow_notes = reversal_reason.trim();
+    }
+
+    // Also update main description so ticket details view shows
+    // the text entered by the reversing user, not an older comment.
+    // We don't append here – we replace, because this is specifically
+    // the reversal explanation from the current step.
+    if (reversal_reason && reversal_reason.trim()) {
+      ticket.description = reversal_reason.trim();
+    }
+
     ticket.status = 'Reversed';
 
     // Find previous user in workflow
@@ -426,13 +452,21 @@ const reverseTicket = async (req, res) => {
     }
 
     // Create assignment record
+    // IMPORTANT: Always use reason from frontend (director/head-of-unit's own reason)
+    // Do NOT use reason from previous assignment or reviewer
+    const assignmentReason = reversal_reason && String(reversal_reason).trim() 
+      ? String(reversal_reason).trim() 
+      : 'Ticket reversed to previous step';
+    
+    console.log(`🔍 Workflow reverse - Creating assignment with reason from frontend: "${assignmentReason}"`);
+    
     await TicketAssignment.create({
       ticket_id: ticket.id,
       assigned_by_id: userId,
       assigned_to_id: ticket.assigned_to_id,
       assigned_to_role: ticket.assigned_to_role,
       action: 'Reversed',
-      reason: reversal_reason || 'Ticket reversed to previous step',
+      reason: assignmentReason, // Use reason from frontend, NOT from previous assignment
       attachment_path: attachmentPath,
       created_at: new Date()
     }, { transaction });
@@ -545,7 +579,7 @@ const canUserPerformAction = (ticket, user, action) => {
     'reverse': {
       'head-of-unit': ['MINOR_UNIT', 'MAJOR_UNIT'],
       'director': ['MINOR_UNIT', 'MAJOR_UNIT'],
-      'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
+      // 'supervisor': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE'],
       'director-general': ['MINOR_DIRECTORATE', 'MAJOR_DIRECTORATE']
     },
     'close': {
@@ -573,9 +607,10 @@ const getWorkflowTotalSteps = (workflowPath) => {
 const getNextRoleInWorkflow = (workflowPath, currentStep) => {
   const workflowRoles = {
           'MINOR_UNIT': ['reviewer', 'head-of-unit', 'attendee', 'head-of-unit'],
-      'MINOR_DIRECTORATE': ['reviewer', 'director-general', 'supervisor', 'attendee', 'supervisor'],
+      'MINOR_DIRECTORATE': ['reviewer', 'director', 'manager', 'attendee', 'director'],
       'MAJOR_UNIT': ['reviewer', 'head-of-unit', 'attendee', 'head-of-unit', 'director-general'],
-      'MAJOR_DIRECTORATE': ['reviewer', 'director-general', 'supervisor', 'attendee', 'supervisor', 'director-general', 'director-general']
+      'MAJOR_DIRECTORATE': ['reviewer', 'director-general', 'manager', 'attendee', 'manager', 
+         'director', 'director-general' ]
   };
   
   const roles = workflowRoles[workflowPath];
