@@ -5904,6 +5904,10 @@ const reverseTicket = async (req, res) => {
     const { ticketId } = req.params;
     const { userId, reason, status, description } = req.body;
 
+    // Log received reason for debugging
+    console.log(`🔍 Reverse request - reason from frontend: "${reason}", description: "${description}"`);
+    console.log(`🔍 Reverse request - req.body keys:`, Object.keys(req.body || {}));
+
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
     }
@@ -5962,6 +5966,8 @@ const reverseTicket = async (req, res) => {
     if (currentUserAssignment && currentUserAssignment.action === "Reassigned") {
       const reassignedBy = await User.findByPk(currentUserAssignment.assigned_by_id);
       if (reassignedBy) {
+        // IMPORTANT: Only use currentUserAssignment to find the previous user
+        // Do NOT use currentUserAssignment.reason - always use reason from frontend
         prevAssignment = {
           assigned_to_id: reassignedBy.id,
           assigned_to_role: reassignedBy.role
@@ -5969,23 +5975,31 @@ const reverseTicket = async (req, res) => {
         targetUserId = reassignedBy.id;
         targetUserRole = reassignedBy.role;
         console.log(`DEBUG: User was reassigned - returning to reassigned_by: ${reassignedBy.full_name} (${reassignedBy.role})`);
+        console.log(`🔍 DEBUG: currentUserAssignment exists but NOT using its reason - will use reason from frontend`);
       }
     } else if (assignments.length >= 1) {
       // Normal reverse (like attendee): return to the user who assigned this ticket to the current user.
       // IMPORTANT: Skip "self-assignments" where assigned_by_id === assigned_to_id (these would bounce back to self).
+      // IMPORTANT: Also skip "Rated" actions where reviewer assigned to themselves (assigned_to_id === assigned_by_id)
+      // This ensures we don't use reviewer's rating assignment as the previous assignment
       const senderAssignment = assignments.find(a =>
         a.assigned_to_id === userId &&
         a.assigned_by_id &&
-        a.assigned_by_id !== userId
+        a.assigned_by_id !== userId &&
+        a.action !== "Rated" // Skip rating actions where reviewer assigned to themselves
       );
 
       if (senderAssignment) {
         const senderUser = await User.findByPk(senderAssignment.assigned_by_id);
         if (senderUser) {
+          // IMPORTANT: Only use senderAssignment to find the previous user
+          // Do NOT use senderAssignment.reason - always use reason from frontend
           prevAssignment = { assigned_to_id: senderUser.id, assigned_to_role: senderUser.role };
           targetUserId = senderUser.id;
           targetUserRole = senderUser.role;
           console.log(`DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`);
+          console.log(`🔍 DEBUG: senderAssignment exists but NOT using its reason - will use reason from frontend`);
+          console.log(`🔍 DEBUG: senderAssignment action: "${senderAssignment.action}", assigned_by_id: ${senderAssignment.assigned_by_id}, assigned_to_id: ${senderAssignment.assigned_to_id}`);
         }
       }
 
@@ -6026,13 +6040,26 @@ const reverseTicket = async (req, res) => {
         });
       }
 
+      // Use the reason from frontend (director/head-of-unit's own reason)
+      // IMPORTANT: Do NOT use reason from prevAssignment or reviewer - always use reason from frontend
+      // If reason is not provided, use default message
+      const reversalReason = reason && String(reason).trim() 
+        ? String(reason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Processing workflow reversal with reason from frontend: "${reversalReason}"`);
+      console.log(`🔍 Original reason from req.body: "${reason}"`);
+      console.log(`🔍 prevAssignment exists: ${!!prevAssignment}, but NOT using its reason`);
+
       // Use workflow service to process the reversal
+      // Pass reversalReason from frontend - this will be saved in TicketAssignment.reason
       const result = await workflowService.processWorkflowStepTransition(
         ticketId,
         "Reversed",
         assignedBy,
         { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
-        reason || "Ticket reversed to previous user",
+        reversalReason, // This is the reason from frontend (director/head-of-unit), NOT from reviewer
+        attachmentPath, // Pass attachment path - will be saved with assigned_by_id (user aliyetuma)
         null // No transaction needed here
       );
 
@@ -6100,9 +6127,8 @@ const reverseTicket = async (req, res) => {
       });
 
       // Send emails in background (non-blocking)
-      const reversalReason = reason;
       setImmediate(() => {
-        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
       });
 
       // Format role name for display (capitalize and add spaces)
@@ -6128,17 +6154,44 @@ const reverseTicket = async (req, res) => {
         forwarded_by_id: null // Clear forwarded_by_id to allow forwarding again
       });
 
+      // Use the reason from frontend (director/head-of-unit's own reason)
+      // IMPORTANT: Do NOT use reason from prevAssignment, senderAssignment, or reviewer - always use reason from frontend
+      // This applies to ALL tickets including major/minor complaints
+      // If reason is not provided, use default message
+      const reversalReason = reason && String(reason).trim() 
+        ? String(reason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Creating reversal assignment with reason from frontend: "${reversalReason}"`);
+      console.log(`🔍 Original reason from req.body: "${reason}"`);
+      console.log(`🔍 NOT using reason from senderAssignment or prevAssignment - using reason from frontend only`);
+
       // Add a new assignment record for the reversal
-      await TicketAssignment.create({
+      // IMPORTANT: Always use reason from frontend, NOT from previous assignment or reviewer
+      // Ensure reason is properly trimmed and saved exactly as received from frontend
+      const finalReason = reversalReason && String(reversalReason).trim() 
+        ? String(reversalReason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Final reason being saved to TicketAssignment (non-workflow): "${finalReason}"`);
+      console.log(`🔍 Director/Head-of-unit reversing - reason from frontend: "${reason}"`);
+      console.log(`🔍 reversalReason after processing: "${reversalReason}"`);
+      console.log(`🔍 finalReason to be saved: "${finalReason}"`);
+      
+      const assignmentRecord = await TicketAssignment.create({
         ticket_id: ticketId,
         assigned_by_id: userId,
         assigned_to_id: targetUserId,
         assigned_to_role: targetUserRole,
         action: "Reversed",
-        reason: reason || "Ticket reversed to previous user",
+        reason: finalReason, // Use reason from frontend (director/head-of-unit), NOT from reviewer
         attachment_path: attachmentPath,
         created_at: new Date()
       });
+      
+      console.log(`✅ TicketAssignment created with ID: ${assignmentRecord.id}`);
+      console.log(`✅ TicketAssignment.reason saved as: "${assignmentRecord.reason}"`);
+      console.log(`✅ Verifying: reason from frontend was "${reason}", saved as "${assignmentRecord.reason}"`);
 
       // Create notification for the target user (the one receiving the reversed ticket)
       console.log(`🔍 DEBUG: Creating notification for recipient (no workflow) - targetUserId: ${targetUserId}, ticketId: ${ticketId}, ticket.ticket_id: ${ticket.ticket_id}`);
@@ -6182,7 +6235,7 @@ const reverseTicket = async (req, res) => {
       }
 
       // Send emails in background (non-blocking)
-      const reversalReason = reason;
+      // reversalReason is already declared above, so we use it directly
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
@@ -6203,8 +6256,6 @@ const reverseTicket = async (req, res) => {
     });
   }
 };
-
-// ... existing code ...
 
 // --- Ticket Count Endpoints for Sidebar ---
 const getOpenTicketsCount = async (req, res) => {

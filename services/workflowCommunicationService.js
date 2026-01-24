@@ -141,7 +141,7 @@ async function updateTicketWorkflowState(ticketId, updates, transaction = null) 
 /**
  * Create comprehensive workflow assignment record
  */
-async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assignedTo, currentStep, nextStep, reason, transaction = null) {
+async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assignedTo, currentStep, nextStep, reason, attachmentPath = null, transaction = null) {
   try {
     const workflow = getWorkflowInfo(ticket);
     if (!workflow) return null;
@@ -149,13 +149,24 @@ async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assign
     const slaInfo = workflow.sla[workflow.currentRole] || 0;
     const estimatedCompletion = calculateEstimatedCompletion(ticket);
     
+    // IMPORTANT: Always use reason from frontend (director/head-of-unit's own reason)
+    // Do NOT use reason from previous assignment or reviewer
+    // Ensure reason is properly trimmed and not empty
+    const assignmentReason = reason && String(reason).trim() 
+      ? String(reason).trim() 
+      : `Workflow action: ${action}`;
+    
+    console.log(`🔍 createWorkflowAssignmentRecord - Using reason from frontend: "${assignmentReason}"`);
+    console.log(`🔍 createWorkflowAssignmentRecord - Original reason parameter: "${reason}"`);
+    
     const assignmentData = {
       ticket_id: ticket.id,
-      assigned_by_id: assignedBy.id,
-      assigned_to_id: assignedTo ? assignedTo.id : null,
+      assigned_by_id: assignedBy.id, // User aliyetuma attachment
+      assigned_to_id: assignedTo ? assignedTo.id : null, // User anayepokea ticket
       assigned_to_role: assignedTo ? assignedTo.role : null,
       action: action,
-      reason: reason || `Workflow action: ${action}`,
+      reason: assignmentReason, // Use reason from frontend, NOT from previous assignment
+      attachment_path: attachmentPath, // Save attachment kwa user aliyetuma (assigned_by_id)
       workflow_path: ticket.workflow_path,
       workflow_step: currentStep,
       workflow_current_role: workflow.currentRole,
@@ -175,11 +186,20 @@ async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assign
       created_at: new Date()
     };
     
+    console.log(`🔍 createWorkflowAssignmentRecord - About to create TicketAssignment with reason: "${assignmentData.reason}"`);
+    
+    let assignmentRecord;
     if (transaction) {
-      return await TicketAssignment.create(assignmentData, { transaction });
+      assignmentRecord = await TicketAssignment.create(assignmentData, { transaction });
     } else {
-      return await TicketAssignment.create(assignmentData);
+      assignmentRecord = await TicketAssignment.create(assignmentData);
     }
+    
+    console.log(`✅ createWorkflowAssignmentRecord - TicketAssignment created with ID: ${assignmentRecord.id}`);
+    console.log(`✅ createWorkflowAssignmentRecord - TicketAssignment.reason saved as: "${assignmentRecord.reason}"`);
+    console.log(`✅ createWorkflowAssignmentRecord - Verifying: reason parameter was "${reason}", saved as "${assignmentRecord.reason}"`);
+    
+    return assignmentRecord;
   } catch (error) {
     console.error('Error creating workflow assignment record:', error);
     return null;
@@ -214,8 +234,12 @@ function calculateRemainingSLADays(ticket, currentStep, workflow) {
 /**
  * Process workflow step transition
  */
-async function processWorkflowStepTransition(ticketId, action, assignedBy, assignedTo, reason, transaction = null) {
+async function processWorkflowStepTransition(ticketId, action, assignedBy, assignedTo, reason, attachmentPath = null, transaction = null) {
   try {
+    // IMPORTANT: Log the reason received from frontend to ensure it's being used correctly
+    console.log(`🔍 processWorkflowStepTransition - Received reason from frontend: "${reason}"`);
+    console.log(`🔍 processWorkflowStepTransition - Action: ${action}, assignedBy: ${assignedBy?.id}, assignedTo: ${assignedTo?.id}`);
+    
     const ticket = await Ticket.findByPk(ticketId);
     if (!ticket || !ticket.workflow_path) {
       throw new Error('Ticket not found or no workflow path set');
@@ -268,6 +292,7 @@ async function processWorkflowStepTransition(ticketId, action, assignedBy, assig
       workflow.currentStep,
       nextRole,
       reason,
+      attachmentPath, // Pass attachment path to save with assignment
       transaction
     );
     
