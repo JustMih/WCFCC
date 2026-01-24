@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const { Server } = require("socket.io");
+const amiLive = require("./amiServer");
 
 /* ------------------------------ CONFIG & DB ------------------------------ */
 const sequelize = require("./config/mysql_connection.js");
@@ -87,6 +88,25 @@ app.use(
     credentials: true,
   })
 );
+setInterval(() => {
+  if (!amiLive?.getLiveQueueCalls) return;
+
+  const calls = amiLive.getLiveQueueCalls();
+  const liveCount = Object.keys(calls).length;
+
+  if (liveCount > 0) {
+    console.log("📞 LIVE CALLS (from AMI):");
+    Object.values(calls).forEach((c) => {
+      console.log({
+        caller: c.caller,
+        queue: c.queue,
+        joinedAt: c.joinedAt,
+        answered: c.answered,
+        abandoned: c.abandoned,
+      });
+    });
+  }
+}, 2000);
 
 /* ------------------------------ STATIC FILES ------------------------------ */
 // Voice note audio files
@@ -212,6 +232,7 @@ const io = new Server(server, {
 });
 global._io = io;
 setupSocket(io);
+setSocketInstance(io);
 
 // Private messaging and live call socket logic
 const users = {};
@@ -393,6 +414,15 @@ io.on("connection", (socket) => {
     }
   });
 });
+setInterval(() => {
+  if (!amiLive?.getLiveQueueCalls) return;
+
+  const calls = Object.values(amiLive.getLiveQueueCalls());
+
+  io.emit("public_dashboard_update", {
+    liveCalls: calls
+  });
+}, 2000);
 
 /* ------------------------------ SERVER START ------------------------------ */
 // Sync database - handle errors gracefully for models managed by migrations
