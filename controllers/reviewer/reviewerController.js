@@ -448,6 +448,10 @@ const convertOrForwardTicket = async (req, res) => {
         ticket.forwarded_at = new Date();
         ticket.status = "Assigned"; // Keep as "Assigned" since it's an Inquiry
         forwardingDone = true;
+        // Skip the rest of forwarding logic - don't create "Forwarded" assignment, conversion logic will handle it
+        // Don't set unitUser - it's not needed for Inquiry conversion
+        // Exit early - don't proceed with director/head-of-unit forwarding logic
+        // The conversion logic below will create the "Converted" assignment
       } else {
         // Not converting to Inquiry - proceed with normal forwarding logic (director/head-of-unit)
         
