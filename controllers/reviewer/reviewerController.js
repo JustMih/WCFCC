@@ -423,14 +423,71 @@ const convertOrForwardTicket = async (req, res) => {
           transaction
         });
       } else if (isUnit) {
+        console.log(`DEBUG: Looking for unit with name: "${responsible_unit_name}"`);
+        
+        // Try to find the unit by name (exact match first)
         functionUnit = await FunctionModel.findOne({
           where: { name: responsible_unit_name },
           transaction
         });
         
+        if (functionUnit) {
+          console.log(`DEBUG: Found unit in FunctionModel (exact match): ${functionUnit.name} (ID: ${functionUnit.id})`);
+        }
+        
+        // If not found, try case-insensitive search
+        if (!functionUnit) {
+          console.log(`DEBUG: Exact match not found, trying case-insensitive search...`);
+          functionUnit = await FunctionModel.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('name')),
+              Sequelize.fn('LOWER', responsible_unit_name)
+            ),
+            transaction
+          });
+          
+          if (functionUnit) {
+            console.log(`DEBUG: Found unit in FunctionModel (case-insensitive): ${functionUnit.name} (ID: ${functionUnit.id})`);
+          }
+        }
+        
+        // If still not found, try searching by section name (for cases where frontend sends section name instead of unit name)
+        if (!functionUnit) {
+          console.log(`DEBUG: Not found in FunctionModel, trying to find by section name: "${responsible_unit_name}"`);
+          const section = await Section.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('name')),
+              Sequelize.fn('LOWER', responsible_unit_name)
+            ),
+            include: [{
+              model: FunctionModel,
+              as: 'functions',
+              required: false
+            }],
+            transaction
+          });
+          
+          if (section) {
+            console.log(`DEBUG: Found section: ${section.name} with ${section.functions?.length || 0} functions`);
+            // If section found and has functions, use first function
+            if (section.functions && section.functions.length > 0) {
+              functionUnit = section.functions[0];
+              console.log(`DEBUG: Using first function from section: ${functionUnit.name} (ID: ${functionUnit.id})`);
+            }
+          }
+        }
+        
         if (!functionUnit) {
           await safeRollback(transaction);
-          return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+          console.error(`ERROR: Unit '${responsible_unit_name}' not found in FunctionModel or Section`);
+          // List available units for debugging
+          const allFunctions = await FunctionModel.findAll({
+            attributes: ['id', 'name'],
+            limit: 10,
+            transaction
+          });
+          console.error(`DEBUG: Available functions (first 10):`, allFunctions.map(f => f.name));
+          return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found. Please ensure the unit name is correct.` });
         }
       }
 

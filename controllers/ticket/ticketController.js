@@ -6848,20 +6848,20 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Append amended description to ticket's description ONLY if it's different from current
+    // Append Additional Clarification to ticket's description ONLY if it's different from current
     // If not edited (same as current), keep current description as is
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
       const currentDescription = ticket.description || "";
       const amendedDescription = String(resolution_details).trim();
       
-      // Only update if amended description is different from current description
+      // Only update if Additional Clarification is different from current description
       // If they are the same, don't update (keep current description)
       if (amendedDescription !== currentDescription) {
-        // Format with clear separation: Previous description, separator, then amended description
+        // Format with clear separation: Previous description, separator, then Additional Clarification
         let updatedDescription = "";
         if (currentDescription) {
-          // Clean layout: Previous description on top, separator line, then amended description
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Amended Description ---\n" + amendedDescription;
+          // Clean layout: Previous description on top, separator line, then Additional Clarification
+          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Additional Clarification ---\n" + amendedDescription;
         } else {
           updatedDescription = amendedDescription;
         }
@@ -6870,7 +6870,7 @@ const forwardToDirectorGeneral = async (req, res) => {
           description: updatedDescription
         });
       }
-      // If amended description is same as current, do nothing (keep current description)
+      // If Additional Clarification is same as current, do nothing (keep current description)
     }
     // If resolution_details is not provided or empty, do nothing (keep current description)
 
@@ -8581,17 +8581,17 @@ const managerSendToDirector = async (req, res) => {
     }
 
     // Update ticket description if resolution_details is provided and different from current
-    // Append amended description to ticket's description ONLY if it's different from current
+    // Append Additional Clarification to ticket's description ONLY if it's different from current
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
       const currentDescription = ticket.description || "";
       const amendedDescription = String(resolution_details).trim();
       
-      // Only update if amended description is different from current description
+      // Only update if Additional Clarification is different from current description
       if (amendedDescription !== currentDescription) {
-        // Format: Previous description on top, separator line, then amended description
+        // Format: Previous description on top, separator line, then Additional Clarification
         let updatedDescription = "";
         if (currentDescription) {
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Amended Description ---\n" + amendedDescription;
+          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Additional Clarification ---\n" + amendedDescription;
         } else {
           updatedDescription = amendedDescription;
         }
