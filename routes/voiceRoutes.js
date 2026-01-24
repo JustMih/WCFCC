@@ -45,7 +45,7 @@ router.post(
   },
   createVoice
 );
-// Add this to your existing voiceRouter.js
+ 
 
 // Serve audio file for playing
 router.get("/voices/:id/audio", async (req, res) => {
@@ -71,10 +71,6 @@ router.get("/voices/:id/audio", async (req, res) => {
   }
 });
 
- 
- 
- 
- 
 //Get All Voices
 router.get("/voices", getAllVoices);
 

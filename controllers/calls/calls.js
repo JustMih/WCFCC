@@ -347,26 +347,26 @@ const syncMissedCallCallbacksFromCdrToday = async () => {
     const [result] = await sequelize.query(`
       UPDATE MissedCalls mc
       INNER JOIN cdr c
-         ON  c.clid          = mc.caller
-         AND c.disposition   = 'ANSWERED'
-         AND c.cdrstarttime >= mc.time
-         AND c.cdrstarttime <= DATE_ADD(mc.time, INTERVAL 45 MINUTE)
+         ON c.disposition = 'ANSWERED'
+        AND c.lastapp IS NULL          -- outbound calls
+        AND c.clid = mc.caller
+        AND c.cdrstarttime >= mc.time
+        AND c.cdrstarttime <= DATE_ADD(mc.time, INTERVAL 30 MINUTE)
       SET
         mc.status         = 'called_back',
-        mc.called_back_by = SUBSTRING_INDEX(c.src, '/', -1),
+        mc.called_back_by = c.src,
         mc.called_back_at = c.cdrstarttime,
         mc.billsec        = c.billsec,
         mc.updatedAt      = NOW()
       WHERE mc.status = 'pending'
-        AND mc.called_back_at IS NULL
     `, { type: sequelize.QueryTypes.UPDATE });
 
     const affected = result?.affectedRows || 0;
     if (affected > 0) {
-      console.log(`[CDR_SYNC] Updated ${affected} missed calls from answered outbound CDR`);
+      console.log(`[CDR CALLBACK SYNC] Updated ${affected} missed calls`);
     }
   } catch (err) {
-    console.error("[CDR_SYNC] Failed:", err.message);
+    console.error("[CDR CALLBACK SYNC ERROR]", err.message);
   }
 };
 
@@ -527,4 +527,5 @@ module.exports = {
   getDroppedCalls,
   markLostCallAsAnswered,
   markMissedCallCallback,
+  syncMissedCallsFromCdrToday,
 };
