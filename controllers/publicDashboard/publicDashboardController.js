@@ -223,9 +223,14 @@ const getPublicDashboardData = async (req, res) => {
     const allCalls = Object.values(calls);
     const liveCalls = allCalls.filter((c) => !c.call_end);
     const activeCalls = liveCalls.filter((c) => c.status === "active");
-    const inQueueCalls = liveCalls.filter(
-      (c) => c.queue_entry_time && !c.call_answered
-    );
+    // const inQueueCalls = liveCalls.filter(
+    //   (c) => c.queue_entry_time && !c.call_answered
+    // );
+    const inQueueCalls = queueStatus.reduce(
+  (sum, q) => sum + Number(q.calls || 0),
+  0
+);
+
     const droppedCalls = allCalls.filter((c) => c.status === "dropped");
 
     /* =====================================================
@@ -274,22 +279,29 @@ const monthlyCounts = await sequelize.query(
       `,
       { type: QueryTypes.SELECT }
     );
+      const totalRows = dailyCounts.reduce(
+        (sum, row) => sum + Number(row.count || 0),
+        0
+      );
+
 
     /* ================= FINAL PAYLOAD ================= */
     const payload = {
       agentStatus: { onlineCount, offlineCount },
       liveCalls,
-      callStatusSummary: {
-        active: activeCalls.length,
-        inQueue: inQueueCalls.length,
-        answered: activeCalls.length,
-        dropped: droppedCalls.length,
-        lost: Number(lostCount || 0),
-      },
+     callStatusSummary: {
+          active: activeCalls.length,
+          inQueue: inQueueCalls, // ✅ FIXED
+          answered: activeCalls.length,
+          dropped: droppedCalls.length,
+          lost: Number(lostCount || 0),
+        },
+
       callStats: {
         totalCounts,    // YEARLY (frontend expects this)
         monthlyCounts,  // MONTHLY
         dailyCounts,    // DAILY
+        totalRows,
       },
       queueStatus,
       timestamp: new Date().toISOString(),
