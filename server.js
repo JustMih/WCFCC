@@ -54,6 +54,9 @@ const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require("./routes/recordedAudioRoutes");
 const reportsRoutes = require("./routes/reports.routes");
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
+const spyRoutes = require("./routes/spy");
+
+
 // const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
 const baseAudioPath =
   process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
@@ -206,6 +209,7 @@ app.use("/api/livestream", livestreamRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
 app.use("/api/instagram-management", instagramManagementRoutes);
 app.use("/api", require("./routes/dtmfRoutes"));
+app.use("/api/spy", spyRoutes);
 
 /* ------------------------------ SOCKET.IO ------------------------------ */
 const io = new Server(server, {
