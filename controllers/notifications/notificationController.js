@@ -92,7 +92,7 @@ const createNotification = async (req, res) => {
       // Send email in background to avoid blocking
       // sendEmailNonBlocking({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
       sendEmailNonBlocking({
-        to: "rehema.said3@ttcl.co.tz",
+        to: "grace.tarimo@wcf.go.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
       });
