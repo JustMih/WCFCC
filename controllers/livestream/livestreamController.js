@@ -112,9 +112,7 @@ const getAllLiveCalls = async (req, res) => {
           break;
 
         case "BRIDGE_ENTER":
-          // If call has not been answered and Bridge Enter event occurs, mark it as answered and active
-          // if (!c.call_answered) {
-          // c.call_answered = row.eventtime; // Mark call as answered
+        
           c.status = "active"; // Set status to active since the call is bridged
           console.log(`🔗 BRIDGE_ENTER: ${key} at ${row.eventtime}`);
           // }
