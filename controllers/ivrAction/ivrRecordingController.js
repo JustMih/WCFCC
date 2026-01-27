@@ -3,28 +3,33 @@ const VoiceNote = require("../../models/VoiceNote");
 
 const getAllVoiceNotes = async (req, res) => {
   try {
-    const [voiceNotes] = await sequelize.query(`
-      SELECT 
-        id,
-        recording_path,
-        CONCAT('custom/', 
-          SUBSTRING_INDEX(
-            SUBSTRING_INDEX(recording_path, '/', -1), 
-            '.', 
-            1
-          ), 
-          '.wav'
-        ) AS playable_path,
-        clid, 
-        assigned_agent_id,
-        is_played,
-        duration_seconds,
-        transcription,
-        created_at 
-      FROM Voice_Notes 
-      ORDER BY created_at DESC
-    `);
-    
+ const [voiceNotes] = await sequelize.query(`
+SELECT 
+  vn.id,
+  vn.recording_path,
+  CONCAT(
+    'custom/',
+    SUBSTRING_INDEX(
+      SUBSTRING_INDEX(vn.recording_path, '/', -1),
+      '.',
+      1
+    ),
+    '.wav'
+  ) AS playable_path,
+  vn.clid,
+  vn.assigned_extension,
+  u.full_name AS assigned_agent_name,   -- ✅ FIXED HERE
+  vn.is_played,
+  vn.duration_seconds,
+  vn.transcription,
+  vn.created_at
+FROM Voice_Notes vn
+LEFT JOIN Users u
+  ON u.extension = vn.assigned_extension
+ORDER BY vn.created_at DESC;
+
+`);
+
     res.status(200).json({ voiceNotes });
   } catch (error) {
     console.error("Error fetching voice notes:", error);
