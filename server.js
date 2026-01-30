@@ -34,6 +34,8 @@ const VoiceNote = require("./models/voice_notes.model");
 
 /* ------------------------------ CONTROLLERS ------------------------------ */
 const { registerSuperAdmin } = require("./controllers/auth/authController");
+/* ✅ REGISTER LIVE CALL CACHE */
+app.locals.getLiveCalls = livestreamController.getLiveCallsCache;
 const {
   setupSocket,
 } = require("./controllers/livestream/livestreamController");

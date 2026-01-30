@@ -1,6 +1,9 @@
  
 "use strict";
 
+/* ============================== LIVE CALL CACHE ============================== */
+let liveCallsCache = [];
+
 const sequelize = require("../../config/mysql_connection");
 const { DataTypes, Op } = require("sequelize");
 const moment = require("moment");
@@ -226,16 +229,22 @@ const getAllLiveCalls = async (req, res) => {
       return new Date(b.call_start || 0) - new Date(a.call_start || 0);
     });
 
-    res.json(result);
+    /* ✅ UPDATE LIVE CALL CACHE */
+liveCallsCache = result;
+
+res.json(result);
+
   } catch (err) {
     console.error("❌ Livestream error:", err);
     res.status(500).json({ error: "Failed to fetch live calls" });
   }
 };
+const getLiveCallsCache = () => liveCallsCache;
 
 /* ============================== EXPORTS ============================== */
 module.exports = {
   setupSocket,
   emitLiveCall,
   getAllLiveCalls,
+  getLiveCallsCache, // 👈 ADD THIS
 };
