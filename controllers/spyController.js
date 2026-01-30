@@ -24,18 +24,40 @@ const normalizeSpyMode = (mode) => {
   }
 };
 
+/* ====================== ROLE CHECK ====================== */
+const isAuthorizedSupervisor = (user) => {
+  if (!user) return false;
+
+  // adjust ONLY if your role names differ
+  return ["SUPERVISOR", "ADMIN"].includes(user.role);
+};
+console.log("👤 req.user:", req.user);
+
 /* ====================== SPY ACTION ====================== */
 const spyOnCall = async (req, res) => {
   try {
     const { linkedid, mode } = req.body;
 
-    // 🔒 1. Permission check
-    if (!req.user || !req.user.is_supervisor) {
+    /* 🔐 1. AUTH CHECK */
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthenticated" });
+    }
+
+    if (!isAuthorizedSupervisor(req.user)) {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
-    // 🔍 2. Get live calls (reuse SAME logic)
-    const liveCalls = await req.app.locals.getLiveCalls(); 
+    if (!linkedid || !mode) {
+      return res.status(400).json({ error: "Missing parameters" });
+    }
+
+    /* 🔍 2. GET LIVE CALLS */
+    if (typeof req.app.locals.getLiveCalls !== "function") {
+      return res.status(500).json({ error: "Live call cache not available" });
+    }
+
+    const liveCalls = await req.app.locals.getLiveCalls();
+
     const call = liveCalls.find(
       (c) => c.linkedid === linkedid && c.status === "active"
     );
@@ -44,13 +66,13 @@ const spyOnCall = async (req, res) => {
       return res.status(400).json({ error: "Call not spyiable" });
     }
 
-    // 🎧 3. Normalize spy mode
+    /* 🎧 3. NORMALIZE MODE */
     const spyMode = normalizeSpyMode(mode);
 
-    // 📞 4. Originate WebRTC supervisor call
+    /* 📞 4. ORIGINATE SUPERVISOR CALL */
     ami.action({
       action: "Originate",
-      channel: `PJSIP/${req.user.extension}`, // supervisor SIP.js endpoint
+      channel: `PJSIP/${req.user.extension}`, // supervisor WebRTC endpoint
       context: "chanspy",
       exten: "chanspy",
       priority: 1,
@@ -62,6 +84,7 @@ const spyOnCall = async (req, res) => {
       },
     });
 
+    /* ✅ 5. RESPONSE */
     return res.json({
       status: "ok",
       spying_on: call.agent_extension,
