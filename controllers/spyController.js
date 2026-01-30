@@ -27,18 +27,17 @@ const normalizeSpyMode = (mode) => {
 /* ====================== ROLE CHECK ====================== */
 const isAuthorizedSupervisor = (user) => {
   if (!user) return false;
-
-  // adjust ONLY if your role names differ
   return ["SUPERVISOR", "ADMIN"].includes(user.role);
 };
-console.log("👤 req.user:", req.user);
 
 /* ====================== SPY ACTION ====================== */
 const spyOnCall = async (req, res) => {
   try {
+    console.log("👤 req.user:", req.user);
+
     const { linkedid, mode } = req.body;
 
-    /* 🔐 1. AUTH CHECK */
+    /* 🔐 AUTH CHECK */
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
     }
@@ -47,11 +46,15 @@ const spyOnCall = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
+    if (!req.user.extension) {
+      return res.status(400).json({ error: "Supervisor extension missing" });
+    }
+
     if (!linkedid || !mode) {
       return res.status(400).json({ error: "Missing parameters" });
     }
 
-    /* 🔍 2. GET LIVE CALLS */
+    /* 🔍 GET LIVE CALL */
     if (typeof req.app.locals.getLiveCalls !== "function") {
       return res.status(500).json({ error: "Live call cache not available" });
     }
@@ -66,13 +69,13 @@ const spyOnCall = async (req, res) => {
       return res.status(400).json({ error: "Call not spyiable" });
     }
 
-    /* 🎧 3. NORMALIZE MODE */
+    /* 🎧 NORMALIZE MODE */
     const spyMode = normalizeSpyMode(mode);
 
-    /* 📞 4. ORIGINATE SUPERVISOR CALL */
+    /* 📞 ORIGINATE SUPERVISOR CALL */
     ami.action({
       action: "Originate",
-      channel: `PJSIP/${req.user.extension}`, // supervisor WebRTC endpoint
+      channel: `PJSIP/${req.user.extension}`,
       context: "chanspy",
       exten: "chanspy",
       priority: 1,
@@ -84,7 +87,7 @@ const spyOnCall = async (req, res) => {
       },
     });
 
-    /* ✅ 5. RESPONSE */
+    /* ✅ RESPONSE */
     return res.json({
       status: "ok",
       spying_on: call.agent_extension,
