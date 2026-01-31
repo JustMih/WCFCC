@@ -9,6 +9,48 @@ const { Op } = require("sequelize");
 // const { getEffectiveRoles } = require("../../utils/roleMapper");
 require("dotenv").config();
 
+/**
+ * Returns seconds until the next daily logout time (default 8:00 PM server local time).
+ * Uses DAILY_LOGOUT_TIME env (e.g. "20:00" or "20:00:00"); TZ env controls timezone.
+ */
+function getSecondsUntilNextDailyLogout() {
+  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:00:00";
+  const parts = timeStr.trim().split(":").map((p) => parseInt(p, 10) || 0);
+  const hour = Math.min(23, Math.max(0, parts[0] || 20));
+  const minute = Math.min(59, Math.max(0, parts[1] || 0));
+  const second = Math.min(59, Math.max(0, parts[2] || 0));
+
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, minute, second, 0);
+
+  if (now >= target) {
+    target.setDate(target.getDate() + 1);
+  }
+  const seconds = Math.max(1, Math.floor((target - now) / 1000));
+  return seconds;
+}
+
+/**
+ * Returns the Date (ms) of the next daily logout time for the login response (expiresAt).
+ */
+function getNextDailyLogoutDate() {
+  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:00:00";
+  const parts = timeStr.trim().split(":").map((p) => parseInt(p, 10) || 0);
+  const hour = Math.min(23, Math.max(0, parts[0] || 20));
+  const minute = Math.min(59, Math.max(0, parts[1] || 0));
+  const second = Math.min(59, Math.max(0, parts[2] || 0));
+
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, minute, second, 0);
+
+  if (now >= target) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target;
+}
+
 const registerSuperAdmin = async () => {
   try {
     const existingAdmin = await User.findOne({
@@ -163,11 +205,14 @@ const login = async (req, res) => {
       });
     }
 
-    // Step 5: Generate JWT token
+    // Step 5: Generate JWT token (expires at next daily logout time, e.g. 8:00 PM)
+    const expiresInSeconds = getSecondsUntilNextDailyLogout();
+    const expiresAt = getNextDailyLogoutDate();
+
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: expiresInSeconds }
     );
 
     // Log agent login in AgentLoginLog
@@ -188,6 +233,7 @@ const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
+      expiresAt: expiresAt.getTime(), // ms since epoch for frontend tokenExpiration
       user: {
         full_name: user.full_name,
         isActive: user.isActive,
