@@ -1,78 +1,95 @@
 "use strict";
 
+const { User } = require("../../models");
+const { getLiveChannelByExtension } = require("../../services/liveCallResolver");
+
 /**
- * Supervisor Call Control (ChanSpy)
- *
  * Supported actions:
  *  - listen  → ChanSpy(PJSIP/XXXX,q)
  *  - whisper → ChanSpy(PJSIP/XXXX,qw)
  *  - barge   → ChanSpy(PJSIP/XXXX,qB)
- *
- * Body:
- * {
- *   callId: "PJSIP/1001",
- *   action: "listen" | "whisper" | "barge"
- * }
  */
+const ACTION_MAP = {
+  listen: "q",
+  whisper: "qw",
+  barge: "qB",
+};
+
 exports.callControl = async (req, res) => {
   try {
-    const { callId, action } = req.body || {};
+    /* =====================================================
+       1️⃣ INPUT VALIDATION (ONLY)
+    ===================================================== */
+    const { agentExtension, action } = req.body || {};
 
-    /* ================= VALIDATION ================= */
-    if (!callId || typeof callId !== "string") {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid or missing callId"
-      });
+    if (!agentExtension || typeof agentExtension !== "string") {
+      return res.status(400).json({ error: "agentExtension is required" });
     }
 
-    if (!action || typeof action !== "string") {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid or missing action"
-      });
+    if (!action || !ACTION_MAP[action]) {
+      return res.status(400).json({ error: "Invalid action" });
     }
-
-    /* ================= ACTION MAP ================= */
-    const ACTION_MAP = {
-      listen: "q",    // quiet listen
-      whisper: "qw",  // whisper
-      barge: "qB"     // barge
-    };
 
     const option = ACTION_MAP[action];
 
-    if (!option) {
-      return res.status(400).json({
-        success: false,
-        error: "Unsupported action"
-      });
+    /* =====================================================
+       2️⃣ AGENT LOOKUP (OPTIONAL BUT SAFE)
+    ===================================================== */
+    const agent = await User.findOne({
+      where: {
+        extension: agentExtension,
+        role: "agent",
+      },
+      attributes: ["id", "full_name", "extension"],
+    });
+
+    if (!agent) {
+      return res.status(404).json({ error: "Agent not found" });
     }
 
-    /* ================= BUILD DIAL ================= */
-    // IMPORTANT:
-    // callId MUST be base channel, e.g. PJSIP/1001
-    const dial = `ChanSpy(${callId},${option})`;
+    /* =====================================================
+       3️⃣ LIVE CHANNEL RESOLUTION
+    ===================================================== */
+    const channel = await getLiveChannelByExtension(agentExtension);
 
-    /* ================= LOG ================= */
-    console.log("🎧 SUPERVISOR SPY");
-    console.log("   Action :", action);
-    console.log("   Channel:", callId);
-    console.log("   Dial   :", dial);
+    if (!channel) {
+      return res
+        .status(409)
+        .json({ error: "Agent is not on an active call" });
+    }
 
-    /* ================= RESPONSE ================= */
-    return res.status(200).json({
+    /* =====================================================
+       4️⃣ BUILD DIAL STRING
+    ===================================================== */
+    const dial = `ChanSpy(${channel},${option})`;
+
+    /* =====================================================
+       5️⃣ LOG (DEBUG)
+    ===================================================== */
+    console.log("🎧 SPY TEST MODE");
+    console.log(" Agent   :", agent.full_name, `(Ext ${agent.extension})`);
+    console.log(" Channel :", channel);
+    console.log(" Action  :", action);
+    console.log(" Dial    :", dial);
+
+    /* =====================================================
+       6️⃣ RESPONSE
+    ===================================================== */
+    return res.json({
       success: true,
-      dial
+      dial,
+      meta: {
+        agent: agent.full_name,
+        extension: agent.extension,
+        action,
+      },
     });
 
   } catch (err) {
     console.error("❌ Spy controller error:", err);
-
-    // ALWAYS JSON — never HTML
     return res.status(500).json({
       success: false,
-      error: "Spy operation failed"
+      error: "Spy operation failed",
     });
   }
 };

@@ -1,51 +1,3 @@
-// const VoiceNote = require('../../models/voice_notes.model');
-// const CDR = require('../../models/cdr.model');
-// const IVRDTMFMapping = require('../../models/ivr_dtmf_mappings.model');
-// const {IVRAction, IVRVoice } = require('../../models');
-
-// exports.getVoiceNotes = async (req, res) => {
-//   try {
-//     const voiceNotes = await VoiceNote.findAll();
-//     res.json(voiceNotes);
-//   } catch (error) {
-//     res.status(500).json({ error: error.message });
-//   }
-// };
-
-// exports.getCDRReports = async (req, res) => {
-//   console.log("CDR REPORT API HIT"); // Add this
-//   try {
-//     const cdrReports = await CDR.findAll();
-//     console.log("CDR fetched successfully:", cdrReports.length);
-//     res.json(cdrReports);
-//   } catch (error) {
-//     console.error("CDR REPORT ERROR:", error); // Add this
-//     res.status(500).json({ error: error.message });
-//   }
-// };
-
-// exports.getIVRInteractions = async (req, res) => {
-//   try {
-//     const ivrInteractions = await IVRDTMFMapping.findAll({
-//       include: [
-//         {
-//           model: IVRAction, // Include action details
-//           attributes: ['name'], // Only get the 'name' attribute
-//           as: 'action', // Specify the alias 'action' if it was set in the association
-//         },
-//         {
-//           model: IVRVoice, // Include voice details
-//           attributes: ['file_name'], // Only get the 'file_name' attribute
-//           as: 'voice', // Specify the alias 'voice' if it was set in the association
-//         },
-//       ],
-//     });
-//     res.json(ivrInteractions);
-//   } catch (error) {
-//     console.error("Error fetching IVR Interactions:", error);
-//     res.status(500).json({ error: error.message });
-//   }
-// };
 
 // Safely require models with error handling
 let VoiceNote,
@@ -343,13 +295,42 @@ exports.getVoiceReport = (req, res) => {
       .json({ error: "Start date and end date are required" });
   }
 
-  const query = sequelize.query(
-    `SELECT * FROM Voice_Notes WHERE created_at BETWEEN :startDate AND :endDate`,
-    {
-      replacements: { startDate, endDate },
-      type: sequelize.QueryTypes.SELECT,
-    }
-  );
+ const query = sequelize.query(
+  `
+  SELECT 
+    vn.id,
+    vn.recording_path,
+    CONCAT(
+      'custom/',
+      SUBSTRING_INDEX(
+        SUBSTRING_INDEX(vn.recording_path, '/', -1),
+        '.',
+        1
+      ),
+      '.wav'
+    ) AS playable_path,
+    vn.clid,
+    vn.assigned_extension,
+    u.full_name AS assigned_agent_name,
+    vn.is_played,
+    vn.duration_seconds,
+    vn.transcription,
+    vn.created_at
+  FROM Voice_Notes vn
+  LEFT JOIN Users u
+    ON u.extension = vn.assigned_extension
+  WHERE vn.created_at BETWEEN
+    CONCAT(:startDate, ' 00:00:00')
+    AND
+    CONCAT(:endDate, ' 23:59:59')
+  ORDER BY vn.created_at DESC
+  `,
+  {
+    replacements: { startDate, endDate },
+    type: sequelize.QueryTypes.SELECT,
+  }
+);
+
   query
     .then((voices) => {
       if (voices.length === 0) {

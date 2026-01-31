@@ -33,10 +33,16 @@ const InstagramComment = require("./models/instagram_comment");
 const VoiceNote = require("./models/voice_notes.model");
 
 /* ------------------------------ CONTROLLERS ------------------------------ */
+/* ------------------------------ CONTROLLERS ------------------------------ */
 const { registerSuperAdmin } = require("./controllers/auth/authController");
-const {
-  setupSocket,
-} = require("./controllers/livestream/livestreamController");
+
+/* ✅ LOAD LIVESTREAM CONTROLLER FIRST */
+const livestreamController = require("./controllers/livestream/livestreamController");
+const { setupSocket } = livestreamController;
+
+/* ✅ REGISTER LIVE CALL CACHE */
+app.locals.getLiveCalls = livestreamController.getLiveCallsCache;
+
 const {
   setSocketInstance,
   startPeriodicUpdates,
