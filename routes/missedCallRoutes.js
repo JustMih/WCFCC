@@ -33,17 +33,23 @@ router.post("/", async (req, res) => {
 });
 
 
-// 🔁 GET all or filtered missed calls
-router.get("/", async (req, res) => {
+// 🔁 GET all or filtered missed calls by erassing called_back
+ 
+ router.get("/", async (req, res) => {
   try {
     console.log("📥 GET /missed-calls called with query:", req.query);
 
-    const { agentId, startDate, endDate } = req.query;
+    const { agentId, startDate, endDate, status } = req.query;
 
     const where = {};
 
     if (agentId) {
       where.agentId = agentId;
+    }
+
+    // ✅ STATUS FILTER (THIS WAS MISSING)
+    if (status) {
+      where.status = status;
     }
 
     if (startDate && endDate) {
@@ -71,7 +77,7 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
- 
+
 router.put("/:id/status", async (req, res) => {
   try {
     const { id } = req.params;

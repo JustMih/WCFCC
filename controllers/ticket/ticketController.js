@@ -16,6 +16,7 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const TicketUpdate = require("../../models/TicketUpdate");
+const TicketClarification = require("../../models/TicketClarification");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 const workflowService = require("../../services/workflowCommunicationService");
 
@@ -345,8 +346,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [previousAssignee.email, "rehema.said3@ttcl.co.tz"],
-        to:`rehema.said3@ttcl.co.tz`,
+        // to: [previousAssignee.email, "grace.tarimo@wcf.go.tz"],
+        to:`grace.tarimo@wcf.go.tz`,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -378,8 +379,8 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [nextUser.email, "rehema.said3@ttcl.co.tz"],
-        to: `rehema.said3@ttcl.co.tz`,
+        // to: [nextUser.email, "grace.tarimo@wcf.go.tz"],
+        to: `grace.tarimo@wcf.go.tz`,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -1552,7 +1553,7 @@ const createTicket = async (req, res) => {
       // Send emails in background to avoid blocking the assignment
       sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
       sendEmailNonBlocking({
-        to: "rehema.said3@ttcl.co.tz",
+        to: "grace.tarimo@wcf.go.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -1598,7 +1599,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
           attachments: attachments,
@@ -1685,7 +1686,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "rehema.said3@ttcl.co.tz", // For testing, replace with creatorUser.email in production
+          to: "grace.tarimo@wcf.go.tz", // For testing, replace with creatorUser.email in production
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
           attachments: attachments,
@@ -1736,8 +1737,8 @@ const createTicket = async (req, res) => {
         `;
         const attachments = getTicketAttachments(newTicket);
         sendEmail({
-          // to: [headOfUnit.email, "rehema.said3@ttcl.co.tz"],
-          to:`rehema.said3@ttcl.co.tz`,
+          // to: [headOfUnit.email, "grace.tarimo@wcf.go.tz"],
+          to:`grace.tarimo@wcf.go.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -1894,7 +1895,7 @@ const createTicket = async (req, res) => {
           
           sendEmail({
             // to: creatorUser.email,
-            to: "rehema.said3@ttcl.co.tz",
+            to: "grace.tarimo@wcf.go.tz",
             subject: emailSubject,
             htmlBody: htmlBody,
             attachments: attachments,
@@ -1935,7 +1936,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+              to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1980,7 +1981,7 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       
       sendEmail({
-        to: "rehema.said3@ttcl.co.tz",
+        to: "grace.tarimo@wcf.go.tz",
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -2027,8 +2028,8 @@ const createTicket = async (req, res) => {
         const attachments = getTicketAttachments(newTicket);
         
         sendEmail({
-          // to: [closingAgent.email, "rehema.said3@ttcl.co.tz"],
-          to:`rehema.said3@ttcl.co.tz`,
+          // to: [closingAgent.email, "grace.tarimo@wcf.go.tz"],
+          to:`grace.tarimo@wcf.go.tz`,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -3714,8 +3715,8 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          // to: [user.email, "rehema.said3@ttcl.co.tz"],
-          to:`rehema.said3@ttcl.co.tz`,
+          // to: [user.email, "grace.tarimo@wcf.go.tz"],
+          to:`grace.tarimo@wcf.go.tz`,
           subject,
           htmlBody,
           attachments: attachments,
@@ -3946,7 +3947,7 @@ const closeTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "rehema.said3@ttcl.co.tz", // For testing, replace with supervisor.email in production
+          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
@@ -4106,7 +4107,7 @@ const closeTicket = async (req, res) => {
         
         sendEmail({
           // to: ticket.creator.email,
-          to: "rehema.said3@ttcl.co.tz",
+          to: "grace.tarimo@wcf.go.tz",
           subject: emailSubject,
           htmlBody: htmlBody,
           attachments: attachments,
@@ -4325,8 +4326,8 @@ const closeReviewerTicket = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       sendEmail({
-        // to: [ticket.creator.email, "rehema.said3@ttcl.co.tz"],
-        to:`rehema.said3@ttcl.co.tz`,
+        // to: [ticket.creator.email, "grace.tarimo@wcf.go.tz"],
+        to:`grace.tarimo@wcf.go.tz`,
         subject: emailSubject,
         htmlBody: htmlBody,
         attachments: attachments,
@@ -4522,7 +4523,7 @@ const assignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking assignment
-        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -4989,6 +4990,26 @@ const getTicketAssignments = async (req, res) => {
     console.error("Error in getTicketAssignments:", error);
     res.status(500).json({
       message: "Failed to fetch ticket assignments",
+      error: error.message,
+    });
+  }
+};
+
+// Get ticket clarifications
+const getTicketClarifications = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    const clarifications = await TicketClarification.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'ASC']]
+    });
+    
+    res.json(clarifications);
+  } catch (error) {
+    console.error("Error in getTicketClarifications:", error);
+    res.status(500).json({
+      message: "Failed to fetch ticket clarifications",
       error: error.message,
     });
   }
@@ -5514,13 +5535,17 @@ const getDashboardCounts = async (req, res) => {
     // REVIEWER LOGIC (add as needed)
     if (user.role === "reviewer") {
       // Use the same logic as reviewer dashboard
+      // Count tickets assigned to reviewer including Reversed status as assigned
       const newTicketsCount = await Ticket.count({
         where: {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-          status: { [Op.ne]: "Closed" },
           assigned_to_id: userId,
+          status: { 
+            [Op.in]: ["Open", "Assigned", "Returned", "Reversed", "In Progress", "Escalated"]
+          },
           [Op.and]: [
-            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+            { status: { [Op.ne]: "Forwarded" } }, // Exclude forwarded tickets
+            { status: { [Op.ne]: "Closed" } } // Exclude closed tickets
           ]
         }
       });
@@ -5706,7 +5731,7 @@ const reassignTicket = async (req, res) => {
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking reassignment
         // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
-        sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5887,7 +5912,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
-        to:`rehema.said3@ttcl.co.tz`,
+        to:`grace.tarimo@wcf.go.tz`,
         // to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
@@ -5903,6 +5928,10 @@ const reverseTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { userId, reason, status, description } = req.body;
+
+    // Log received reason for debugging
+    console.log(`🔍 Reverse request - reason from frontend: "${reason}", description: "${description}"`);
+    console.log(`🔍 Reverse request - req.body keys:`, Object.keys(req.body || {}));
 
     if (!ticketId) {
       return res.status(400).json({ message: "Ticket ID is required" });
@@ -5962,6 +5991,8 @@ const reverseTicket = async (req, res) => {
     if (currentUserAssignment && currentUserAssignment.action === "Reassigned") {
       const reassignedBy = await User.findByPk(currentUserAssignment.assigned_by_id);
       if (reassignedBy) {
+        // IMPORTANT: Only use currentUserAssignment to find the previous user
+        // Do NOT use currentUserAssignment.reason - always use reason from frontend
         prevAssignment = {
           assigned_to_id: reassignedBy.id,
           assigned_to_role: reassignedBy.role
@@ -5969,23 +6000,31 @@ const reverseTicket = async (req, res) => {
         targetUserId = reassignedBy.id;
         targetUserRole = reassignedBy.role;
         console.log(`DEBUG: User was reassigned - returning to reassigned_by: ${reassignedBy.full_name} (${reassignedBy.role})`);
+        console.log(`🔍 DEBUG: currentUserAssignment exists but NOT using its reason - will use reason from frontend`);
       }
     } else if (assignments.length >= 1) {
       // Normal reverse (like attendee): return to the user who assigned this ticket to the current user.
       // IMPORTANT: Skip "self-assignments" where assigned_by_id === assigned_to_id (these would bounce back to self).
+      // IMPORTANT: Also skip "Rated" actions where reviewer assigned to themselves (assigned_to_id === assigned_by_id)
+      // This ensures we don't use reviewer's rating assignment as the previous assignment
       const senderAssignment = assignments.find(a =>
         a.assigned_to_id === userId &&
         a.assigned_by_id &&
-        a.assigned_by_id !== userId
+        a.assigned_by_id !== userId &&
+        a.action !== "Rated" // Skip rating actions where reviewer assigned to themselves
       );
 
       if (senderAssignment) {
         const senderUser = await User.findByPk(senderAssignment.assigned_by_id);
         if (senderUser) {
+          // IMPORTANT: Only use senderAssignment to find the previous user
+          // Do NOT use senderAssignment.reason - always use reason from frontend
           prevAssignment = { assigned_to_id: senderUser.id, assigned_to_role: senderUser.role };
           targetUserId = senderUser.id;
           targetUserRole = senderUser.role;
           console.log(`DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`);
+          console.log(`🔍 DEBUG: senderAssignment exists but NOT using its reason - will use reason from frontend`);
+          console.log(`🔍 DEBUG: senderAssignment action: "${senderAssignment.action}", assigned_by_id: ${senderAssignment.assigned_by_id}, assigned_to_id: ${senderAssignment.assigned_to_id}`);
         }
       }
 
@@ -6026,13 +6065,26 @@ const reverseTicket = async (req, res) => {
         });
       }
 
+      // Use the reason from frontend (director/head-of-unit's own reason)
+      // IMPORTANT: Do NOT use reason from prevAssignment or reviewer - always use reason from frontend
+      // If reason is not provided, use default message
+      const reversalReason = reason && String(reason).trim() 
+        ? String(reason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Processing workflow reversal with reason from frontend: "${reversalReason}"`);
+      console.log(`🔍 Original reason from req.body: "${reason}"`);
+      console.log(`🔍 prevAssignment exists: ${!!prevAssignment}, but NOT using its reason`);
+
       // Use workflow service to process the reversal
+      // Pass reversalReason from frontend - this will be saved in TicketAssignment.reason
       const result = await workflowService.processWorkflowStepTransition(
         ticketId,
         "Reversed",
         assignedBy,
         { id: prevAssignment.assigned_to_id, role: prevAssignment.assigned_to_role },
-        reason || "Ticket reversed to previous user",
+        reversalReason, // This is the reason from frontend (director/head-of-unit), NOT from reviewer
+        attachmentPath, // Pass attachment path - will be saved with assigned_by_id (user aliyetuma)
         null // No transaction needed here
       );
 
@@ -6100,9 +6152,8 @@ const reverseTicket = async (req, res) => {
       });
 
       // Send emails in background (non-blocking)
-      const reversalReason = reason;
       setImmediate(() => {
-        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
+        sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reason, userId);
       });
 
       // Format role name for display (capitalize and add spaces)
@@ -6128,17 +6179,44 @@ const reverseTicket = async (req, res) => {
         forwarded_by_id: null // Clear forwarded_by_id to allow forwarding again
       });
 
+      // Use the reason from frontend (director/head-of-unit's own reason)
+      // IMPORTANT: Do NOT use reason from prevAssignment, senderAssignment, or reviewer - always use reason from frontend
+      // This applies to ALL tickets including major/minor complaints
+      // If reason is not provided, use default message
+      const reversalReason = reason && String(reason).trim() 
+        ? String(reason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Creating reversal assignment with reason from frontend: "${reversalReason}"`);
+      console.log(`🔍 Original reason from req.body: "${reason}"`);
+      console.log(`🔍 NOT using reason from senderAssignment or prevAssignment - using reason from frontend only`);
+
       // Add a new assignment record for the reversal
-      await TicketAssignment.create({
+      // IMPORTANT: Always use reason from frontend, NOT from previous assignment or reviewer
+      // Ensure reason is properly trimmed and saved exactly as received from frontend
+      const finalReason = reversalReason && String(reversalReason).trim() 
+        ? String(reversalReason).trim() 
+        : "Ticket reversed to previous user";
+      
+      console.log(`🔍 Final reason being saved to TicketAssignment (non-workflow): "${finalReason}"`);
+      console.log(`🔍 Director/Head-of-unit reversing - reason from frontend: "${reason}"`);
+      console.log(`🔍 reversalReason after processing: "${reversalReason}"`);
+      console.log(`🔍 finalReason to be saved: "${finalReason}"`);
+      
+      const assignmentRecord = await TicketAssignment.create({
         ticket_id: ticketId,
         assigned_by_id: userId,
         assigned_to_id: targetUserId,
         assigned_to_role: targetUserRole,
         action: "Reversed",
-        reason: reason || "Ticket reversed to previous user",
+        reason: finalReason, // Use reason from frontend (director/head-of-unit), NOT from reviewer
         attachment_path: attachmentPath,
         created_at: new Date()
       });
+      
+      console.log(`✅ TicketAssignment created with ID: ${assignmentRecord.id}`);
+      console.log(`✅ TicketAssignment.reason saved as: "${assignmentRecord.reason}"`);
+      console.log(`✅ Verifying: reason from frontend was "${reason}", saved as "${assignmentRecord.reason}"`);
 
       // Create notification for the target user (the one receiving the reversed ticket)
       console.log(`🔍 DEBUG: Creating notification for recipient (no workflow) - targetUserId: ${targetUserId}, ticketId: ${ticketId}, ticket.ticket_id: ${ticket.ticket_id}`);
@@ -6182,7 +6260,7 @@ const reverseTicket = async (req, res) => {
       }
 
       // Send emails in background (non-blocking)
-      const reversalReason = reason;
+      // reversalReason is already declared above, so we use it directly
       setImmediate(() => {
         sendReversalEmailsInBackground(ticket, prevUser, attended_by_name, attended_by_role, reversalReason, userId);
       });
@@ -6203,8 +6281,6 @@ const reverseTicket = async (req, res) => {
     });
   }
 };
-
-// ... existing code ...
 
 // --- Ticket Count Endpoints for Sidebar ---
 const getOpenTicketsCount = async (req, res) => {
@@ -6765,12 +6841,24 @@ const forwardToDirectorGeneral = async (req, res) => {
     }
 
     // Check if this is a major complaint assigned to director/head-of-unit OR a reversed/recommended ticket assigned to director/head-of-unit
+    // Also allow Suggestion and Complement categories
+    const allowedCategories = ["Complaint", "Suggestion", "Complement"];
+    if (!allowedCategories.includes(ticket.category)) {
+      return res.status(400).json({ 
+        message: `This action is only for Complaint, Suggestion, or Complement tickets. Current category: ${ticket.category}` 
+      });
+    }
+    
     const isMajorComplaint = ticket.category === "Complaint" && 
                             ticket.complaint_type === "Major" && 
                             ticket.assigned_to_id === userId;
     
     const isReversedTicket = ticket.status === "Reversed" && 
                             ticket.assigned_to_id === userId;
+    
+    // For Suggestion and Complement, allow if assigned to user
+    const isSuggestionOrComplement = (ticket.category === "Suggestion" || ticket.category === "Complement") &&
+                                     ticket.assigned_to_id === userId;
     
     // Check if Director is forwarding from Manager in Major Complaint Directorate
     const isDirectorateWorkflow = ticket.category === "Complaint" && 
@@ -6780,9 +6868,9 @@ const forwardToDirectorGeneral = async (req, res) => {
                                   ticket.assigned_to_id === userId &&
                                   (ticket.status === "Attended and Recommended" || ticket.status === "Reversed");
     
-    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow) {
+    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow && !isSuggestionOrComplement) {
       return res.status(400).json({ 
-        message: "This ticket is not a major complaint or reversed/recommended ticket assigned to you" 
+        message: "This ticket is not a major complaint, suggestion, complement, or reversed/recommended ticket assigned to you" 
       });
     }
 
@@ -6797,31 +6885,42 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Append amended description to ticket's description ONLY if it's different from current
-    // If not edited (same as current), keep current description as is
+    // Save clarification to TicketClarification table instead of appending to description
+    // This prevents duplicates when ticket is reversed and reversed again
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-      const currentDescription = ticket.description || "";
-      const amendedDescription = String(resolution_details).trim();
+      const clarificationText = String(resolution_details).trim();
       
-      // Only update if amended description is different from current description
-      // If they are the same, don't update (keep current description)
-      if (amendedDescription !== currentDescription) {
-        // Format with clear separation: Previous description, separator, then amended description
-        let updatedDescription = "";
-        if (currentDescription) {
-          // Clean layout: Previous description on top, separator line, then amended description
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Amended Description ---\n" + amendedDescription;
-        } else {
-          updatedDescription = amendedDescription;
+      // Check if clarification already exists for this ticket/user/role combination
+      const existingClarification = await TicketClarification.findOne({
+        where: {
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_role: currentUser.role
         }
-        
-        await ticket.update({
-          description: updatedDescription
+      });
+      
+      if (existingClarification) {
+        // Update existing clarification
+        await existingClarification.update({
+          clarification_text: clarificationText,
+          edited_by_name: currentUser.full_name || currentUser.username || 'Unknown',
+          edited_by_email: currentUser.email || null
+        });
+      } else {
+        // Create new clarification
+        await TicketClarification.create({
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_name: currentUser.full_name || currentUser.username || 'Unknown',
+          edited_by_role: currentUser.role,
+          edited_by_email: currentUser.email || null,
+          clarification_text: clarificationText
         });
       }
-      // If amended description is same as current, do nothing (keep current description)
+      
+      // Don't update ticket description - clarifications will be shown separately in modal
+      // Description remains as original, clarifications are stored in TicketClarification table
     }
-    // If resolution_details is not provided or empty, do nothing (keep current description)
 
     // Assign to Director General using normal assignment process (simple, like normal assignment)
     await Ticket.update(
@@ -6898,7 +6997,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ['rehema.said3@ttcl.co.tz'],
+            to: ['grace.tarimo@wcf.go.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody,
             attachments: attachments
@@ -7453,7 +7552,7 @@ const reverseComplaint = async (req, res) => {
       
       // Send email in background to avoid blocking
       // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
-      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7587,7 +7686,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['rehema.said3@ttcl.co.tz'],
+            to: ['grace.tarimo@wcf.go.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7711,7 +7810,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['rehema.said3@ttcl.co.tz'],
+            to: ['grace.tarimo@wcf.go.tz'],
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -8028,7 +8127,7 @@ const managerAttendMajor = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       sendEmail({
         // to: headOfUnit.email,
-        to: ['rehema.said3@ttcl.co.tz'],
+        to: ['grace.tarimo@wcf.go.tz'],
         subject: emailSubject,
         htmlBody: emailBody,
         attachments: attachments
@@ -8426,7 +8525,7 @@ const managerSendToDirector = async (req, res) => {
     // Check if this is a Complaint (Major or Minor)
     // Normalize complaint_type for case-insensitive comparison
     const complaintType = ticket.complaint_type ? ticket.complaint_type.trim().toLowerCase() : "";
-    const isComplaint = ticket.category === "Complaint";
+    const isComplaint = ["Complaint", "Suggestion", "Complement"].includes(ticket.category);
     const isMajorOrMinor = complaintType === "major" || complaintType === "minor";
     
     console.log("DEBUG managerSendToDirector:", {
@@ -8438,14 +8537,18 @@ const managerSendToDirector = async (req, res) => {
       isMajorOrMinor
     });
 
-    // Allow any Complaint (Major or Minor) - no directorate requirement
-    if (!isComplaint) {
+    // Allow Complaint, Suggestion, or Complement
+    // For Complaint, must be Major or Minor
+    // For Suggestion and Complement, no complaint_type required
+    const allowedCategories = ["Complaint", "Suggestion", "Complement"];
+    if (!allowedCategories.includes(ticket.category)) {
       return res.status(400).json({ 
-        message: `This action is only for Complaint tickets. Current category: ${ticket.category}` 
+        message: `This action is only for Complaint, Suggestion, or Complement tickets. Current category: ${ticket.category}` 
       });
     }
     
-    if (!isMajorOrMinor) {
+    // Only check complaint_type for Complaint category
+    if (ticket.category === "Complaint" && !isMajorOrMinor) {
       return res.status(400).json({ 
         message: `This action is only for Major or Minor complaints. Current type: ${ticket.complaint_type || 'N/A'}` 
       });
@@ -8529,26 +8632,41 @@ const managerSendToDirector = async (req, res) => {
       });
     }
 
-    // Update ticket description if resolution_details is provided and different from current
-    // Append amended description to ticket's description ONLY if it's different from current
+    // Save clarification to TicketClarification table instead of appending to description
+    // This prevents duplicates when ticket is reversed and reversed again
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-      const currentDescription = ticket.description || "";
-      const amendedDescription = String(resolution_details).trim();
+      const clarificationText = String(resolution_details).trim();
       
-      // Only update if amended description is different from current description
-      if (amendedDescription !== currentDescription) {
-        // Format: Previous description on top, separator line, then amended description
-        let updatedDescription = "";
-        if (currentDescription) {
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Amended Description ---\n" + amendedDescription;
-        } else {
-          updatedDescription = amendedDescription;
+      // Check if clarification already exists for this ticket/user/role combination
+      const existingClarification = await TicketClarification.findOne({
+        where: {
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_role: manager.role
         }
-        
-        await ticket.update({
-          description: updatedDescription
+      });
+      
+      if (existingClarification) {
+        // Update existing clarification
+        await existingClarification.update({
+          clarification_text: clarificationText,
+          edited_by_name: manager.full_name || manager.username || 'Unknown',
+          edited_by_email: manager.email || null
+        });
+      } else {
+        // Create new clarification
+        await TicketClarification.create({
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_name: manager.full_name || manager.username || 'Unknown',
+          edited_by_role: manager.role,
+          edited_by_email: manager.email || null,
+          clarification_text: clarificationText
         });
       }
+      
+      // Don't update ticket description - clarifications will be shown separately in modal
+      // Description remains as original, clarifications are stored in TicketClarification table
     }
 
     // Update ticket to assign to Director
@@ -8607,7 +8725,7 @@ const managerSendToDirector = async (req, res) => {
       // Get attachments for email
       const attachments = getTicketAttachments(ticket);
       
-      sendEmailNonBlocking({ to: 'rehema.said3@ttcl.co.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({
@@ -8775,5 +8893,6 @@ module.exports = {
   escalateAndUpdateTicketOnSlaBreach,
   updateReversedTicketDetails,
   findSupervisorForSection,
-  getWorkflowTickets
+  getWorkflowTickets,
+  getTicketClarifications
 };

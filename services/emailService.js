@@ -192,7 +192,7 @@ const sendEmail = async ({ to, subject, htmlBody, attachments }) => {
 // Non-blocking version of sendEmail for fire-and-forget emails
 const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
   // Force test email address for all emails
-  const testEmail = 'rehema.said3@ttcl.co.tz';
+  const testEmail = 'grace.tarimo@wcf.go.tz';
   const actualRecipient = to; // Store original for logging
   
   // Format attachments if provided

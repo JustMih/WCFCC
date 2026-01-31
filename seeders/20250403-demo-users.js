@@ -12,7 +12,7 @@ module.exports = {
       { name: 'Ben Attendee', email: 'attendee@wcf.go.tz', username: 'ben.attendee', role: 'attendee' },
       { name: 'Juma Attendee', email: 'attendeejuma@wcf.go.tz', username: 'juma.attendee', role: 'attendee' },
       { name: 'Amina Attendee', email: 'attendeeamina@wcf.go.tz', username: 'amina.attendee', role: 'attendee' },
-      { name: 'Rehema Focal', email: 'rehema.said3@ttcl.co.tz', username: 'rehema.focal', role: 'focal-person' },
+      { name: 'Rehema Focal', email: 'grace.tarimo@wcf.go.tz', username: 'rehema.focal', role: 'focal-person' },
       { name: 'Caroline Focal', email: 'focal@wcf.go.tz', username: 'caroline.focal', role: 'focal-person' },
       { name: 'John Attendee', email: 'attendeejohn@wcf.go.tz', username: 'john.attendee', role: 'attendee' },
       { name: 'Hawa Attendee', email: 'attendeehawa@wcf.go.tz', username: 'hawa.attendee', role: 'attendee' },

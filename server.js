@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const { Server } = require("socket.io");
+const amiLive = require("./amiServer");
 
 /* ------------------------------ CONFIG & DB ------------------------------ */
 const sequelize = require("./config/mysql_connection.js");
@@ -32,10 +33,16 @@ const InstagramComment = require("./models/instagram_comment");
 const VoiceNote = require("./models/voice_notes.model");
 
 /* ------------------------------ CONTROLLERS ------------------------------ */
+/* ------------------------------ CONTROLLERS ------------------------------ */
 const { registerSuperAdmin } = require("./controllers/auth/authController");
-const {
-  setupSocket,
-} = require("./controllers/livestream/livestreamController");
+
+/* ✅ LOAD LIVESTREAM CONTROLLER FIRST */
+const livestreamController = require("./controllers/livestream/livestreamController");
+const { setupSocket } = livestreamController;
+
+/* ✅ REGISTER LIVE CALL CACHE */
+app.locals.getLiveCalls = livestreamController.getLiveCallsCache;
+
 const {
   setSocketInstance,
   startPeriodicUpdates,
@@ -53,6 +60,9 @@ const livestreamRoutes = require("./routes/livestreamRoutes");
 const recordedAudioRoutes = require("./routes/recordedAudioRoutes");
 const reportsRoutes = require("./routes/reports.routes");
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
+const spyRoutes = require("./routes/spy");
+
+
 // const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
 const baseAudioPath =
   process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
@@ -87,6 +97,25 @@ app.use(
     credentials: true,
   })
 );
+setInterval(() => {
+  if (!amiLive?.getLiveQueueCalls) return;
+
+  const calls = amiLive.getLiveQueueCalls();
+  const liveCount = Object.keys(calls).length;
+
+  if (liveCount > 0) {
+    console.log("📞 LIVE CALLS (from AMI):");
+    Object.values(calls).forEach((c) => {
+      console.log({
+        caller: c.caller,
+        queue: c.queue,
+        joinedAt: c.joinedAt,
+        answered: c.answered,
+        abandoned: c.abandoned,
+      });
+    });
+  }
+}, 2000);
 
 /* ------------------------------ STATIC FILES ------------------------------ */
 // Voice note audio files
@@ -186,6 +215,7 @@ app.use("/api/livestream", livestreamRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
 app.use("/api/instagram-management", instagramManagementRoutes);
 app.use("/api", require("./routes/dtmfRoutes"));
+app.use("/api/spy", spyRoutes);
 
 /* ------------------------------ SOCKET.IO ------------------------------ */
 const io = new Server(server, {
@@ -212,6 +242,7 @@ const io = new Server(server, {
 });
 global._io = io;
 setupSocket(io);
+setSocketInstance(io);
 
 // Private messaging and live call socket logic
 const users = {};
@@ -393,6 +424,15 @@ io.on("connection", (socket) => {
     }
   });
 });
+setInterval(() => {
+  if (!amiLive?.getLiveQueueCalls) return;
+
+  const calls = Object.values(amiLive.getLiveQueueCalls());
+
+  io.emit("public_dashboard_update", {
+    liveCalls: calls
+  });
+}, 2000);
 
 /* ------------------------------ SERVER START ------------------------------ */
 // Sync database - handle errors gracefully for models managed by migrations

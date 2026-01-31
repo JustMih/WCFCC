@@ -9,6 +9,7 @@ const { Op, Sequelize } = require("sequelize");
 const TicketAssignment = require("../../models/TicketAssignment");
 const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const Notification = require("../../models/Notification"); // Added Notification model
+const { UserRole } = require("../../models");
 
 // Helper to get requester display name
 function getRequesterDisplayName(ticket) {
@@ -196,6 +197,7 @@ async function safeRollback(transaction) {
   }
 }
 
+
 const convertOrForwardTicket = async (req, res) => {
   const { userId, category, responsible_unit_name, complaintType, ratingComment } = req.body;
   const { id: ticketId } = req.params;
@@ -314,16 +316,13 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
-      // Special case: "Units" is a generic term, use ticket's sub_section to find focal person
-      const isGenericUnits = responsible_unit_name && responsible_unit_name.trim().toLowerCase() === 'units';
+      // Use responsible_unit_name from frontend directly to find focal person
+      // No generic logic - use exact value from frontend
+      const searchField = responsible_unit_name;
       
-      // Use responsible_unit_name from the input to find focal person
-      // For "Units" (generic), use ticket's sub_section instead
-      let searchField = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
+      console.log(`DEBUG: Inquiry conversion - Looking for focal-person using responsible_unit_name from frontend: "${searchField}"`);
       
-      console.log(`DEBUG: Inquiry conversion - Looking for focal-person using ${isGenericUnits ? 'ticket.sub_section' : 'responsible_unit_name'}: "${searchField}"`);
-      
-      // Find focal person using unit_section field
+      // Find focal person using unit_section field with value from frontend
       let focalPerson = null;
       
       if (searchField) {
@@ -376,17 +375,17 @@ const convertOrForwardTicket = async (req, res) => {
       } else {
         // If no focal person found, return error - conversion requires focal person
         await safeRollback(transaction);
-        const searchFieldUsed = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
-        console.error(`ERROR: No focal-person found for ${isGenericUnits ? 'ticket.sub_section' : 'unit/directorate'} "${searchFieldUsed}". Cannot convert to Inquiry.`);
+        console.error(`ERROR: No focal-person found for unit/directorate "${responsible_unit_name}". Cannot convert to Inquiry.`);
         return res.status(404).json({ 
-          message: isGenericUnits 
-            ? `No focal-person found for unit '${ticket.sub_section || 'N/A'}'. Please ensure there is a focal-person assigned to this unit before converting to Inquiry.`
-            : `No focal-person found for unit/directorate '${responsible_unit_name}'. Please ensure there is a focal-person assigned to this unit/directorate before converting to Inquiry.`
+          message: `No focal-person found for unit/directorate '${responsible_unit_name}'. Please ensure there is a focal-person assigned to this unit/directorate before converting to Inquiry.`
         });
       }
     }
 
     // Handle forwarding to a unit
+    // Declare unitUser at higher scope so it can be accessed by both forwarding and rating blocks
+    let unitUser = null;
+    
     if (responsible_unit_name) {
       // Check if ticket is already forwarded in this session
       if (forwardingDone) {
@@ -399,7 +398,7 @@ const convertOrForwardTicket = async (req, res) => {
       // Allow forwarding again - removed restriction to allow re-forwarding tickets
 
       // Validate that ticket is rated before forwarding (Complaint tickets only)
-      // If converting to Inquiry in this request, rating is not required.
+      // If converting to Inquiry in this request, q not required.
       if (isComplaintTicket && !conversionDone && !ticket.complaint_type && !ratingDone) {
         await safeRollback(transaction);
         return res.status(400).json({
@@ -407,37 +406,88 @@ const convertOrForwardTicket = async (req, res) => {
         });
       }
 
-      // Special case: "Units" is a generic term, always treat as unit and use sub_section
-      // Match "units" (plural) to be consistent with conversion logic
-      const isGenericUnits = responsible_unit_name && responsible_unit_name.trim().toLowerCase() === 'units';
+      // Determine if it's a directorate or unit based on responsible_unit_name from frontend
+      // Check if name contains "directorate" (case-insensitive) - if yes, it's a directorate
+      // Check if name contains "units" (case-insensitive) - if yes, it's a unit
+      const nameLower = responsible_unit_name.trim().toLowerCase();
+      const isDirectorate = nameLower.includes('directorate');
+      const isUnit = nameLower.includes('units') || nameLower.includes('unit');
       
-      // Check if it's a Section (directorate) or Function (unit)
-      // Skip Section lookup if it's generic "Units" - it's always a unit, not a directorate
+      // Check if it's a Section (directorate) or Function (unit) in database
       let section = null;
-      if (!isGenericUnits) {
+      let functionUnit = null;
+      
+      if (isDirectorate) {
         section = await Section.findOne({
           where: { name: responsible_unit_name },
           transaction
         });
-      }
-
-      let functionUnit = null;
-      // If it's "Units" (generic), always treat as unit, not directorate
-      const isDirectorate = !isGenericUnits && section !== null;
-      
-      // If not found as Section, check if it's a Function (unit like "ICT Units")
-      if (!section || isGenericUnits) {
-        // For generic "Units", skip Function lookup and use sub_section directly
-        if (!isGenericUnits) {
+      } else if (isUnit) {
+        console.log(`DEBUG: Looking for unit with name: "${responsible_unit_name}"`);
+        
+        // Try to find the unit by name (exact match first)
+        functionUnit = await FunctionModel.findOne({
+          where: { name: responsible_unit_name },
+          transaction
+        });
+        
+        if (functionUnit) {
+          console.log(`DEBUG: Found unit in FunctionModel (exact match): ${functionUnit.name} (ID: ${functionUnit.id})`);
+        }
+        
+        // If not found, try case-insensitive search
+        if (!functionUnit) {
+          console.log(`DEBUG: Exact match not found, trying case-insensitive search...`);
           functionUnit = await FunctionModel.findOne({
-            where: { name: responsible_unit_name },
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('name')),
+              Sequelize.fn('LOWER', responsible_unit_name)
+            ),
             transaction
           });
           
-          if (!functionUnit) {
-            await safeRollback(transaction);
-            return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found` });
+          if (functionUnit) {
+            console.log(`DEBUG: Found unit in FunctionModel (case-insensitive): ${functionUnit.name} (ID: ${functionUnit.id})`);
           }
+        }
+        
+        // If still not found, try searching by section name (for cases where frontend sends section name instead of unit name)
+        if (!functionUnit) {
+          console.log(`DEBUG: Not found in FunctionModel, trying to find by section name: "${responsible_unit_name}"`);
+          const section = await Section.findOne({
+            where: Sequelize.where(
+              Sequelize.fn('LOWER', Sequelize.col('name')),
+              Sequelize.fn('LOWER', responsible_unit_name)
+            ),
+            include: [{
+              model: FunctionModel,
+              as: 'functions',
+              required: false
+            }],
+            transaction
+          });
+          
+          if (section) {
+            console.log(`DEBUG: Found section: ${section.name} with ${section.functions?.length || 0} functions`);
+            // If section found and has functions, use first function
+            if (section.functions && section.functions.length > 0) {
+              functionUnit = section.functions[0];
+              console.log(`DEBUG: Using first function from section: ${functionUnit.name} (ID: ${functionUnit.id})`);
+            }
+          }
+        }
+        
+        if (!functionUnit) {
+          await safeRollback(transaction);
+          console.error(`ERROR: Unit '${responsible_unit_name}' not found in FunctionModel or Section`);
+          // List available units for debugging
+          const allFunctions = await FunctionModel.findAll({
+            attributes: ['id', 'name'],
+            limit: 10,
+            transaction
+          });
+          console.error(`DEBUG: Available functions (first 10):`, allFunctions.map(f => f.name));
+          return res.status(404).json({ message: `Unit '${responsible_unit_name}' not found. Please ensure the unit name is correct.` });
         }
       }
 
@@ -455,39 +505,42 @@ const convertOrForwardTicket = async (req, res) => {
         ticket.forwarded_at = new Date();
         ticket.status = "Assigned"; // Keep as "Assigned" since it's an Inquiry
         forwardingDone = true;
+        // Skip the rest of forwarding logic - don't create "Forwarded" assignment, conversion logic will handle it
+        // Don't set unitUser - it's not needed for Inquiry conversion
+        // Exit early - don't proceed with director/head-of-unit forwarding logic
+        // The conversion logic below will create the "Converted" assignment
       } else {
         // Not converting to Inquiry - proceed with normal forwarding logic (director/head-of-unit)
         
         // Debug: Log the values to understand what's happening
-        console.log(`DEBUG: Forwarding logic - isGenericUnits: ${isGenericUnits}, isDirectorate: ${isDirectorate}, responsible_unit_name: "${responsible_unit_name}", ticket.sub_section: "${ticket.sub_section}"`);
+        console.log(`DEBUG: Forwarding logic - isDirectorate: ${isDirectorate}, isUnit: ${isUnit}, responsible_unit_name: "${responsible_unit_name}"`);
         
         // Determine the appropriate role to assign to based on unit type
-        // Both Minor and Major complaints go to director (for directorate) or head-of-unit (for unit)
-        // IMPORTANT: "Units" is always a unit, never a directorate - always use head-of-unit
+        // Check if responsible_unit_name contains "directorate" or "units" to determine target role
+        const nameLowerForRole = responsible_unit_name.trim().toLowerCase();
         let targetRole = null;
-        if (isGenericUnits) {
-          // Explicitly handle "Units" - always treat as unit and look for head-of-unit
-          targetRole = 'head-of-unit';
-          console.log(`DEBUG: "Units" detected - forcing head-of-unit role (isDirectorate: ${isDirectorate})`);
-        } else if (isDirectorate) {
+        
+        if (nameLowerForRole.includes('directorate')) {
           targetRole = 'director'; // For directorate, go to Director
-        } else {
+          console.log(`DEBUG: "directorate" detected in name - using director role`);
+        } else if (nameLowerForRole.includes('units') || nameLowerForRole.includes('unit')) {
           targetRole = 'head-of-unit'; // For unit, go to Head of Unit
+          console.log(`DEBUG: "units/unit" detected in name - using head-of-unit role`);
+        } else {
+          // If neither found, default based on isDirectorate flag
+          targetRole = isDirectorate ? 'director' : 'head-of-unit';
+          console.log(`DEBUG: No "directorate" or "units" in name - defaulting to ${targetRole} based on isDirectorate: ${isDirectorate}`);
         }
 
         // Find a user with the target role in the selected unit/directorate
-        // Use responsible_unit_name (the value from forward to input) to find director/head-of-unit
-        // Special case: For "Units", use ticket's sub_section instead of "Units"
-        // Both directorates and units use unit_section field
-        let unitUser = null;
+        // Use responsible_unit_name from frontend directly (no generic logic, no fallback)
         if (targetRole) {
-        // Use responsible_unit_name (the unit/directorate being forwarded to) to find the target role
-        // For "Units" (generic), use ticket's sub_section instead
-        let searchField = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
+        // Use responsible_unit_name from frontend (req.body) directly - no generic logic, no fallback
+        const searchField = responsible_unit_name;
         
         console.log(`DEBUG: Looking for ${targetRole} in ${isDirectorate ? 'directorate' : 'unit'}: "${searchField}"`);
         console.log(`DEBUG: Forwarding to responsible_unit_name: "${responsible_unit_name}"`);
-        console.log(`DEBUG: Using ${isGenericUnits ? 'ticket.sub_section' : 'unit_section field'} for search`);
+        console.log(`DEBUG: Using unit_section field for search with value from frontend`);
         
         // Both directorates and units: search by unit_section
         if (searchField) {
@@ -520,8 +573,7 @@ const convertOrForwardTicket = async (req, res) => {
         
         // If still not found, list all users with that role to see what values exist
         if (!unitUser) {
-          const searchFieldUsed = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
-          console.log(`DEBUG: No ${targetRole} found for ${isDirectorate ? 'directorate' : 'unit'} "${searchFieldUsed}"`);
+          console.log(`DEBUG: No ${targetRole} found for ${isDirectorate ? 'directorate' : 'unit'} "${responsible_unit_name}"`);
           const allUsersWithRole = await User.findAll({
             where: { role: targetRole },
             attributes: ['id', 'full_name', 'unit_section', 'sub_section', 'role'],
@@ -547,15 +599,12 @@ const convertOrForwardTicket = async (req, res) => {
       } else {
         // If target role (director or head-of-unit) not found, return error - no fallback
         await safeRollback(transaction);
-        const roleName = targetRole === 'director' ? 'director' : 'head of unit';
-        // Use the search field that was actually used for the search
-        const searchFieldUsed = isGenericUnits && ticket.sub_section ? ticket.sub_section : responsible_unit_name;
-        console.error(`ERROR: No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} "${searchFieldUsed}". Cannot forward ticket.`);
-        console.error(`ERROR DEBUG: isGenericUnits: ${isGenericUnits}, isDirectorate: ${isDirectorate}, targetRole: "${targetRole}", responsible_unit_name: "${responsible_unit_name}", ticket.sub_section: "${ticket.sub_section}"`);
+        const roleName = targetRole === 'director' ? 'director' : 'head-of-unit';
+        // IMPORTANT: Always use responsible_unit_name from frontend (req.body), not ticket.responsible_unit_name
+        console.error(`ERROR: No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} "${responsible_unit_name}". Cannot forward ticket.`);
+        console.error(`ERROR DEBUG: isDirectorate: ${isDirectorate}, isUnit: ${isUnit}, targetRole: "${targetRole}", responsible_unit_name (from frontend): "${responsible_unit_name}"`);
         return res.status(404).json({ 
-          message: isGenericUnits
-            ? `No ${roleName} found for unit '${ticket.sub_section || 'N/A'}'. Please ensure there is a ${roleName} assigned to this unit.`
-            : `No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} '${responsible_unit_name}'. Please ensure there is a ${roleName} assigned to this ${isDirectorate ? 'directorate' : 'unit'}.` 
+          message: `No ${roleName} found for ${isDirectorate ? 'directorate' : 'unit'} '${responsible_unit_name}'. Please ensure there is a ${roleName} assigned to this ${isDirectorate ? 'directorate' : 'unit'}.` 
         });
       }
 
@@ -565,9 +614,20 @@ const convertOrForwardTicket = async (req, res) => {
       forwardingDone = true;
 
       // Create TicketAssignment record for forwarding (only forwarding, no conversion)
-      const forwardReason = ratingComment && ratingComment.trim() 
-        ? `Ticket forwarded to ${responsible_unit_name} by reviewer. Comment: ${ratingComment.trim()}`
-        : `Ticket forwarded to ${responsible_unit_name} by reviewer`;
+      // Include rating (complaintType) in the reason since forwarding requires rating
+      let forwardReason = `Ticket forwarded to ${responsible_unit_name} by reviewer`;
+      
+      // Add rating (complaintType) if available
+      if (complaintType && complaintType !== 'undefined') {
+        forwardReason += `. Rated as ${complaintType}`;
+      }
+      
+      // Add comment if available
+      if (ratingComment && ratingComment.trim()) {
+        forwardReason += `. Comment: ${ratingComment.trim()}`;
+      }
+      
+      forwardReason += '.';
       
       await TicketAssignment.create({
         ticket_id: ticket.id,
@@ -597,22 +657,10 @@ const convertOrForwardTicket = async (req, res) => {
     // Save the ticket
     await ticket.save({ transaction });
 
-    // Create TicketAssignment records for rating and conversion actions
-    if (ratingDone) {
-      const ratingReason = ratingComment && ratingComment.trim()
-        ? `Ticket rated as ${complaintType} by reviewer. Comment: ${ratingComment.trim()}`
-        : `Ticket rated as ${complaintType} by reviewer`;
-      
-      await TicketAssignment.create({
-        ticket_id: ticket.id,
-        assigned_by_id: userId,
-        assigned_to_id: userId, // Reviewer rates the ticket
-        assigned_to_role: 'reviewer',
-        action: "Rated",
-        reason: ratingReason,
-        created_at: new Date()
-      }, { transaction });
-    }
+    // IMPORTANT: Rating is NOT a separate action - it's part of forwarding
+    // We do NOT create a separate "Rated" assignment record
+    // Rating value (complaint_type) is set on the ticket, and rating info is included in "Forwarded" assignment reason
+    // No need to create a separate "Rated" assignment even if forwarding was not done
 
     // Handle conversion - combine with forwarding if both happened
     if (conversionDone) {
@@ -697,6 +745,7 @@ const convertOrForwardTicket = async (req, res) => {
       .json({ message: "Server error", error: error.message });
   }
 };
+
 
 const getReviewerDashboardCounts = async (req, res) => {
   try {
@@ -812,34 +861,36 @@ const getReviewerDashboardCounts = async (req, res) => {
       }
     });
 
-    // Count open tickets
+    // Count open tickets (including Reversed tickets)
     const openCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: "Open",
+        status: { [Op.in]: ["Open", "Reversed", "Assigned"] },
         assigned_to_id: req.user.userId
       }
     });
 
-    // Count assigned tickets
+    // Count assigned tickets (including Reversed status)
     const assignedCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: "Assigned",
+        status: { [Op.in]: ["Assigned", "Reversed"] },
         assigned_to_id: req.user.userId
       }
     });
 
     const ticketStatus = {
       "Open": openCount,
-      "Assigned": assignedCount,
+      // "Assigned": assignedCount,
       Closed: closedCount,
       Minor: minorCount,
       Major: majorCount
       // add other statuses if needed
     };
 
-    const ticketStatusTotal = Object.values(ticketStatus).reduce((a, b) => 0 + b, 0);
+    // Total should be Open + Closed only (not Minor + Major to avoid duplicates)
+    // Minor and Major are ratings that are already counted in Open/Closed tickets
+    // const ticketStatusTotal = openCount + closedCount;
 
     console.log('New Tickets Total Calculation:', newTicketsCount + escalatedTicketsCount);
 
@@ -861,7 +912,7 @@ const getReviewerDashboardCounts = async (req, res) => {
           Units: unitsCount
         },
         ticketStatus,
-        ticketStatusTotal
+        // ticketStatusTotal
       }
     });
   } catch (error) {
@@ -1046,7 +1097,7 @@ const getTicketsByCategoryAndType = async (req, res) => {
 const getOpenTickets = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { tickets, user } = await getTicketsByStatus(userId, "Open");
+    const { tickets, user } = await getTicketsByStatus(userId, "Open", );
 
     if (tickets.length === 0) {
       return res.status(404).json({ message: "No open tickets found" });
@@ -1213,19 +1264,40 @@ const getTicketsByStatus = async (req, res) => {
 
     switch (status) {
       case "new":
-        whereClause.category = {
-          [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+        // For "new" tickets: show tickets assigned to reviewer that are:
+        // - Open, Assigned, Reversed, or null status
+        // - Not Forwarded
+        // - Can be already rated (complaint_type set) but still need reviewer action
+        // Check both assigned_to_id and assigned_to_role to catch all reviewer tickets
+        whereClause = {
+          [Op.and]: [
+            {
+              category: {
+                [Op.in]: ["Complaint", "Suggestion", "Compliment"]
+              }
+            },
+            {
+              [Op.or]: [
+                { assigned_to_id: req.user.userId },
+                { assigned_to_role: "reviewer" }
+              ]
+            },
+            {
+              [Op.or]: [
+                { status: null },
+                { status: "Open" },
+                { status: "Assigned" },
+                { status: "Reversed" }
+              ]
+            },
+            {
+              status: { [Op.ne]: "Forwarded" }
+            }
+          ]
         };
-        whereClause.assigned_to_id = req.user.userId;
-        // whereClause[Op.or] = [
-        //   { responsible_unit_name: null },
-        //   { responsible_unit_name: "Public Relation Unit" }
-        // ];
-        // Explicitly exclude forwarded tickets
-        whereClause[Op.and] = [
-          { [Op.or]: [{ status: null }, { status: "Open" }, { status: "Reversed" }] },
-          { status: { [Op.ne]: "Forwarded" } }
-        ];
+        console.log('🔍 Reviewer "new" tickets query:', JSON.stringify(whereClause, null, 2));
+        console.log('👤 Reviewer userId:', req.user.userId);
+        console.log('👤 Reviewer role:', req.user.role);
         break;
         case "escalated":
           whereClause = {
@@ -1344,6 +1416,19 @@ const getTicketsByStatus = async (req, res) => {
       ],
       order: [["created_at", "DESC"]]
     });
+
+    console.log(`📊 Found ${tickets.length} tickets for status "${status}"`);
+    if (status === "new" && tickets.length > 0) {
+      console.log('📋 Sample ticket:', {
+        id: tickets[0].id,
+        ticket_id: tickets[0].ticket_id,
+        status: tickets[0].status,
+        assigned_to_id: tickets[0].assigned_to_id,
+        category: tickets[0].category
+      });
+    } else if (status === "new" && tickets.length === 0) {
+      console.log('⚠️ No tickets found for reviewer. Query:', JSON.stringify(whereClause, null, 2));
+    }
 
     res.json({ tickets });
   } catch (error) {
