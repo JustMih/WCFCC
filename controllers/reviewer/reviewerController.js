@@ -861,34 +861,36 @@ const getReviewerDashboardCounts = async (req, res) => {
       }
     });
 
-    // Count open tickets
+    // Count open tickets (including Reversed tickets)
     const openCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: "Open",
+        status: { [Op.in]: ["Open", "Reversed", "Assigned"] },
         assigned_to_id: req.user.userId
       }
     });
 
-    // Count assigned tickets
+    // Count assigned tickets (including Reversed status)
     const assignedCount = await Ticket.count({
       where: {
         category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-        status: "Assigned",
+        status: { [Op.in]: ["Assigned", "Reversed"] },
         assigned_to_id: req.user.userId
       }
     });
 
     const ticketStatus = {
       "Open": openCount,
-      "Assigned": assignedCount,
+      // "Assigned": assignedCount,
       Closed: closedCount,
       Minor: minorCount,
       Major: majorCount
       // add other statuses if needed
     };
 
-    const ticketStatusTotal = Object.values(ticketStatus).reduce((a, b) => 0 + b, 0);
+    // Total should be Open + Closed only (not Minor + Major to avoid duplicates)
+    // Minor and Major are ratings that are already counted in Open/Closed tickets
+    // const ticketStatusTotal = openCount + closedCount;
 
     console.log('New Tickets Total Calculation:', newTicketsCount + escalatedTicketsCount);
 
@@ -910,7 +912,7 @@ const getReviewerDashboardCounts = async (req, res) => {
           Units: unitsCount
         },
         ticketStatus,
-        ticketStatusTotal
+        // ticketStatusTotal
       }
     });
   } catch (error) {

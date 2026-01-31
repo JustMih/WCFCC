@@ -46,7 +46,7 @@ const storage = multer.diskStorage({
 
 // Enhanced limits
 const limits = {
-  fileSize: 10 * 1024 * 1024, // 10MB limit
+  fileSize: 2 * 1024 * 1024, // 2MB limit
   files: 5, // Maximum 5 files per request
   fieldNameSize: 100,
   fieldSize: 1024 * 1024, // 1MB for text fields
@@ -65,7 +65,7 @@ const handleMulterError = (error, req, res, next) => {
     switch (error.code) {
       case 'LIMIT_FILE_SIZE':
         return res.status(400).json({
-          message: 'File too large. Maximum size is 10MB.',
+          message: 'File too large. Maximum size is 2MB.',
           error: error.message
         });
       case 'LIMIT_FILE_COUNT':

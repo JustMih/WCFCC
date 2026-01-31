@@ -5535,13 +5535,17 @@ const getDashboardCounts = async (req, res) => {
     // REVIEWER LOGIC (add as needed)
     if (user.role === "reviewer") {
       // Use the same logic as reviewer dashboard
+      // Count tickets assigned to reviewer including Reversed status as assigned
       const newTicketsCount = await Ticket.count({
         where: {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-          status: { [Op.ne]: "Closed" },
           assigned_to_id: userId,
+          status: { 
+            [Op.in]: ["Open", "Assigned", "Returned", "Reversed", "In Progress", "Escalated"]
+          },
           [Op.and]: [
-            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+            { status: { [Op.ne]: "Forwarded" } }, // Exclude forwarded tickets
+            { status: { [Op.ne]: "Closed" } } // Exclude closed tickets
           ]
         }
       });
