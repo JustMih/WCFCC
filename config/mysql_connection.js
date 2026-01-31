@@ -46,17 +46,17 @@
 const { Sequelize } = require("sequelize");
 require("dotenv").config();
 
-// const dbName = process.env.DB_NAME || "asterisk";
-// const dbUser = process.env.DB_USER || "asterisk";
-// const dbPass = process.env.DB_PASS || "Wcf@1234";
-// const dbHost = process.env.DB_HOST || "192.168.21.70";
-// const dbPort = process.env.DB_PORT || 3306;
-
 const dbName = process.env.DB_NAME || "asterisk";
 const dbUser = process.env.DB_USER || "asterisk";
-const dbPass = process.env.DB_PASS || "@Ttcl123";
-const dbHost = process.env.DB_HOST || "10.52.0.19";
+const dbPass = process.env.DB_PASS || "Wcf@1234";
+const dbHost = process.env.DB_HOST || "192.168.21.70";
 const dbPort = process.env.DB_PORT || 3306;
+
+// const dbName = process.env.DB_NAME || "asterisk";
+// const dbUser = process.env.DB_USER || "asterisk";
+// const dbPass = process.env.DB_PASS || "@Ttcl123";
+// const dbHost = process.env.DB_HOST || "10.52.0.19";
+// const dbPort = process.env.DB_PORT || 3306;
 
 const sequelize = new Sequelize(
   dbName,
