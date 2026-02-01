@@ -8253,83 +8253,113 @@ const updateReversedTicketDetails = async (req, res) => {
     }
 
     // Find focal-person for the specific unit/directorate (no fallback - must be the specific focal person)
+    // This applies the same logic as ticket creation for Compliance and Claims sections
     let assignedUser = null;
     let assignedRole = null;
     
-    if (responsible_unit_name && responsible_unit_name.trim() !== "") {
-      const trimmedUnitName = responsible_unit_name.trim();
-      const trimmedSubSection = sub_section && sub_section.trim() !== "" ? sub_section.trim() : null;
-      
-      console.log("🔍 ===== STARTING FOCAL PERSON SEARCH =====");
-      console.log("🔍 Looking for focal-person for unit/directorate:", trimmedUnitName);
-      console.log("🔍 Also checking sub_section:", trimmedSubSection);
-      
-      // Only find focal-person for this specific unit/directorate - NO FALLBACK TO DIRECTOR OR HEAD-OF-UNIT
-      // Priority 1: Try matching by sub_section first (more specific)
-      // Priority 2: Then try matching by unit_section (directorate/unit name)
-      let searchConditions = [];
-      
-      // First priority: search by sub_section if provided (more specific match)
-      if (trimmedSubSection) {
-        searchConditions.push(
-          { unit_section: trimmedSubSection },
-          Sequelize.where(
-            Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-            Sequelize.fn('LOWER', trimmedSubSection)
-          )
-        );
-        console.log("🔍 Priority 1: Searching by sub_section:", trimmedSubSection);
+    // Helper function to determine if section is directorate or unit (same as ticket creation)
+    const getSectionType = (sectionName) => {
+      if (!sectionName) return null;
+      const name = sectionName.toLowerCase();
+      if (name.includes('directorate')) {
+        return 'directorate';
+      } else if (name.includes('unit')) {
+        return 'unit';
       }
+      return null;
+    };
+    
+    // Priority 1: If sub_section is being updated, find focal-person for the new sub_section
+    // This works like initial ticket creation - assign to focal-person of the new sub_section
+    const previousSubSection = ticket.sub_section;
+    const newSubSection = sub_section && sub_section.trim() !== "" ? sub_section.trim() : null;
+    const sectionName = section || ticket.section || responsible_unit_name || null;
+    const sectionType = getSectionType(sectionName);
+    
+    if (newSubSection) {
+      console.log("🔍 ===== SEARCHING FOR FOCAL-PERSON BY NEW SUB_SECTION =====");
+      console.log("🔍 Previous sub_section:", previousSubSection);
+      console.log("🔍 New sub_section:", newSubSection);
+      console.log("🔍 Section name:", sectionName);
+      console.log("🔍 Section type:", sectionType);
+      console.log("🔍 Searching for focal-person of new sub_section:", newSubSection);
       
-      // Second priority: search by unit_section (directorate/unit name)
-      searchConditions.push(
-        { unit_section: trimmedUnitName },
-        Sequelize.where(
-          Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-          Sequelize.fn('LOWER', trimmedUnitName)
-        )
-      );
-      console.log("🔍 Priority 2: Searching by unit_section:", trimmedUnitName);
-      
+      // Apply same logic as ticket creation:
+      // For directorate: match by sub_section field
+      // For unit: match by unit_section field
+      if (sectionType === 'directorate') {
+        console.log("🔍 Section is directorate - matching focal-person by sub_section field");
         assignedUser = await User.findOne({
           where: {
             role: "focal-person",
-          [Op.or]: searchConditions
+            [Op.or]: [
+              { sub_section: newSubSection },
+              Sequelize.where(
+                Sequelize.fn('LOWER', Sequelize.col('sub_section')),
+                Sequelize.fn('LOWER', newSubSection)
+              )
+            ]
           },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
-        order: [
-          // Prefer exact matches first, then case-insensitive
-          [Sequelize.literal(`CASE WHEN unit_section = '${trimmedSubSection || trimmedUnitName}' THEN 1 ELSE 2 END`), 'ASC']
-        ]
+          attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+          order: [
+            // Prefer exact matches first
+            [Sequelize.literal(`CASE WHEN sub_section = '${newSubSection}' THEN 1 ELSE 2 END`), 'ASC']
+          ]
         });
-        assignedRole = "focal-person";
+        console.log("Found focal-person with matching sub_section (directorate):", assignedUser?.full_name || "None found");
+      } else if (sectionType === 'unit') {
+        console.log("🔍 Section is unit - matching focal-person by unit_section field");
+        assignedUser = await User.findOne({
+          where: {
+            role: "focal-person",
+            [Op.or]: [
+              { unit_section: newSubSection },
+              Sequelize.where(
+                Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                Sequelize.fn('LOWER', newSubSection)
+              )
+            ]
+          },
+          attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+          order: [
+            // Prefer exact matches first
+            [Sequelize.literal(`CASE WHEN unit_section = '${newSubSection}' THEN 1 ELSE 2 END`), 'ASC']
+          ]
+        });
+        console.log("Found focal-person with matching unit_section (unit):", assignedUser?.full_name || "None found");
+      } else {
+        console.log("⚠️ Section type is not directorate or unit - cannot find focal-person");
+        console.log("⚠️ Ticket assignment will NOT be changed");
+      }
       
       if (assignedUser) {
-        console.log("✅ SUCCESS: Found focal person:", assignedUser.full_name, "ID:", assignedUser.id);
-        console.log("✅ Focal person unit_section:", assignedUser.unit_section);
-        console.log("✅ Matched with:", trimmedUnitName);
-      } else {
-        console.log("❌ ERROR: No focal person found for unit/directorate:", trimmedUnitName);
-        if (sub_section) {
-          console.log("❌ Also checked sub_section:", sub_section);
+        assignedRole = "focal-person";
+        console.log("✅ SUCCESS: Found focal person for new sub_section:", assignedUser.full_name, "ID:", assignedUser.id);
+        if (sectionType === 'directorate') {
+          console.log("✅ Focal person sub_section:", assignedUser.sub_section);
+        } else if (sectionType === 'unit') {
+          console.log("✅ Focal person unit_section:", assignedUser.unit_section);
         }
-        console.log("❌ Ticket will NOT be reassigned - focal person MUST exist");
-        console.log("❌ NO FALLBACK to director or head-of-unit - assignment will remain unchanged");
+        console.log("✅ Matched with new sub_section:", newSubSection);
+      } else {
+        console.log("❌ ERROR: No focal person found for new sub_section:", newSubSection);
+        console.log("❌ Ticket will NOT be reassigned - focal person for sub_section MUST exist");
+        console.log("❌ NO FALLBACK - assignment will remain unchanged");
         
         // Log all focal persons in database for debugging
         const allFocalPersons = await User.findAll({
           where: { role: "focal-person" },
-          attributes: ["id", "full_name", "unit_section"],
+          attributes: ["id", "full_name", "unit_section", "sub_section"],
         });
         console.log("📋 All focal persons in database:", JSON.stringify(allFocalPersons.map(fp => ({
           name: fp.full_name,
-          unit_section: fp.unit_section
+          unit_section: fp.unit_section,
+          sub_section: fp.sub_section
         })), null, 2));
-        console.log("🔍 ===== END FOCAL PERSON SEARCH =====");
       }
+      console.log("🔍 ===== END SUB_SECTION FOCAL-PERSON SEARCH =====");
     } else {
-      console.log("⚠️ No responsible_unit_name provided - cannot find focal person");
-      console.log("⚠️ Ticket assignment will NOT be changed");
+      console.log("⚠️ No new sub_section provided - ticket assignment will NOT be changed");
     }
 
     // Update ticket with focal person assignment ONLY if found (no fallback)
