@@ -8009,7 +8009,7 @@ const getTicketWorkflowAuditTrail = async (req, res) => {
 const managerAttendMajor = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, recommendation, evidence_url, responsible_unit_name } = req.body;
+    const { userId, recommendation, reason, evidence_url, responsible_unit_name } = req.body;
 
     // Find the ticket
     const ticket = await Ticket.findByPk(ticketId);
@@ -8027,8 +8027,13 @@ const managerAttendMajor = async (req, res) => {
       return res.status(403).json({ message: "Ticket is not assigned to you" });
     }
 
-    if (ticket.complaint_type !== "Major") {
-      return res.status(400).json({ message: "This action is only for Major complaints" });
+    // Allow: Minor Complaints, Unrated (N/A) Complaints, Suggestion, or Compliment
+    // Managers close Minor complaints or unrated complaints, NOT Major complaints
+    const isAllowed = (ticket.category === "Complaint" && (ticket.complaint_type === "Minor" || ticket.complaint_type === "N/A" || !ticket.complaint_type)) || 
+                      ticket.category === "Suggestion" || 
+                      ticket.category === "Compliment";
+    if (!isAllowed) {
+      return res.status(400).json({ message: "This action is only for Minor or unrated complaints, suggestion or compliment." });
     }
 
     // Determine the target unit section
@@ -8091,7 +8096,7 @@ const managerAttendMajor = async (req, res) => {
       assigned_to_id: headOfUnit.id,
       assigned_to_role: headOfUnit.role,
       action: "Assigned",
-      reason: `Ticket attended by manager and assigned to Head of Unit of ${targetUnitSection}`,
+      reason: reason || `Ticket attended by manager and assigned to ${targetUnitSection}`,
       created_at: new Date()
     });
 
