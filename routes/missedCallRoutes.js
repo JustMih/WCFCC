@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { MissedCall } = require("../models");
+const { MissedCall, User } = require("../models");
 const { Op } = require("sequelize");
 
 // ✅ POST a new missed call
@@ -69,9 +69,24 @@ router.post("/", async (req, res) => {
     const missedCalls = await MissedCall.findAll({
       where,
       order: [["time", "DESC"]],
+      include: [
+        {
+          model: User,
+          as: "agent",
+          attributes: ["full_name", "extension"],
+          required: false,
+        },
+      ],
     });
 
-    res.json(missedCalls);
+    const payload = missedCalls.map((mc) => {
+      const row = mc.toJSON();
+      row.agent_name = row.agent ? row.agent.full_name : null;
+      delete row.agent;
+      return row;
+    });
+
+    res.json(payload);
   } catch (err) {
     console.error("❌ Error fetching missed calls:", err);
     res.status(500).json({ error: "Internal server error" });

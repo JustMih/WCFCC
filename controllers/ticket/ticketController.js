@@ -16,6 +16,7 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const TicketUpdate = require("../../models/TicketUpdate");
+const TicketClarification = require("../../models/TicketClarification");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 const workflowService = require("../../services/workflowCommunicationService");
 
@@ -4994,6 +4995,26 @@ const getTicketAssignments = async (req, res) => {
   }
 };
 
+// Get ticket clarifications
+const getTicketClarifications = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    const clarifications = await TicketClarification.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'ASC']]
+    });
+    
+    res.json(clarifications);
+  } catch (error) {
+    console.error("Error in getTicketClarifications:", error);
+    res.status(500).json({
+      message: "Failed to fetch ticket clarifications",
+      error: error.message,
+    });
+  }
+};
+
 // Get all users involved in a ticket (for @ mentions)
 const getTicketMentionUsers = async (req, res) => {
   try {
@@ -5514,13 +5535,17 @@ const getDashboardCounts = async (req, res) => {
     // REVIEWER LOGIC (add as needed)
     if (user.role === "reviewer") {
       // Use the same logic as reviewer dashboard
+      // Count tickets assigned to reviewer including Reversed status as assigned
       const newTicketsCount = await Ticket.count({
         where: {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-          status: { [Op.ne]: "Closed" },
           assigned_to_id: userId,
+          status: { 
+            [Op.in]: ["Open", "Assigned", "Returned", "Reversed", "In Progress", "Escalated"]
+          },
           [Op.and]: [
-            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+            { status: { [Op.ne]: "Forwarded" } }, // Exclude forwarded tickets
+            { status: { [Op.ne]: "Closed" } } // Exclude closed tickets
           ]
         }
       });
@@ -6816,12 +6841,24 @@ const forwardToDirectorGeneral = async (req, res) => {
     }
 
     // Check if this is a major complaint assigned to director/head-of-unit OR a reversed/recommended ticket assigned to director/head-of-unit
+    // Also allow Suggestion and Complement categories
+    const allowedCategories = ["Complaint", "Suggestion", "Complement"];
+    if (!allowedCategories.includes(ticket.category)) {
+      return res.status(400).json({ 
+        message: `This action is only for Complaint, Suggestion, or Complement tickets. Current category: ${ticket.category}` 
+      });
+    }
+    
     const isMajorComplaint = ticket.category === "Complaint" && 
                             ticket.complaint_type === "Major" && 
                             ticket.assigned_to_id === userId;
     
     const isReversedTicket = ticket.status === "Reversed" && 
                             ticket.assigned_to_id === userId;
+    
+    // For Suggestion and Complement, allow if assigned to user
+    const isSuggestionOrComplement = (ticket.category === "Suggestion" || ticket.category === "Complement") &&
+                                     ticket.assigned_to_id === userId;
     
     // Check if Director is forwarding from Manager in Major Complaint Directorate
     const isDirectorateWorkflow = ticket.category === "Complaint" && 
@@ -6831,9 +6868,9 @@ const forwardToDirectorGeneral = async (req, res) => {
                                   ticket.assigned_to_id === userId &&
                                   (ticket.status === "Attended and Recommended" || ticket.status === "Reversed");
     
-    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow) {
+    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow && !isSuggestionOrComplement) {
       return res.status(400).json({ 
-        message: "This ticket is not a major complaint or reversed/recommended ticket assigned to you" 
+        message: "This ticket is not a major complaint, suggestion, complement, or reversed/recommended ticket assigned to you" 
       });
     }
 
@@ -6848,31 +6885,42 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Append Additional Clarification to ticket's description ONLY if it's different from current
-    // If not edited (same as current), keep current description as is
+    // Save clarification to TicketClarification table instead of appending to description
+    // This prevents duplicates when ticket is reversed and reversed again
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-      const currentDescription = ticket.description || "";
-      const amendedDescription = String(resolution_details).trim();
+      const clarificationText = String(resolution_details).trim();
       
-      // Only update if Additional Clarification is different from current description
-      // If they are the same, don't update (keep current description)
-      if (amendedDescription !== currentDescription) {
-        // Format with clear separation: Previous description, separator, then Additional Clarification
-        let updatedDescription = "";
-        if (currentDescription) {
-          // Clean layout: Previous description on top, separator line, then Additional Clarification
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Additional Clarification ---\n" + amendedDescription;
-        } else {
-          updatedDescription = amendedDescription;
+      // Check if clarification already exists for this ticket/user/role combination
+      const existingClarification = await TicketClarification.findOne({
+        where: {
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_role: currentUser.role
         }
-        
-        await ticket.update({
-          description: updatedDescription
+      });
+      
+      if (existingClarification) {
+        // Update existing clarification
+        await existingClarification.update({
+          clarification_text: clarificationText,
+          edited_by_name: currentUser.full_name || currentUser.username || 'Unknown',
+          edited_by_email: currentUser.email || null
+        });
+      } else {
+        // Create new clarification
+        await TicketClarification.create({
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_name: currentUser.full_name || currentUser.username || 'Unknown',
+          edited_by_role: currentUser.role,
+          edited_by_email: currentUser.email || null,
+          clarification_text: clarificationText
         });
       }
-      // If Additional Clarification is same as current, do nothing (keep current description)
+      
+      // Don't update ticket description - clarifications will be shown separately in modal
+      // Description remains as original, clarifications are stored in TicketClarification table
     }
-    // If resolution_details is not provided or empty, do nothing (keep current description)
 
     // Assign to Director General using normal assignment process (simple, like normal assignment)
     await Ticket.update(
@@ -8477,7 +8525,7 @@ const managerSendToDirector = async (req, res) => {
     // Check if this is a Complaint (Major or Minor)
     // Normalize complaint_type for case-insensitive comparison
     const complaintType = ticket.complaint_type ? ticket.complaint_type.trim().toLowerCase() : "";
-    const isComplaint = ticket.category === "Complaint";
+    const isComplaint = ["Complaint", "Suggestion", "Complement"].includes(ticket.category);
     const isMajorOrMinor = complaintType === "major" || complaintType === "minor";
     
     console.log("DEBUG managerSendToDirector:", {
@@ -8489,14 +8537,18 @@ const managerSendToDirector = async (req, res) => {
       isMajorOrMinor
     });
 
-    // Allow any Complaint (Major or Minor) - no directorate requirement
-    if (!isComplaint) {
+    // Allow Complaint, Suggestion, or Complement
+    // For Complaint, must be Major or Minor
+    // For Suggestion and Complement, no complaint_type required
+    const allowedCategories = ["Complaint", "Suggestion", "Complement"];
+    if (!allowedCategories.includes(ticket.category)) {
       return res.status(400).json({ 
-        message: `This action is only for Complaint tickets. Current category: ${ticket.category}` 
+        message: `This action is only for Complaint, Suggestion, or Complement tickets. Current category: ${ticket.category}` 
       });
     }
     
-    if (!isMajorOrMinor) {
+    // Only check complaint_type for Complaint category
+    if (ticket.category === "Complaint" && !isMajorOrMinor) {
       return res.status(400).json({ 
         message: `This action is only for Major or Minor complaints. Current type: ${ticket.complaint_type || 'N/A'}` 
       });
@@ -8580,26 +8632,41 @@ const managerSendToDirector = async (req, res) => {
       });
     }
 
-    // Update ticket description if resolution_details is provided and different from current
-    // Append Additional Clarification to ticket's description ONLY if it's different from current
+    // Save clarification to TicketClarification table instead of appending to description
+    // This prevents duplicates when ticket is reversed and reversed again
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-      const currentDescription = ticket.description || "";
-      const amendedDescription = String(resolution_details).trim();
+      const clarificationText = String(resolution_details).trim();
       
-      // Only update if Additional Clarification is different from current description
-      if (amendedDescription !== currentDescription) {
-        // Format: Previous description on top, separator line, then Additional Clarification
-        let updatedDescription = "";
-        if (currentDescription) {
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Additional Clarification ---\n" + amendedDescription;
-        } else {
-          updatedDescription = amendedDescription;
+      // Check if clarification already exists for this ticket/user/role combination
+      const existingClarification = await TicketClarification.findOne({
+        where: {
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_role: manager.role
         }
-        
-        await ticket.update({
-          description: updatedDescription
+      });
+      
+      if (existingClarification) {
+        // Update existing clarification
+        await existingClarification.update({
+          clarification_text: clarificationText,
+          edited_by_name: manager.full_name || manager.username || 'Unknown',
+          edited_by_email: manager.email || null
+        });
+      } else {
+        // Create new clarification
+        await TicketClarification.create({
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_name: manager.full_name || manager.username || 'Unknown',
+          edited_by_role: manager.role,
+          edited_by_email: manager.email || null,
+          clarification_text: clarificationText
         });
       }
+      
+      // Don't update ticket description - clarifications will be shown separately in modal
+      // Description remains as original, clarifications are stored in TicketClarification table
     }
 
     // Update ticket to assign to Director
@@ -8826,5 +8893,6 @@ module.exports = {
   escalateAndUpdateTicketOnSlaBreach,
   updateReversedTicketDetails,
   findSupervisorForSection,
-  getWorkflowTickets
+  getWorkflowTickets,
+  getTicketClarifications
 };
