@@ -14,7 +14,7 @@ require("dotenv").config();
  * Uses DAILY_LOGOUT_TIME env (e.g. "14:00" or "14:00:00"); TZ env controls timezone.
  */
 function getSecondsUntilNextDailyLogout() {
-  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();
+  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();  
   const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
   const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
   const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
