@@ -112,8 +112,8 @@ const getTicketSummary = async (req, res) => {
       AND status NOT IN ('Closed', 'Resolved')
       AND (
         aging_days > 10
-        OR (category = 'Inquiry' AND aging_days > 3)
-        OR (category = 'Complaint' AND complaint_type = 'Minor' AND aging_days > 7)
+        OR (category = 'Inquiry' AND aging_days > 5)
+        OR (category = 'Complaint' AND complaint_type = 'Minor' AND aging_days > 10)
         OR (category = 'Complaint' AND complaint_type = 'Major' AND aging_days > 15)
       )
     `;
