@@ -15,8 +15,8 @@ const externalCorsOptions = {
         'http://127.0.0.1:5070',
         'http://localhost:8005',
         // 'http://10.52.0.19:5070',
-        'http://192.168.21.70:5070', 'https://demoportal.wcf.go.tz',
-        'https://portal.wcf.go.tz', 'https://essp.wcf.go.tz', 'https://192.168.21.70',
+        'http://192.168.21.69:5070', 'https://demoportal.wcf.go.tz',
+        'https://portal.wcf.go.tz', 'https://essp.wcf.go.tz', 'https://192.168.21.69',
       ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
