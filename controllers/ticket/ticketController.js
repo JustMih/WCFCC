@@ -346,8 +346,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [previousAssignee.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        to: previousAssignee.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -379,8 +378,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [nextUser.email, "grace.tarimo@wcf.go.tz"],
-        to: `grace.tarimo@wcf.go.tz`,
+        to: nextUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -1510,8 +1508,23 @@ const createTicket = async (req, res) => {
       isValidTzPhone(smsRecipient)
     ) {
       // Ensure requesterFullName is never empty
-      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
-      const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Mteja";
+      const ticketId = newTicket.ticket_id;
+      
+      // Generate SMS message based on category
+      let smsMessage = "";
+      if (category === "Inquiry") {
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea ombi lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      } else if (category === "Complaint") {
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea lalamiko lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      } else if (category === "Suggestion") {
+        smsMessage = `Mpendwa ${finalName}, WCF inashukuru kwa maoni mazuri uliyotoa, tunaahidi kuendelea kuboresha huduma zetu.`;
+      } else if (category === "Compliment") {
+        smsMessage = `Mpendwa ${finalName}, WCF inashukuru kwa pongezi ulizotoa, Tunaahidi kuendelea kutoa huduma bora na endelea kufurahia huduma za WCF`;
+      } else {
+        // Fallback for other categories - use Inquiry format
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea ombi lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      }
       
       console.log(`🔍 Name for SMS (creation) ${newTicket.ticket_id}:`, {
         requester_type: requester,
@@ -1519,7 +1532,9 @@ const createTicket = async (req, res) => {
         finalName: finalName,
         representative_name: representative_name,
         firstName: firstName,
-        lastName: lastName
+        lastName: lastName,
+        category: category,
+        smsMessage: smsMessage
       });
       
       // Send SMS asynchronously to avoid blocking the response
@@ -1552,12 +1567,6 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       // Send emails in background to avoid blocking the assignment
       sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
-      sendEmailNonBlocking({
-        to: "grace.tarimo@wcf.go.tz",
-        subject: emailSubject,
-        htmlBody: emailHtmlBody,
-        attachments: attachments,
-      });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
     if (!shouldClose) {
@@ -1599,7 +1608,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
           attachments: attachments,
@@ -1686,7 +1695,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with creatorUser.email in production
+          to: creatorUser.email,
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
           attachments: attachments,
@@ -1737,8 +1746,7 @@ const createTicket = async (req, res) => {
         `;
         const attachments = getTicketAttachments(newTicket);
         sendEmail({
-          // to: [headOfUnit.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: headOfUnit.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -1837,7 +1845,17 @@ const createTicket = async (req, res) => {
               finalName = trimmedRepName || "Customer";
             }
             
-            const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.`;
+            // Generate SMS message based on category for closure
+            let smsMessage = "";
+            const ticketCategory = newTicket.category || category;
+            if (ticketCategory === "Inquiry") {
+              smsMessage = `Mpendwa Mteja, ombi lako nambari ${newTicket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+            } else if (ticketCategory === "Complaint") {
+              smsMessage = `Mpendwa Mteja, lalamiko lako nambari ${newTicket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo wasiliana nasi kwa simu nambari 0800110028/29.`;
+            } else {
+              // For Suggestion and Compliment, use generic closure message
+              smsMessage = `Mpendwa Mteja, tiketi yako nambari ${newTicket.ticket_id} imefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+            }
             
             console.log(`🔍 Name for SMS (closed at creation) ${newTicket.ticket_id}:`, {
               requester_type: ticketRequester,
@@ -1894,8 +1912,7 @@ const createTicket = async (req, res) => {
           const attachments = getTicketAttachments(newTicket);
           
           sendEmail({
-            // to: creatorUser.email,
-            to: "grace.tarimo@wcf.go.tz",
+            to: creatorUser.email,
             subject: emailSubject,
             htmlBody: htmlBody,
             attachments: attachments,
@@ -1936,7 +1953,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+              to: supervisor.email,
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1981,7 +1998,7 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       
       sendEmail({
-        to: "grace.tarimo@wcf.go.tz",
+        to: assignedUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -2028,8 +2045,7 @@ const createTicket = async (req, res) => {
         const attachments = getTicketAttachments(newTicket);
         
         sendEmail({
-          // to: [closingAgent.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: closingAgent.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -3715,8 +3731,7 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          // to: [user.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: user.email,
           subject,
           htmlBody,
           attachments: attachments,
@@ -3947,7 +3962,7 @@ const closeTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
@@ -4053,14 +4068,21 @@ const closeTicket = async (req, res) => {
         
         // Only send SMS if phone is valid (same condition as create ticket)
         if (isValidTzPhone(smsRecipient)) {
-          // Truncate resolution details if too long for SMS (SMS limit is usually 160 characters)
-          const resolutionText = resolution_details ? 
-            (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
-            '';
-          const categoryText = ticket.category ? ` (${ticket.category})` : '';
           // Ensure requesterFullName is never empty
-          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
-          const smsMessage = `Dear ${finalName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved.`;
+          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Mteja";
+          
+          // Generate SMS message based on category for closure
+          let smsMessage = "";
+          const ticketCategory = ticket.category || "Inquiry";
+          
+          if (ticketCategory === "Inquiry") {
+            smsMessage = `Mpendwa Mteja, ombi lako nambari ${ticket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+          } else if (ticketCategory === "Complaint") {
+            smsMessage = `Mpendwa Mteja, lalamiko lako nambari ${ticket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo wasiliana nasi kwa simu nambari 0800110028/29.`;
+          } else {
+            // For Suggestion and Compliment, use generic closure message
+            smsMessage = `Mpendwa Mteja, tiketi yako nambari ${ticket.ticket_id} imefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+          }
           
           // Send SMS asynchronously to avoid blocking the response
           sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -4106,8 +4128,7 @@ const closeTicket = async (req, res) => {
         const attachments = getTicketAttachments(ticket);
         
         sendEmail({
-          // to: ticket.creator.email,
-          to: "grace.tarimo@wcf.go.tz",
+          to: ticket.creator.email,
           subject: emailSubject,
           htmlBody: htmlBody,
           attachments: attachments,
@@ -4326,8 +4347,7 @@ const closeReviewerTicket = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       sendEmail({
-        // to: [ticket.creator.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        to: ticket.creator.email,
         subject: emailSubject,
         htmlBody: htmlBody,
         attachments: attachments,
@@ -4523,7 +4543,7 @@ const assignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking assignment
-        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: assignedTo.email, subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5730,8 +5750,7 @@ const reassignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking reassignment
-        // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
-        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5912,8 +5931,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
-        to:`grace.tarimo@wcf.go.tz`,
-        // to: prevUser.email,
+        to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments
@@ -6997,7 +7015,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: directorGeneral.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody,
             attachments: attachments
@@ -7551,8 +7569,7 @@ const reverseComplaint = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       // Send email in background to avoid blocking
-      // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
-      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7686,7 +7703,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7810,7 +7827,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -8131,8 +8148,7 @@ const managerAttendMajor = async (req, res) => {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: headOfUnit.email,
-        to: ['grace.tarimo@wcf.go.tz'],
+        to: headOfUnit.email,
         subject: emailSubject,
         htmlBody: emailBody,
         attachments: attachments
@@ -8760,7 +8776,7 @@ const managerSendToDirector = async (req, res) => {
       // Get attachments for email
       const attachments = getTicketAttachments(ticket);
       
-      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: director.email, subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({

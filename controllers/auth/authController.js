@@ -93,26 +93,43 @@ const login = async (req, res) => {
         return res.status(400).json({ message: "Invalid password" });
       }
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      // If username is an email, authenticate using DB only
-      user = await User.findOne({
-        where: { email: username },
-      });
+      // If username is an email, extract username and authenticate using LDAP (AD password)
+      const emailUsername = username.split('@')[0];
+      console.log(`🔍 Email login detected. Extracted username: ${emailUsername}`);
+      
+      try {
+        // Authenticate with Active Directory using extracted username and password
+        await authenticateActiveDirectory(emailUsername, password);
+        console.log(`✅ LDAP authentication successful for email: ${username}`);
+        
+        // LDAP success, now check or create user in DB
+        user = await User.findOne({
+          where: { email: username },
+        });
 
-      if (!user) {
-        return res
-          .status(400)
-          .json({ message: "Authentication failed. User not found." });
-      }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res
-          .status(400)
-          .json({ message: "Authentication failed. Invalid password." });
-      }
-      if (user.isActive === false) {
-        return res.status(400).json({
-          message:
-            "Your account is inactive. Please wait for the super admin to activate it.",
+        if (!user) {
+          // If user doesn't exist, create a new user with inactive status
+          user = await User.create({
+            full_name: emailUsername,
+            email: username,
+            password: "wcf12345", // Placeholder password (not used for AD auth)
+            extension: null,
+            role: "agent",
+            isActive: false,
+          });
+          console.log(`User ${emailUsername} created with inactive status.`);
+        }
+
+        if (user.isActive === false) {
+          return res.status(400).json({
+            message:
+              "Your account is inactive. Please wait for the super admin to activate it.",
+          });
+        }
+      } catch (ldapError) {
+        console.error("LDAP authentication failed for email login:", ldapError.message);
+        return res.status(400).json({ 
+          message: "LDAP authentication failed. Please check your Active Directory password." 
         });
       }
     } else {
