@@ -1508,8 +1508,23 @@ const createTicket = async (req, res) => {
       isValidTzPhone(smsRecipient)
     ) {
       // Ensure requesterFullName is never empty
-      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
-      const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Mteja";
+      const ticketId = newTicket.ticket_id;
+      
+      // Generate SMS message based on category
+      let smsMessage = "";
+      if (category === "Inquiry") {
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea ombi lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      } else if (category === "Complaint") {
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea lalamiko lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      } else if (category === "Suggestion") {
+        smsMessage = `Mpendwa ${finalName}, WCF inashukuru kwa maoni mazuri uliyotoa, tunaahidi kuendelea kuboresha huduma zetu.`;
+      } else if (category === "Compliment") {
+        smsMessage = `Mpendwa ${finalName}, WCF inashukuru kwa pongezi ulizotoa, Tunaahidi kuendelea kutoa huduma bora na endelea kufurahia huduma za WCF`;
+      } else {
+        // Fallback for other categories - use Inquiry format
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea ombi lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      }
       
       console.log(`🔍 Name for SMS (creation) ${newTicket.ticket_id}:`, {
         requester_type: requester,
@@ -1517,7 +1532,9 @@ const createTicket = async (req, res) => {
         finalName: finalName,
         representative_name: representative_name,
         firstName: firstName,
-        lastName: lastName
+        lastName: lastName,
+        category: category,
+        smsMessage: smsMessage
       });
       
       // Send SMS asynchronously to avoid blocking the response
@@ -1828,7 +1845,17 @@ const createTicket = async (req, res) => {
               finalName = trimmedRepName || "Customer";
             }
             
-            const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.`;
+            // Generate SMS message based on category for closure
+            let smsMessage = "";
+            const ticketCategory = newTicket.category || category;
+            if (ticketCategory === "Inquiry") {
+              smsMessage = `Mpendwa Mteja, ombi lako nambari ${newTicket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+            } else if (ticketCategory === "Complaint") {
+              smsMessage = `Mpendwa Mteja, lalamiko lako nambari ${newTicket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo wasiliana nasi kwa simu nambari 0800110028/29.`;
+            } else {
+              // For Suggestion and Compliment, use generic closure message
+              smsMessage = `Mpendwa Mteja, tiketi yako nambari ${newTicket.ticket_id} imefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+            }
             
             console.log(`🔍 Name for SMS (closed at creation) ${newTicket.ticket_id}:`, {
               requester_type: ticketRequester,
@@ -4041,14 +4068,21 @@ const closeTicket = async (req, res) => {
         
         // Only send SMS if phone is valid (same condition as create ticket)
         if (isValidTzPhone(smsRecipient)) {
-          // Truncate resolution details if too long for SMS (SMS limit is usually 160 characters)
-          const resolutionText = resolution_details ? 
-            (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
-            '';
-          const categoryText = ticket.category ? ` (${ticket.category})` : '';
           // Ensure requesterFullName is never empty
-          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
-          const smsMessage = `Dear ${finalName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved.`;
+          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Mteja";
+          
+          // Generate SMS message based on category for closure
+          let smsMessage = "";
+          const ticketCategory = ticket.category || "Inquiry";
+          
+          if (ticketCategory === "Inquiry") {
+            smsMessage = `Mpendwa Mteja, ombi lako nambari ${ticket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+          } else if (ticketCategory === "Complaint") {
+            smsMessage = `Mpendwa Mteja, lalamiko lako nambari ${ticket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo wasiliana nasi kwa simu nambari 0800110028/29.`;
+          } else {
+            // For Suggestion and Compliment, use generic closure message
+            smsMessage = `Mpendwa Mteja, tiketi yako nambari ${ticket.ticket_id} imefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+          }
           
           // Send SMS asynchronously to avoid blocking the response
           sendQuickSms({ message: smsMessage, recipient: smsRecipient })
