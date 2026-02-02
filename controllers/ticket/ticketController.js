@@ -346,8 +346,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [previousAssignee.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        to: previousAssignee.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -379,8 +378,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [nextUser.email, "grace.tarimo@wcf.go.tz"],
-        to: `grace.tarimo@wcf.go.tz`,
+        to: nextUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -1552,12 +1550,6 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       // Send emails in background to avoid blocking the assignment
       sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
-      sendEmailNonBlocking({
-        to: "grace.tarimo@wcf.go.tz",
-        subject: emailSubject,
-        htmlBody: emailHtmlBody,
-        attachments: attachments,
-      });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
     if (!shouldClose) {
@@ -1599,7 +1591,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
           attachments: attachments,
@@ -1686,7 +1678,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with creatorUser.email in production
+          to: creatorUser.email,
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
           attachments: attachments,
@@ -1737,8 +1729,7 @@ const createTicket = async (req, res) => {
         `;
         const attachments = getTicketAttachments(newTicket);
         sendEmail({
-          // to: [headOfUnit.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: headOfUnit.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -1894,8 +1885,7 @@ const createTicket = async (req, res) => {
           const attachments = getTicketAttachments(newTicket);
           
           sendEmail({
-            // to: creatorUser.email,
-            to: "grace.tarimo@wcf.go.tz",
+            to: creatorUser.email,
             subject: emailSubject,
             htmlBody: htmlBody,
             attachments: attachments,
@@ -1936,7 +1926,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+              to: supervisor.email,
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1981,7 +1971,7 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       
       sendEmail({
-        to: "grace.tarimo@wcf.go.tz",
+        to: assignedUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -2028,8 +2018,7 @@ const createTicket = async (req, res) => {
         const attachments = getTicketAttachments(newTicket);
         
         sendEmail({
-          // to: [closingAgent.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: closingAgent.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -3715,8 +3704,7 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          // to: [user.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: user.email,
           subject,
           htmlBody,
           attachments: attachments,
@@ -3947,7 +3935,7 @@ const closeTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
@@ -4106,8 +4094,7 @@ const closeTicket = async (req, res) => {
         const attachments = getTicketAttachments(ticket);
         
         sendEmail({
-          // to: ticket.creator.email,
-          to: "grace.tarimo@wcf.go.tz",
+          to: ticket.creator.email,
           subject: emailSubject,
           htmlBody: htmlBody,
           attachments: attachments,
@@ -4326,8 +4313,7 @@ const closeReviewerTicket = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       sendEmail({
-        // to: [ticket.creator.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        to: ticket.creator.email,
         subject: emailSubject,
         htmlBody: htmlBody,
         attachments: attachments,
@@ -4523,7 +4509,7 @@ const assignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking assignment
-        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: assignedTo.email, subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5730,8 +5716,7 @@ const reassignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking reassignment
-        // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
-        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5912,8 +5897,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
-        to:`grace.tarimo@wcf.go.tz`,
-        // to: prevUser.email,
+        to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments
@@ -6997,7 +6981,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: directorGeneral.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody,
             attachments: attachments
@@ -7551,8 +7535,7 @@ const reverseComplaint = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       // Send email in background to avoid blocking
-      // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
-      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7686,7 +7669,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7810,7 +7793,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -8131,8 +8114,7 @@ const managerAttendMajor = async (req, res) => {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: headOfUnit.email,
-        to: ['grace.tarimo@wcf.go.tz'],
+        to: headOfUnit.email,
         subject: emailSubject,
         htmlBody: emailBody,
         attachments: attachments
@@ -8760,7 +8742,7 @@ const managerSendToDirector = async (req, res) => {
       // Get attachments for email
       const attachments = getTicketAttachments(ticket);
       
-      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: director.email, subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({

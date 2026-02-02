@@ -1629,7 +1629,7 @@ const closeReviewerTicket = async (req, res) => {
       `;
       const emailBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       sendEmail({
-        to:'grace.tarimo@wcf.go.tz',
+        to: creator.email,
         subject: emailSubject,
         htmlBody: emailBody
       }).catch(emailError => {
