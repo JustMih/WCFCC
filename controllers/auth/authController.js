@@ -447,8 +447,26 @@ const loginRedirect = async (req, res) => {
       fullBody: req.body,
     });
 
+    // Extract username from logged-in user
+    // Use username if available, otherwise extract from email (format: username@wcf.go.tz)
+    let username = user.username;
+    if (!username && user.email) {
+      username = user.email.split('@')[0];
+    }
+    if (!username) {
+      return res.status(400).json({ 
+        message: "User username not found. Cannot proceed with MAC login." 
+      });
+    }
+
+    console.log("🔍 Using logged-in user credentials:", {
+      userId: user.id,
+      username: username,
+      email: user.email
+    });
+
     const auth_data = {
-      username: "mmsaki-admin",
+      username: username,
       notification_report_id: idRaw || "",
       employer_id:
         employerRaw !== undefined && employerRaw !== null ? employerRaw : "",
@@ -461,7 +479,7 @@ const loginRedirect = async (req, res) => {
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
     // 4. Build MAC App URL
-    const macAppUrl = process.env.MAC_APP_URL || "https://demomac.wcf.go.tz/";
+    const macAppUrl = process.env.MAC_APP_URL || "https://mac.wcf.go.tz/";
     const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
       encryptedToken
     )}`;
