@@ -68,6 +68,7 @@ const baseAudioPath =
   process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
 
 require("./cron/escalationJob");
+require("./cron/dailyLogoutJob");
 
 require("./amiServer"); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
