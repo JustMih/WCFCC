@@ -108,6 +108,41 @@ At 2 PM (backend cron, agents only)
 
 ---
 
+## Troubleshooting (agent not logged out at DAILY_LOGOUT_TIME)
+
+1. **24h format**  
+   `DAILY_LOGOUT_TIME` is in **24-hour server local time**.  
+   - **02:24** = 2:24 **AM**  
+   - **14:24** = 2:24 **PM**  
+   If you want logout at 2:24 PM, use `DAILY_LOGOUT_TIME=14:24`, not `02:24`.
+
+2. **Restart backend**  
+   After changing `.env`, restart the WCFCC server so it reads the new `DAILY_LOGOUT_TIME`.
+
+3. **Log in as agent**  
+   Only users with role **agent** get the DAILY_LOGOUT_TIME expiry. Supervisors/admins get 24h. Role check is case-insensitive.
+
+4. **Backend logs (agent login)**  
+   On agent login the server logs:  
+   `[Agent login] DAILY_LOGOUT_TIME: ...`  
+   `[Agent login] Token expires at (server local): ...`  
+   `[Agent login] expiresAt (ms): ... | in X minutes`  
+   Confirm the “Token expires at” time is when you expect (same timezone as your clock).
+
+5. **Frontend logs**  
+   After login, open DevTools → Console. You should see:  
+   `[Login] role: agent | tokenExpiration: <date string> | ms: <number>`  
+   When the session expires you should see:  
+   `[Session] Token expired at ... – redirecting to login.`
+
+6. **Check localStorage**  
+   DevTools → Application → Local Storage. After login you should have `tokenExpiration` (a number in ms). When the current time (in ms) is past that value, the next frontend check (every 5 s) will redirect to login.
+
+7. **Frontend check interval**  
+   The expiry check runs every **5 seconds** and when you switch back to the tab. So logout happens within about 5 seconds after the expiry time.
+
+---
+
 ## Changing the logout time
 
 - **Backend:** Set `DAILY_LOGOUT_TIME=HH:MM` in `WCFCC/.env` (e.g. `15:00` for 3 PM).  

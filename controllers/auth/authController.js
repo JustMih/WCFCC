@@ -14,8 +14,8 @@ require("dotenv").config();
  * Uses DAILY_LOGOUT_TIME env (e.g. "14:00" or "14:00:00"); TZ env controls timezone.
  */
 function getSecondsUntilNextDailyLogout() {
-  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:10";
-  const parts = timeStr.trim().split(":").map((p) => parseInt(p, 10) || 0);
+  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();
+  const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
   const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
   const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
   const second = Math.min(59, Math.max(0, parts[2] ?? 0));
@@ -35,8 +35,8 @@ function getSecondsUntilNextDailyLogout() {
  * Returns the Date (ms) of the next daily logout time for the login response (expiresAt).
  */
 function getNextDailyLogoutDate() {
-  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:10";
-  const parts = timeStr.trim().split(":").map((p) => parseInt(p, 10) || 0);
+  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();
+  const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
   const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
   const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
   const second = Math.min(59, Math.max(0, parts[2] ?? 0));
@@ -208,7 +208,8 @@ const login = async (req, res) => {
     // Step 5: Generate JWT token
     // Agents: expire at DAILY_LOGOUT_TIME (e.g. 2 PM) – forced logout at that time.
     // Other roles (supervisor, admin, etc.): expire after 24h – forced logout after 24h.
-    const isAgent = user.role === "agent";
+    const roleLower = (user.role && String(user.role).toLowerCase()) || "";
+    const isAgent = roleLower === "agent";
     const TWENTY_FOUR_HOURS_SEC = 24 * 60 * 60;
     const expiresInSeconds = isAgent
       ? getSecondsUntilNextDailyLogout()
@@ -216,6 +217,12 @@ const login = async (req, res) => {
     const expiresAt = isAgent
       ? getNextDailyLogoutDate()
       : new Date(Date.now() + TWENTY_FOUR_HOURS_SEC * 1000);
+
+    if (isAgent) {
+      console.log("[Agent login] DAILY_LOGOUT_TIME:", process.env.DAILY_LOGOUT_TIME);
+      console.log("[Agent login] Token expires at (server local):", expiresAt.toLocaleString());
+      console.log("[Agent login] expiresAt (ms):", expiresAt.getTime(), "| in", Math.round(expiresInSeconds / 60), "minutes");
+    }
 
     const token = jwt.sign(
       { userId: user.id, role: user.role },
