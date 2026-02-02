@@ -10,15 +10,15 @@ const { Op } = require("sequelize");
 require("dotenv").config();
 
 /**
- * Returns seconds until the next daily logout time (default 8:00 PM server local time).
- * Uses DAILY_LOGOUT_TIME env (e.g. "20:00" or "20:00:00"); TZ env controls timezone.
+ * Returns seconds until the next daily logout time (default 2:00 PM / 14:00 server local time).
+ * Uses DAILY_LOGOUT_TIME env (e.g. "14:00" or "14:00:00"); TZ env controls timezone.
  */
 function getSecondsUntilNextDailyLogout() {
-  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:00:00";
+  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:10";
   const parts = timeStr.trim().split(":").map((p) => parseInt(p, 10) || 0);
-  const hour = Math.min(23, Math.max(0, parts[0] || 20));
-  const minute = Math.min(59, Math.max(0, parts[1] || 0));
-  const second = Math.min(59, Math.max(0, parts[2] || 0));
+  const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
+  const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
+  const second = Math.min(59, Math.max(0, parts[2] ?? 0));
 
   const now = new Date();
   const target = new Date(now);
@@ -35,11 +35,11 @@ function getSecondsUntilNextDailyLogout() {
  * Returns the Date (ms) of the next daily logout time for the login response (expiresAt).
  */
 function getNextDailyLogoutDate() {
-  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:00:00";
+  const timeStr = process.env.DAILY_LOGOUT_TIME || "08:10";
   const parts = timeStr.trim().split(":").map((p) => parseInt(p, 10) || 0);
-  const hour = Math.min(23, Math.max(0, parts[0] || 20));
-  const minute = Math.min(59, Math.max(0, parts[1] || 0));
-  const second = Math.min(59, Math.max(0, parts[2] || 0));
+  const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
+  const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
+  const second = Math.min(59, Math.max(0, parts[2] ?? 0));
 
   const now = new Date();
   const target = new Date(now);
@@ -205,9 +205,17 @@ const login = async (req, res) => {
       });
     }
 
-    // Step 5: Generate JWT token (expires at next daily logout time, e.g. 8:00 PM)
-    const expiresInSeconds = getSecondsUntilNextDailyLogout();
-    const expiresAt = getNextDailyLogoutDate();
+    // Step 5: Generate JWT token
+    // Agents: expire at DAILY_LOGOUT_TIME (e.g. 2 PM) – forced logout at that time.
+    // Other roles (supervisor, admin, etc.): expire after 24h – forced logout after 24h.
+    const isAgent = user.role === "agent";
+    const TWENTY_FOUR_HOURS_SEC = 24 * 60 * 60;
+    const expiresInSeconds = isAgent
+      ? getSecondsUntilNextDailyLogout()
+      : TWENTY_FOUR_HOURS_SEC;
+    const expiresAt = isAgent
+      ? getNextDailyLogoutDate()
+      : new Date(Date.now() + TWENTY_FOUR_HOURS_SEC * 1000);
 
     const token = jwt.sign(
       { userId: user.id, role: user.role },
@@ -233,7 +241,7 @@ const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
-      expiresAt: expiresAt.getTime(), // ms since epoch for frontend tokenExpiration
+      expiresAt: expiresAt.getTime(), // ms; agents = next DAILY_LOGOUT_TIME, others = 24h
       user: {
         full_name: user.full_name,
         isActive: user.isActive,

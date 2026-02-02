@@ -1,15 +1,15 @@
 const cron = require("node-cron");
 const { User, AgentStatus } = require("../models");
 
-// Run every day at 8:00 PM (20:00) server local time
-cron.schedule("0 20 * * *", async () => {
-  console.log("Running daily logout job (8 PM)...");
+// Run every day at 2:00 PM (14:00) server local time – must match DAILY_LOGOUT_TIME in .env
+cron.schedule("0 14 * * *", async () => {
+  console.log("Running daily logout job (2 PM) – agents only...");
   try {
     const [userCount] = await User.update(
       { status: "offline" },
-      { where: {} }
+      { where: { role: "agent" } }
     );
-    console.log(`Daily logout: set ${userCount} user(s) to offline.`);
+    console.log(`Daily logout: set ${userCount} agent user(s) to offline.`);
 
     const now = new Date();
     const [agentStatusCount] = await AgentStatus.update(
