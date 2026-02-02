@@ -10,7 +10,7 @@ const fs = require('fs');
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = "https://192.168.21.70/";
+  const portalUrl = "https://192.168.21.69/";
   
   return `<!doctype html>
     <html>
