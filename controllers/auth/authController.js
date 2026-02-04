@@ -9,6 +9,48 @@ const { Op } = require("sequelize");
 // const { getEffectiveRoles } = require("../../utils/roleMapper");
 require("dotenv").config();
 
+/**
+ * Returns seconds until the next daily logout time (default 2:00 PM / 14:00 server local time).
+ * Uses DAILY_LOGOUT_TIME env (e.g. "14:00" or "14:00:00"); TZ env controls timezone.
+ */
+function getSecondsUntilNextDailyLogout() {
+  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();  
+  const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
+  const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
+  const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
+  const second = Math.min(59, Math.max(0, parts[2] ?? 0));
+
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, minute, second, 0);
+
+  if (now >= target) {
+    target.setDate(target.getDate() + 1);
+  }
+  const seconds = Math.max(1, Math.floor((target - now) / 1000));
+  return seconds;
+}
+
+/**
+ * Returns the Date (ms) of the next daily logout time for the login response (expiresAt).
+ */
+function getNextDailyLogoutDate() {
+  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();
+  const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
+  const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
+  const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
+  const second = Math.min(59, Math.max(0, parts[2] ?? 0));
+
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, minute, second, 0);
+
+  if (now >= target) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target;
+}
+
 const registerSuperAdmin = async () => {
   try {
     const existingAdmin = await User.findOne({
@@ -93,26 +135,43 @@ const login = async (req, res) => {
         return res.status(400).json({ message: "Invalid password" });
       }
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      // If username is an email, authenticate using DB only
-      user = await User.findOne({
-        where: { email: username },
-      });
+      // If username is an email, extract username and authenticate using LDAP (AD password)
+      const emailUsername = username.split('@')[0];
+      console.log(`🔍 Email login detected. Extracted username: ${emailUsername}`);
+      
+      try {
+        // Authenticate with Active Directory using extracted username and password
+        await authenticateActiveDirectory(emailUsername, password);
+        console.log(`✅ LDAP authentication successful for email: ${username}`);
+        
+        // LDAP success, now check or create user in DB
+        user = await User.findOne({
+          where: { email: username },
+        });
 
-      if (!user) {
-        return res
-          .status(400)
-          .json({ message: "Authentication failed. User not found." });
-      }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res
-          .status(400)
-          .json({ message: "Authentication failed. Invalid password." });
-      }
-      if (user.isActive === false) {
-        return res.status(400).json({
-          message:
-            "Your account is inactive. Please wait for the super admin to activate it.",
+        if (!user) {
+          // If user doesn't exist, create a new user with inactive status
+          user = await User.create({
+            full_name: emailUsername,
+            email: username,
+            password: "wcf12345", // Placeholder password (not used for AD auth)
+            extension: null,
+            role: "agent",
+            isActive: false,
+          });
+          console.log(`User ${emailUsername} created with inactive status.`);
+        }
+
+        if (user.isActive === false) {
+          return res.status(400).json({
+            message:
+              "Your account is inactive. Please wait for the super admin to activate it.",
+          });
+        }
+      } catch (ldapError) {
+        console.error("LDAP authentication failed for email login:", ldapError.message);
+        return res.status(400).json({ 
+          message: "LDAP authentication failed. Please check your Active Directory password." 
         });
       }
     } else {
@@ -164,10 +223,28 @@ const login = async (req, res) => {
     }
 
     // Step 5: Generate JWT token
+    // Agents: expire at DAILY_LOGOUT_TIME (e.g. 2 PM) – forced logout at that time.
+    // Other roles (supervisor, admin, etc.): expire after 24h – forced logout after 24h.
+    const roleLower = (user.role && String(user.role).toLowerCase()) || "";
+    const isAgent = roleLower === "agent";
+    const TWENTY_FOUR_HOURS_SEC = 24 * 60 * 60;
+    const expiresInSeconds = isAgent
+      ? getSecondsUntilNextDailyLogout()
+      : TWENTY_FOUR_HOURS_SEC;
+    const expiresAt = isAgent
+      ? getNextDailyLogoutDate()
+      : new Date(Date.now() + TWENTY_FOUR_HOURS_SEC * 1000);
+
+    if (isAgent) {
+      console.log("[Agent login] DAILY_LOGOUT_TIME:", process.env.DAILY_LOGOUT_TIME);
+      console.log("[Agent login] Token expires at (server local):", expiresAt.toLocaleString());
+      console.log("[Agent login] expiresAt (ms):", expiresAt.getTime(), "| in", Math.round(expiresInSeconds / 60), "minutes");
+    }
+
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: expiresInSeconds }
     );
 
     // Log agent login in AgentLoginLog
@@ -188,6 +265,7 @@ const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
+      expiresAt: expiresAt.getTime(), // ms; agents = next DAILY_LOGOUT_TIME, others = 24h
       user: {
         full_name: user.full_name,
         isActive: user.isActive,
@@ -447,8 +525,26 @@ const loginRedirect = async (req, res) => {
       fullBody: req.body,
     });
 
+    // Extract username from logged-in user
+    // Use username if available, otherwise extract from email (format: username@wcf.go.tz)
+    let username = user.username;
+    if (!username && user.email) {
+      username = user.email.split('@')[0];
+    }
+    if (!username) {
+      return res.status(400).json({ 
+        message: "User username not found. Cannot proceed with MAC login." 
+      });
+    }
+
+    console.log("🔍 Using logged-in user credentials:", {
+      userId: user.id,
+      username: username,
+      email: user.email
+    });
+
     const auth_data = {
-      username: "mmsaki-admin",
+      username: username,
       notification_report_id: idRaw || "",
       employer_id:
         employerRaw !== undefined && employerRaw !== null ? employerRaw : "",
@@ -461,7 +557,7 @@ const loginRedirect = async (req, res) => {
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
     // 4. Build MAC App URL
-    const macAppUrl = process.env.MAC_APP_URL || "https://demomac.wcf.go.tz/";
+    const macAppUrl = process.env.MAC_APP_URL || "https://mac.wcf.go.tz/";
     const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
       encryptedToken
     )}`;

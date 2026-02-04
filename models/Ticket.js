@@ -67,7 +67,7 @@ const Ticket = sequelize.define(
     },
     sub_section: DataTypes.STRING(100),
     section: DataTypes.STRING(100),
-    channel: { type: DataTypes.STRING(50), allowNull: false },
+    channel: { type: DataTypes.STRING(50), allowNull: true },
     description: { type: DataTypes.TEXT, allowNull: false },
     complaint_type: DataTypes.ENUM('Minor', 'Major'),
     converted_to: DataTypes.STRING(100),
