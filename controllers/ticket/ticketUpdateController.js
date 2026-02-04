@@ -144,13 +144,12 @@ const notifyTaggedUsers = async (ticket, updateText, senderId, senderName, type 
             const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
             
             sendEmailNonBlocking({
-              // to: taggedUser.email,
-              to:'grace.tarimo@wcf.go.tz',
+              to: taggedUser.email,
               subject: subject,
               htmlBody: htmlBody
             });
             
-            console.log(`✅ [Mentions] Email sent to test email: grace.tarimo@wcf.go.tz (original: ${taggedUser.email})`);
+            console.log(`✅ [Mentions] Email sent to: ${taggedUser.email}`);
           } catch (emailError) {
             console.error(`❌ [Mentions] Error sending email to ${taggedUser.email}:`, emailError);
           }

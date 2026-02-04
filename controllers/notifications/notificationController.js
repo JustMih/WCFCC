@@ -90,12 +90,7 @@ const createNotification = async (req, res) => {
       `;
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       // Send email in background to avoid blocking
-      // sendEmailNonBlocking({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
-      sendEmailNonBlocking({
-        to: "grace.tarimo@wcf.go.tz",
-        subject: emailSubject,
-        htmlBody: emailHtmlBody,
-      });
+      sendEmailNonBlocking({ to: recipientUser.email, subject: emailSubject, htmlBody: emailHtmlBody });
     }
 
     return res.status(201).json({

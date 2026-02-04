@@ -716,7 +716,7 @@ const createMessage = async (req, res) => {
         });
 
         console.log(
-          `✅ [Chat Email] Email sending initiated to: ${receiver.email} (will be sent to test email: grace.tarimo@wcf.go.tz)`
+          `✅ [Chat Email] Email sending initiated to: ${receiver.email}`
         );
       } catch (emailError) {
         console.error(

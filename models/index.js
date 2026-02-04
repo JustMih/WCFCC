@@ -59,6 +59,7 @@ const Relation = require("./Relation");
 const Directorate = require("./Directorate");
 const Unit = require("./Unit");
 const Subject = require("./Subject");
+const Channel = require("./Channel");
 
 db.ReportTo = ReportTo;
 db.Designation = Designation;
@@ -69,6 +70,7 @@ db.Relation = Relation;
 db.Directorate = Directorate;
 db.Unit = Unit;
 db.Subject = Subject;
+db.Channel = Channel;
 
 // Note: Associations for Unit, Subject, and Directorate are defined in their respective model files
 // via the associate() function, which is automatically called above (lines 23-27)
