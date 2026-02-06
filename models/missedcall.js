@@ -28,6 +28,13 @@ const MissedCall = sequelize.define("MissedCall", {
   timestamps: true, // adds createdAt and updatedAt
 });
 
-
+MissedCall.associate = function (models) {
+  // agentId on MissedCall matches extension on User
+  MissedCall.belongsTo(models.User, {
+    foreignKey: "agentId",
+    targetKey: "extension",
+    as: "agent",
+  });
+};
 
 module.exports = MissedCall;

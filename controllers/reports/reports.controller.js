@@ -160,119 +160,61 @@ exports.testIVRTable = async (req, res) => {
   }
 };
 
+ 
 exports.getIVRInteractions = async (req, res) => {
   try {
-    console.log("IVR Interactions route hit - Params:", req.params);
-    console.log("IVR Interactions route hit - Query:", req.query);
+    const query = `
+      SELECT
+        m.id,
+        m.dtmf_digit,
+        m.parameter,
+        m.language,
+        m.menu_context,
+        m.createdAt,
+        m.updatedAt,
 
-    const { startDate, endDate } = req.params;
+        a.id   AS action_id,
+        a.name AS action_name,
 
-    // Try to load IVRDTMFLog model from models index
-    let IVRDTMFLogModel;
-    try {
-      const models = require("../../models");
-      IVRDTMFLogModel = models.IVRDTMFLog;
-      if (!IVRDTMFLogModel) {
-        // Fallback: load directly
-        const DataTypes = require("sequelize").DataTypes;
-        IVRDTMFLogModel = require("../../models/IVRDTMFLog")(
-          sequelize,
-          DataTypes
-        );
-      }
-    } catch (modelLoadError) {
-      console.error("Error loading IVRDTMFLog model:", modelLoadError);
-    }
+        v.id        AS voice_id,
+        v.file_path AS voice_file_name
 
-    let ivrLogs = [];
-    const whereClause = {};
+      FROM IVRDTMFMappings m
+      LEFT JOIN IVRActions a
+        ON a.id = m.action_id
+      LEFT JOIN IVRVoices v
+        ON v.id = m.ivr_voice_id
+      ORDER BY m.createdAt DESC
+      LIMIT 1000
+    `;
 
-    // Add date filtering if provided
-    const start = startDate || req.query.startDate;
-    const end = endDate || req.query.endDate;
-
-    if (start && end) {
-      const startDateTime = start.includes(" ") ? start : `${start} 00:00:00`;
-      const endDateTime = end.includes(" ") ? end : `${end} 23:59:59`;
-      whereClause.timestamp = {
-        [Op.between]: [new Date(startDateTime), new Date(endDateTime)],
-      };
-    }
-
-    // Try using the model first
-    if (IVRDTMFLogModel) {
-      try {
-        console.log("Attempting to use IVRDTMFLog model...");
-        ivrLogs = await IVRDTMFLogModel.findAll({
-          where: Object.keys(whereClause).length > 0 ? whereClause : undefined,
-          order: [["timestamp", "DESC"]],
-          limit: 1000,
-          raw: true, // Get plain objects instead of model instances
-        });
-        console.log(`Found ${ivrLogs.length} IVR log records using model`);
-      } catch (modelError) {
-        console.error(
-          "Error using model, falling back to raw query:",
-          modelError
-        );
-        // Fall through to raw query
-      }
-    }
-
-    // Fallback to raw SQL query if model fails or doesn't exist
-    if (!IVRDTMFLogModel || ivrLogs.length === 0) {
-      console.log("Using raw SQL query...");
-      let query = `SELECT * FROM IVR_DTMF_Logs`;
-      const replacements = {};
-
-      if (start && end) {
-        const startDateTime = start.includes(" ") ? start : `${start} 00:00:00`;
-        const endDateTime = end.includes(" ") ? end : `${end} 23:59:59`;
-        query += ` WHERE timestamp BETWEEN :startDate AND :endDate`;
-        replacements.startDate = startDateTime;
-        replacements.endDate = endDateTime;
-      }
-
-      query += ` ORDER BY timestamp DESC LIMIT 1000`;
-
-      console.log("Executing query:", query);
-      console.log("With replacements:", replacements);
-
-      try {
-        ivrLogs = await sequelize.query(query, {
-          replacements,
-          type: sequelize.QueryTypes.SELECT,
-        });
-        console.log(`Found ${ivrLogs.length} IVR log records using raw query`);
-      } catch (queryError) {
-        console.error("Raw query also failed:", queryError);
-        throw queryError;
-      }
-    }
-
-    // Format the response to match expected structure
-    const formattedLogs = ivrLogs.map((log) => {
-      return {
-        id: log.id || log.ID || null,
-        caller_id: log.caller_id || log.caller_ID || "-",
-        digit_pressed: log.digit_pressed || log.digit_Pressed || "-",
-        menu_context: log.menu_context || log.menu_Context || "-",
-        language: log.language || "-",
-        timestamp: log.timestamp || log.Timestamp || null,
-      };
+    const rows = await sequelize.query(query, {
+      type: sequelize.QueryTypes.SELECT,
     });
 
-    console.log(`Returning ${formattedLogs.length} formatted log records`);
-    res.json(formattedLogs);
-  } catch (error) {
-    console.error("Error in getIVRInteractions:", error);
-    console.error("Error stack:", error.stack);
-    res.status(500).json({
-      error: error.message,
-      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
-    });
+    const formatted = rows.map(r => ({
+      id: r.id,
+      dtmf_digit: r.dtmf_digit,
+      parameter: r.parameter,
+      language: r.language,
+      menu_context: r.menu_context,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      action: r.action_id
+        ? { id: r.action_id, name: r.action_name }
+        : null,
+      voice: r.voice_id
+        ? { id: r.voice_id, file_name: r.voice_file_name }
+        : null,
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    console.error("IVR Interactions error:", err);
+    res.status(500).json({ error: err.message });
   }
 };
+
 
 // Serve the audio files
 exports.serveVoiceNote = (req, res) => {

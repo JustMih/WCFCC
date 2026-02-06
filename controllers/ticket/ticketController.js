@@ -16,6 +16,7 @@ const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
 const AssignedOfficer = require("../../models/AssignedOfficer");
 const TicketUpdate = require("../../models/TicketUpdate");
+const TicketClarification = require("../../models/TicketClarification");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 const workflowService = require("../../services/workflowCommunicationService");
 
@@ -345,8 +346,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [previousAssignee.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        to: previousAssignee.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -378,8 +378,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: [nextUser.email, "grace.tarimo@wcf.go.tz"],
-        to: `grace.tarimo@wcf.go.tz`,
+        to: nextUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -1509,8 +1508,23 @@ const createTicket = async (req, res) => {
       isValidTzPhone(smsRecipient)
     ) {
       // Ensure requesterFullName is never empty
-      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
-      const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been created.`;
+      const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Mteja";
+      const ticketId = newTicket.ticket_id;
+      
+      // Generate SMS message based on category
+      let smsMessage = "";
+      if (category === "Inquiry") {
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea ombi lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      } else if (category === "Complaint") {
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea lalamiko lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      } else if (category === "Suggestion") {
+        smsMessage = `Mpendwa ${finalName}, WCF inashukuru kwa maoni mazuri uliyotoa, tunaahidi kuendelea kuboresha huduma zetu.`;
+      } else if (category === "Compliment") {
+        smsMessage = `Mpendwa ${finalName}, WCF inashukuru kwa pongezi ulizotoa, Tunaahidi kuendelea kutoa huduma bora na endelea kufurahia huduma za WCF`;
+      } else {
+        // Fallback for other categories - use Inquiry format
+        smsMessage = `Mpendwa ${finalName}, WCF inakiri kupokea ombi lako na kulisajili kwa nambari ${ticketId}. Tunaahidi kulifanyia kazi na kukupa mrejesho.`;
+      }
       
       console.log(`🔍 Name for SMS (creation) ${newTicket.ticket_id}:`, {
         requester_type: requester,
@@ -1518,7 +1532,9 @@ const createTicket = async (req, res) => {
         finalName: finalName,
         representative_name: representative_name,
         firstName: firstName,
-        lastName: lastName
+        lastName: lastName,
+        category: category,
+        smsMessage: smsMessage
       });
       
       // Send SMS asynchronously to avoid blocking the response
@@ -1551,12 +1567,6 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       // Send emails in background to avoid blocking the assignment
       sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
-      sendEmailNonBlocking({
-        to: "grace.tarimo@wcf.go.tz",
-        subject: emailSubject,
-        htmlBody: emailHtmlBody,
-        attachments: attachments,
-      });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
     if (!shouldClose) {
@@ -1598,7 +1608,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
           attachments: attachments,
@@ -1685,7 +1695,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with creatorUser.email in production
+          to: creatorUser.email,
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
           attachments: attachments,
@@ -1736,8 +1746,7 @@ const createTicket = async (req, res) => {
         `;
         const attachments = getTicketAttachments(newTicket);
         sendEmail({
-          // to: [headOfUnit.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: headOfUnit.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -1836,7 +1845,17 @@ const createTicket = async (req, res) => {
               finalName = trimmedRepName || "Customer";
             }
             
-            const smsMessage = `Dear ${finalName}, your ticket (ID: ${newTicket.ticket_id}) has been closed and resolved.`;
+            // Generate SMS message based on category for closure
+            let smsMessage = "";
+            const ticketCategory = newTicket.category || category;
+            if (ticketCategory === "Inquiry") {
+              smsMessage = `Mpendwa Mteja, ombi lako nambari ${newTicket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+            } else if (ticketCategory === "Complaint") {
+              smsMessage = `Mpendwa Mteja, lalamiko lako nambari ${newTicket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo wasiliana nasi kwa simu nambari 0800110028/29.`;
+            } else {
+              // For Suggestion and Compliment, use generic closure message
+              smsMessage = `Mpendwa Mteja, tiketi yako nambari ${newTicket.ticket_id} imefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+            }
             
             console.log(`🔍 Name for SMS (closed at creation) ${newTicket.ticket_id}:`, {
               requester_type: ticketRequester,
@@ -1893,8 +1912,7 @@ const createTicket = async (req, res) => {
           const attachments = getTicketAttachments(newTicket);
           
           sendEmail({
-            // to: creatorUser.email,
-            to: "grace.tarimo@wcf.go.tz",
+            to: creatorUser.email,
             subject: emailSubject,
             htmlBody: htmlBody,
             attachments: attachments,
@@ -1935,7 +1953,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+              to: supervisor.email,
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1980,7 +1998,7 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       
       sendEmail({
-        to: "grace.tarimo@wcf.go.tz",
+        to: assignedUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -2027,8 +2045,7 @@ const createTicket = async (req, res) => {
         const attachments = getTicketAttachments(newTicket);
         
         sendEmail({
-          // to: [closingAgent.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: closingAgent.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -3714,8 +3731,7 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          // to: [user.email, "grace.tarimo@wcf.go.tz"],
-          to:`grace.tarimo@wcf.go.tz`,
+          to: user.email,
           subject,
           htmlBody,
           attachments: attachments,
@@ -3946,7 +3962,7 @@ const closeTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: "grace.tarimo@wcf.go.tz", // For testing, replace with supervisor.email in production
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
@@ -4052,14 +4068,21 @@ const closeTicket = async (req, res) => {
         
         // Only send SMS if phone is valid (same condition as create ticket)
         if (isValidTzPhone(smsRecipient)) {
-          // Truncate resolution details if too long for SMS (SMS limit is usually 160 characters)
-          const resolutionText = resolution_details ? 
-            (resolution_details.length > 80 ? resolution_details.substring(0, 80) + '...' : resolution_details) : 
-            '';
-          const categoryText = ticket.category ? ` (${ticket.category})` : '';
           // Ensure requesterFullName is never empty
-          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Customer";
-          const smsMessage = `Dear ${finalName}, your ticket (ID: ${ticket.ticket_id})${categoryText} has been closed and resolved.`;
+          const finalName = requesterFullName && requesterFullName.trim() ? requesterFullName.trim() : "Mteja";
+          
+          // Generate SMS message based on category for closure
+          let smsMessage = "";
+          const ticketCategory = ticket.category || "Inquiry";
+          
+          if (ticketCategory === "Inquiry") {
+            smsMessage = `Mpendwa Mteja, ombi lako nambari ${ticket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+          } else if (ticketCategory === "Complaint") {
+            smsMessage = `Mpendwa Mteja, lalamiko lako nambari ${ticket.ticket_id} limefanyiwa kazi na WCF. Kwa maelezo wasiliana nasi kwa simu nambari 0800110028/29.`;
+          } else {
+            // For Suggestion and Compliment, use generic closure message
+            smsMessage = `Mpendwa Mteja, tiketi yako nambari ${ticket.ticket_id} imefanyiwa kazi na WCF. Kwa maelezo zaidi wasiliana nasi kwa simu nambari 0800110028/29.`;
+          }
           
           // Send SMS asynchronously to avoid blocking the response
           sendQuickSms({ message: smsMessage, recipient: smsRecipient })
@@ -4105,8 +4128,7 @@ const closeTicket = async (req, res) => {
         const attachments = getTicketAttachments(ticket);
         
         sendEmail({
-          // to: ticket.creator.email,
-          to: "grace.tarimo@wcf.go.tz",
+          to: ticket.creator.email,
           subject: emailSubject,
           htmlBody: htmlBody,
           attachments: attachments,
@@ -4325,8 +4347,7 @@ const closeReviewerTicket = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       sendEmail({
-        // to: [ticket.creator.email, "grace.tarimo@wcf.go.tz"],
-        to:`grace.tarimo@wcf.go.tz`,
+        to: ticket.creator.email,
         subject: emailSubject,
         htmlBody: htmlBody,
         attachments: attachments,
@@ -4522,7 +4543,7 @@ const assignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking assignment
-        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: assignedTo.email, subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -4989,6 +5010,26 @@ const getTicketAssignments = async (req, res) => {
     console.error("Error in getTicketAssignments:", error);
     res.status(500).json({
       message: "Failed to fetch ticket assignments",
+      error: error.message,
+    });
+  }
+};
+
+// Get ticket clarifications
+const getTicketClarifications = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    const clarifications = await TicketClarification.findAll({
+      where: { ticket_id: ticketId },
+      order: [['created_at', 'ASC']]
+    });
+    
+    res.json(clarifications);
+  } catch (error) {
+    console.error("Error in getTicketClarifications:", error);
+    res.status(500).json({
+      message: "Failed to fetch ticket clarifications",
       error: error.message,
     });
   }
@@ -5514,13 +5555,17 @@ const getDashboardCounts = async (req, res) => {
     // REVIEWER LOGIC (add as needed)
     if (user.role === "reviewer") {
       // Use the same logic as reviewer dashboard
+      // Count tickets assigned to reviewer including Reversed status as assigned
       const newTicketsCount = await Ticket.count({
         where: {
           category: { [Op.in]: ["Complaint", "Suggestion", "Compliment"] },
-          status: { [Op.ne]: "Closed" },
           assigned_to_id: userId,
+          status: { 
+            [Op.in]: ["Open", "Assigned", "Returned", "Reversed", "In Progress", "Escalated"]
+          },
           [Op.and]: [
-            { status: { [Op.ne]: "Forwarded" } } // Exclude forwarded tickets
+            { status: { [Op.ne]: "Forwarded" } }, // Exclude forwarded tickets
+            { status: { [Op.ne]: "Closed" } } // Exclude closed tickets
           ]
         }
       });
@@ -5705,8 +5750,7 @@ const reassignTicket = async (req, res) => {
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
         // Send email in background to avoid blocking reassignment
-        // sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
-        sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
       }
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
@@ -5817,7 +5861,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
   try {
     // Notify all reviewers and supervisors
     const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-    const portalUrl = `https://192.168.21.70/`;
+    const portalUrl = `https://192.168.21.69/`;
     const notifyDetailsHtml = `
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
@@ -5887,8 +5931,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
-        to:`grace.tarimo@wcf.go.tz`,
-        // to: prevUser.email,
+        to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments
@@ -6816,12 +6859,24 @@ const forwardToDirectorGeneral = async (req, res) => {
     }
 
     // Check if this is a major complaint assigned to director/head-of-unit OR a reversed/recommended ticket assigned to director/head-of-unit
+    // Also allow Suggestion and Complement categories
+    const allowedCategories = ["Complaint", "Suggestion", "Complement"];
+    if (!allowedCategories.includes(ticket.category)) {
+      return res.status(400).json({ 
+        message: `This action is only for Complaint, Suggestion, or Complement tickets. Current category: ${ticket.category}` 
+      });
+    }
+    
     const isMajorComplaint = ticket.category === "Complaint" && 
                             ticket.complaint_type === "Major" && 
                             ticket.assigned_to_id === userId;
     
     const isReversedTicket = ticket.status === "Reversed" && 
                             ticket.assigned_to_id === userId;
+    
+    // For Suggestion and Complement, allow if assigned to user
+    const isSuggestionOrComplement = (ticket.category === "Suggestion" || ticket.category === "Complement") &&
+                                     ticket.assigned_to_id === userId;
     
     // Check if Director is forwarding from Manager in Major Complaint Directorate
     const isDirectorateWorkflow = ticket.category === "Complaint" && 
@@ -6831,9 +6886,9 @@ const forwardToDirectorGeneral = async (req, res) => {
                                   ticket.assigned_to_id === userId &&
                                   (ticket.status === "Attended and Recommended" || ticket.status === "Reversed");
     
-    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow) {
+    if (!isMajorComplaint && !isReversedTicket && !isDirectorateWorkflow && !isSuggestionOrComplement) {
       return res.status(400).json({ 
-        message: "This ticket is not a major complaint or reversed/recommended ticket assigned to you" 
+        message: "This ticket is not a major complaint, suggestion, complement, or reversed/recommended ticket assigned to you" 
       });
     }
 
@@ -6848,31 +6903,42 @@ const forwardToDirectorGeneral = async (req, res) => {
       });
     }
 
-    // Append Additional Clarification to ticket's description ONLY if it's different from current
-    // If not edited (same as current), keep current description as is
+    // Save clarification to TicketClarification table instead of appending to description
+    // This prevents duplicates when ticket is reversed and reversed again
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-      const currentDescription = ticket.description || "";
-      const amendedDescription = String(resolution_details).trim();
+      const clarificationText = String(resolution_details).trim();
       
-      // Only update if Additional Clarification is different from current description
-      // If they are the same, don't update (keep current description)
-      if (amendedDescription !== currentDescription) {
-        // Format with clear separation: Previous description, separator, then Additional Clarification
-        let updatedDescription = "";
-        if (currentDescription) {
-          // Clean layout: Previous description on top, separator line, then Additional Clarification
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Additional Clarification ---\n" + amendedDescription;
-        } else {
-          updatedDescription = amendedDescription;
+      // Check if clarification already exists for this ticket/user/role combination
+      const existingClarification = await TicketClarification.findOne({
+        where: {
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_role: currentUser.role
         }
-        
-        await ticket.update({
-          description: updatedDescription
+      });
+      
+      if (existingClarification) {
+        // Update existing clarification
+        await existingClarification.update({
+          clarification_text: clarificationText,
+          edited_by_name: currentUser.full_name || currentUser.username || 'Unknown',
+          edited_by_email: currentUser.email || null
+        });
+      } else {
+        // Create new clarification
+        await TicketClarification.create({
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_name: currentUser.full_name || currentUser.username || 'Unknown',
+          edited_by_role: currentUser.role,
+          edited_by_email: currentUser.email || null,
+          clarification_text: clarificationText
         });
       }
-      // If Additional Clarification is same as current, do nothing (keep current description)
+      
+      // Don't update ticket description - clarifications will be shown separately in modal
+      // Description remains as original, clarifications are stored in TicketClarification table
     }
-    // If resolution_details is not provided or empty, do nothing (keep current description)
 
     // Assign to Director General using normal assignment process (simple, like normal assignment)
     await Ticket.update(
@@ -6949,7 +7015,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: directorGeneral.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody,
             attachments: attachments
@@ -7503,8 +7569,7 @@ const reverseComplaint = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       // Send email in background to avoid blocking
-      // sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
-      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7638,7 +7703,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7762,7 +7827,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ['grace.tarimo@wcf.go.tz'],
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7961,7 +8026,7 @@ const getTicketWorkflowAuditTrail = async (req, res) => {
 const managerAttendMajor = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { userId, recommendation, evidence_url, responsible_unit_name } = req.body;
+    const { userId, recommendation, reason, evidence_url, responsible_unit_name } = req.body;
 
     // Find the ticket
     const ticket = await Ticket.findByPk(ticketId);
@@ -7979,8 +8044,13 @@ const managerAttendMajor = async (req, res) => {
       return res.status(403).json({ message: "Ticket is not assigned to you" });
     }
 
-    if (ticket.complaint_type !== "Major") {
-      return res.status(400).json({ message: "This action is only for Major complaints" });
+    // Allow: Minor Complaints, Unrated (N/A) Complaints, Suggestion, or Compliment
+    // Managers close Minor complaints or unrated complaints, NOT Major complaints
+    const isAllowed = (ticket.category === "Complaint" && (ticket.complaint_type === "Minor" || ticket.complaint_type === "N/A" || !ticket.complaint_type)) || 
+                      ticket.category === "Suggestion" || 
+                      ticket.category === "Compliment";
+    if (!isAllowed) {
+      return res.status(400).json({ message: "This action is only for Minor or unrated complaints, suggestion or compliment." });
     }
 
     // Determine the target unit section
@@ -8043,7 +8113,7 @@ const managerAttendMajor = async (req, res) => {
       assigned_to_id: headOfUnit.id,
       assigned_to_role: headOfUnit.role,
       action: "Assigned",
-      reason: `Ticket attended by manager and assigned to Head of Unit of ${targetUnitSection}`,
+      reason: reason || `Ticket attended by manager and assigned to ${targetUnitSection}`,
       created_at: new Date()
     });
 
@@ -8078,8 +8148,7 @@ const managerAttendMajor = async (req, res) => {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        // to: headOfUnit.email,
-        to: ['grace.tarimo@wcf.go.tz'],
+        to: headOfUnit.email,
         subject: emailSubject,
         htmlBody: emailBody,
         attachments: attachments
@@ -8200,83 +8269,113 @@ const updateReversedTicketDetails = async (req, res) => {
     }
 
     // Find focal-person for the specific unit/directorate (no fallback - must be the specific focal person)
+    // This applies the same logic as ticket creation for Compliance and Claims sections
     let assignedUser = null;
     let assignedRole = null;
     
-    if (responsible_unit_name && responsible_unit_name.trim() !== "") {
-      const trimmedUnitName = responsible_unit_name.trim();
-      const trimmedSubSection = sub_section && sub_section.trim() !== "" ? sub_section.trim() : null;
-      
-      console.log("🔍 ===== STARTING FOCAL PERSON SEARCH =====");
-      console.log("🔍 Looking for focal-person for unit/directorate:", trimmedUnitName);
-      console.log("🔍 Also checking sub_section:", trimmedSubSection);
-      
-      // Only find focal-person for this specific unit/directorate - NO FALLBACK TO DIRECTOR OR HEAD-OF-UNIT
-      // Priority 1: Try matching by sub_section first (more specific)
-      // Priority 2: Then try matching by unit_section (directorate/unit name)
-      let searchConditions = [];
-      
-      // First priority: search by sub_section if provided (more specific match)
-      if (trimmedSubSection) {
-        searchConditions.push(
-          { unit_section: trimmedSubSection },
-          Sequelize.where(
-            Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-            Sequelize.fn('LOWER', trimmedSubSection)
-          )
-        );
-        console.log("🔍 Priority 1: Searching by sub_section:", trimmedSubSection);
+    // Helper function to determine if section is directorate or unit (same as ticket creation)
+    const getSectionType = (sectionName) => {
+      if (!sectionName) return null;
+      const name = sectionName.toLowerCase();
+      if (name.includes('directorate')) {
+        return 'directorate';
+      } else if (name.includes('unit')) {
+        return 'unit';
       }
+      return null;
+    };
+    
+    // Priority 1: If sub_section is being updated, find focal-person for the new sub_section
+    // This works like initial ticket creation - assign to focal-person of the new sub_section
+    const previousSubSection = ticket.sub_section;
+    const newSubSection = sub_section && sub_section.trim() !== "" ? sub_section.trim() : null;
+    const sectionName = section || ticket.section || responsible_unit_name || null;
+    const sectionType = getSectionType(sectionName);
+    
+    if (newSubSection) {
+      console.log("🔍 ===== SEARCHING FOR FOCAL-PERSON BY NEW SUB_SECTION =====");
+      console.log("🔍 Previous sub_section:", previousSubSection);
+      console.log("🔍 New sub_section:", newSubSection);
+      console.log("🔍 Section name:", sectionName);
+      console.log("🔍 Section type:", sectionType);
+      console.log("🔍 Searching for focal-person of new sub_section:", newSubSection);
       
-      // Second priority: search by unit_section (directorate/unit name)
-      searchConditions.push(
-        { unit_section: trimmedUnitName },
-        Sequelize.where(
-          Sequelize.fn('LOWER', Sequelize.col('unit_section')),
-          Sequelize.fn('LOWER', trimmedUnitName)
-        )
-      );
-      console.log("🔍 Priority 2: Searching by unit_section:", trimmedUnitName);
-      
+      // Apply same logic as ticket creation:
+      // For directorate: match by sub_section field
+      // For unit: match by unit_section field
+      if (sectionType === 'directorate') {
+        console.log("🔍 Section is directorate - matching focal-person by sub_section field");
         assignedUser = await User.findOne({
           where: {
             role: "focal-person",
-          [Op.or]: searchConditions
+            [Op.or]: [
+              { sub_section: newSubSection },
+              Sequelize.where(
+                Sequelize.fn('LOWER', Sequelize.col('sub_section')),
+                Sequelize.fn('LOWER', newSubSection)
+              )
+            ]
           },
-          attributes: ["id", "full_name", "email", "role", "unit_section"],
-        order: [
-          // Prefer exact matches first, then case-insensitive
-          [Sequelize.literal(`CASE WHEN unit_section = '${trimmedSubSection || trimmedUnitName}' THEN 1 ELSE 2 END`), 'ASC']
-        ]
+          attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+          order: [
+            // Prefer exact matches first
+            [Sequelize.literal(`CASE WHEN sub_section = '${newSubSection}' THEN 1 ELSE 2 END`), 'ASC']
+          ]
         });
-        assignedRole = "focal-person";
+        console.log("Found focal-person with matching sub_section (directorate):", assignedUser?.full_name || "None found");
+      } else if (sectionType === 'unit') {
+        console.log("🔍 Section is unit - matching focal-person by unit_section field");
+        assignedUser = await User.findOne({
+          where: {
+            role: "focal-person",
+            [Op.or]: [
+              { unit_section: newSubSection },
+              Sequelize.where(
+                Sequelize.fn('LOWER', Sequelize.col('unit_section')),
+                Sequelize.fn('LOWER', newSubSection)
+              )
+            ]
+          },
+          attributes: ["id", "full_name", "email", "role", "unit_section", "sub_section"],
+          order: [
+            // Prefer exact matches first
+            [Sequelize.literal(`CASE WHEN unit_section = '${newSubSection}' THEN 1 ELSE 2 END`), 'ASC']
+          ]
+        });
+        console.log("Found focal-person with matching unit_section (unit):", assignedUser?.full_name || "None found");
+      } else {
+        console.log("⚠️ Section type is not directorate or unit - cannot find focal-person");
+        console.log("⚠️ Ticket assignment will NOT be changed");
+      }
       
       if (assignedUser) {
-        console.log("✅ SUCCESS: Found focal person:", assignedUser.full_name, "ID:", assignedUser.id);
-        console.log("✅ Focal person unit_section:", assignedUser.unit_section);
-        console.log("✅ Matched with:", trimmedUnitName);
-      } else {
-        console.log("❌ ERROR: No focal person found for unit/directorate:", trimmedUnitName);
-        if (sub_section) {
-          console.log("❌ Also checked sub_section:", sub_section);
+        assignedRole = "focal-person";
+        console.log("✅ SUCCESS: Found focal person for new sub_section:", assignedUser.full_name, "ID:", assignedUser.id);
+        if (sectionType === 'directorate') {
+          console.log("✅ Focal person sub_section:", assignedUser.sub_section);
+        } else if (sectionType === 'unit') {
+          console.log("✅ Focal person unit_section:", assignedUser.unit_section);
         }
-        console.log("❌ Ticket will NOT be reassigned - focal person MUST exist");
-        console.log("❌ NO FALLBACK to director or head-of-unit - assignment will remain unchanged");
+        console.log("✅ Matched with new sub_section:", newSubSection);
+      } else {
+        console.log("❌ ERROR: No focal person found for new sub_section:", newSubSection);
+        console.log("❌ Ticket will NOT be reassigned - focal person for sub_section MUST exist");
+        console.log("❌ NO FALLBACK - assignment will remain unchanged");
         
         // Log all focal persons in database for debugging
         const allFocalPersons = await User.findAll({
           where: { role: "focal-person" },
-          attributes: ["id", "full_name", "unit_section"],
+          attributes: ["id", "full_name", "unit_section", "sub_section"],
         });
         console.log("📋 All focal persons in database:", JSON.stringify(allFocalPersons.map(fp => ({
           name: fp.full_name,
-          unit_section: fp.unit_section
+          unit_section: fp.unit_section,
+          sub_section: fp.sub_section
         })), null, 2));
-        console.log("🔍 ===== END FOCAL PERSON SEARCH =====");
       }
+      console.log("🔍 ===== END SUB_SECTION FOCAL-PERSON SEARCH =====");
     } else {
-      console.log("⚠️ No responsible_unit_name provided - cannot find focal person");
-      console.log("⚠️ Ticket assignment will NOT be changed");
+      console.log("⚠️ No new sub_section provided - ticket assignment will NOT be changed");
     }
 
     // Update ticket with focal person assignment ONLY if found (no fallback)
@@ -8477,7 +8576,7 @@ const managerSendToDirector = async (req, res) => {
     // Check if this is a Complaint (Major or Minor)
     // Normalize complaint_type for case-insensitive comparison
     const complaintType = ticket.complaint_type ? ticket.complaint_type.trim().toLowerCase() : "";
-    const isComplaint = ticket.category === "Complaint";
+    const isComplaint = ["Complaint", "Suggestion", "Complement"].includes(ticket.category);
     const isMajorOrMinor = complaintType === "major" || complaintType === "minor";
     
     console.log("DEBUG managerSendToDirector:", {
@@ -8489,14 +8588,18 @@ const managerSendToDirector = async (req, res) => {
       isMajorOrMinor
     });
 
-    // Allow any Complaint (Major or Minor) - no directorate requirement
-    if (!isComplaint) {
+    // Allow Complaint, Suggestion, or Complement
+    // For Complaint, must be Major or Minor
+    // For Suggestion and Complement, no complaint_type required
+    const allowedCategories = ["Complaint", "Suggestion", "Complement"];
+    if (!allowedCategories.includes(ticket.category)) {
       return res.status(400).json({ 
-        message: `This action is only for Complaint tickets. Current category: ${ticket.category}` 
+        message: `This action is only for Complaint, Suggestion, or Complement tickets. Current category: ${ticket.category}` 
       });
     }
     
-    if (!isMajorOrMinor) {
+    // Only check complaint_type for Complaint category
+    if (ticket.category === "Complaint" && !isMajorOrMinor) {
       return res.status(400).json({ 
         message: `This action is only for Major or Minor complaints. Current type: ${ticket.complaint_type || 'N/A'}` 
       });
@@ -8580,26 +8683,41 @@ const managerSendToDirector = async (req, res) => {
       });
     }
 
-    // Update ticket description if resolution_details is provided and different from current
-    // Append Additional Clarification to ticket's description ONLY if it's different from current
+    // Save clarification to TicketClarification table instead of appending to description
+    // This prevents duplicates when ticket is reversed and reversed again
     if (resolution_details !== null && resolution_details !== undefined && String(resolution_details).trim()) {
-      const currentDescription = ticket.description || "";
-      const amendedDescription = String(resolution_details).trim();
+      const clarificationText = String(resolution_details).trim();
       
-      // Only update if Additional Clarification is different from current description
-      if (amendedDescription !== currentDescription) {
-        // Format: Previous description on top, separator line, then Additional Clarification
-        let updatedDescription = "";
-        if (currentDescription) {
-          updatedDescription = "Previous Description:\n" + currentDescription + "\n\n--- Additional Clarification ---\n" + amendedDescription;
-        } else {
-          updatedDescription = amendedDescription;
+      // Check if clarification already exists for this ticket/user/role combination
+      const existingClarification = await TicketClarification.findOne({
+        where: {
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_role: manager.role
         }
-        
-        await ticket.update({
-          description: updatedDescription
+      });
+      
+      if (existingClarification) {
+        // Update existing clarification
+        await existingClarification.update({
+          clarification_text: clarificationText,
+          edited_by_name: manager.full_name || manager.username || 'Unknown',
+          edited_by_email: manager.email || null
+        });
+      } else {
+        // Create new clarification
+        await TicketClarification.create({
+          ticket_id: ticketId,
+          edited_by_id: userId,
+          edited_by_name: manager.full_name || manager.username || 'Unknown',
+          edited_by_role: manager.role,
+          edited_by_email: manager.email || null,
+          clarification_text: clarificationText
         });
       }
+      
+      // Don't update ticket description - clarifications will be shown separately in modal
+      // Description remains as original, clarifications are stored in TicketClarification table
     }
 
     // Update ticket to assign to Director
@@ -8658,7 +8776,7 @@ const managerSendToDirector = async (req, res) => {
       // Get attachments for email
       const attachments = getTicketAttachments(ticket);
       
-      sendEmailNonBlocking({ to: 'grace.tarimo@wcf.go.tz', subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: director.email, subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({
@@ -8826,5 +8944,6 @@ module.exports = {
   escalateAndUpdateTicketOnSlaBreach,
   updateReversedTicketDetails,
   findSupervisorForSection,
-  getWorkflowTickets
+  getWorkflowTickets,
+  getTicketClarifications
 };

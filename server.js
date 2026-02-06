@@ -33,10 +33,16 @@ const InstagramComment = require("./models/instagram_comment");
 const VoiceNote = require("./models/voice_notes.model");
 
 /* ------------------------------ CONTROLLERS ------------------------------ */
+/* ------------------------------ CONTROLLERS ------------------------------ */
 const { registerSuperAdmin } = require("./controllers/auth/authController");
-const {
-  setupSocket,
-} = require("./controllers/livestream/livestreamController");
+
+/* ✅ LOAD LIVESTREAM CONTROLLER FIRST */
+const livestreamController = require("./controllers/livestream/livestreamController");
+const { setupSocket } = livestreamController;
+
+/* ✅ REGISTER LIVE CALL CACHE */
+app.locals.getLiveCalls = livestreamController.getLiveCallsCache;
+
 const {
   setSocketInstance,
   startPeriodicUpdates,
@@ -62,6 +68,7 @@ const baseAudioPath =
   process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
 
 require("./cron/escalationJob");
+require("./cron/dailyLogoutJob");
 
 require("./amiServer"); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
@@ -72,17 +79,18 @@ app.use(
     origin: [
       "http://localhost:3000",
       "http://10.52.0.19:3000",
-      "http://192.168.21.70:3000",
+      "http://192.168.21.69:3000",
       "http://localhost:5070",
       "http://10.52.0.19:5070",
       "http://127.0.0.1:5070",
       "http://192.168.1.170:5070",
-      "http://192.168.21.70:5070",
-      "https://192.168.21.70",
+      "http://192.168.21.69:5070",
+      "https://192.168.21.69",
       "https://10.52.0.19",
       "https://demoportal.wcf.go.tz",
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
+      "https://contactcenter.wcf.go.tz",
       // Allow any origin in development (you can remove this in production)
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
@@ -221,12 +229,13 @@ const io = new Server(server, {
       "http://10.52.0.19:5070",
       "http://127.0.0.1:5070",
       "http://192.168.1.170:5070",
-      "http://192.168.21.70:5070",
-      "https://192.168.21.70",
+      "http://192.168.21.69:5070",
+      "https://192.168.21.69",
       "https://10.52.0.19",
       "https://demoportal.wcf.go.tz",
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
+      "https://contactcenter.wcf.go.tz",
       // Allow any origin in development
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
@@ -462,17 +471,18 @@ sequelize
           origin: [
             "http://localhost:3000",
             "http://10.52.0.19:3000",
-            "http://192.168.21.70:3000",
+            "http://192.168.21.69:3000",
             "http://localhost:5070",
             "http://10.52.0.19:5070",
             "http://127.0.0.1:5070",
             "http://192.168.1.170:5070",
-            "http://192.168.21.70:5070",
-            "https://192.168.21.70",
+            "http://192.168.21.69:5070",
+            "https://192.168.21.69",
             "https://10.52.0.19",
             "https://demoportal.wcf.go.tz",
             "https://portal.wcf.go.tz",
             "https://essp.wcf.go.tz",
+            "https://contactcenter.wcf.go.tz",
             process.env.NODE_ENV === "development" ? true : false,
           ].filter(Boolean),
           methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -533,17 +543,18 @@ sequelize
             origin: [
               "http://localhost:3000",
               "http://10.52.0.19:3000",
-              "http://192.168.21.70:3000",
+              "http://192.168.21.69:3000",
               "http://localhost:5070",
               "http://10.52.0.19:5070",
               "http://127.0.0.1:5070",
               "http://192.168.1.170:5070",
-              "http://192.168.21.70:5070",
-              "https://192.168.21.70",
+              "http://192.168.21.69:5070",
+              "https://192.168.21.69",
               "https://10.52.0.19",
               "https://demoportal.wcf.go.tz",
               "https://portal.wcf.go.tz",
               "https://essp.wcf.go.tz",
+              "https://contactcenter.wcf.go.tz",
               process.env.NODE_ENV === "development" ? true : false,
             ].filter(Boolean),
             methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],

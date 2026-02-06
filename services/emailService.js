@@ -10,7 +10,7 @@ const fs = require('fs');
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = "https://192.168.21.70/";
+  const portalUrl = "https://192.168.21.69/";
   
   return `<!doctype html>
     <html>
@@ -191,10 +191,6 @@ const sendEmail = async ({ to, subject, htmlBody, attachments }) => {
 
 // Non-blocking version of sendEmail for fire-and-forget emails
 const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
-  // Force test email address for all emails
-  const testEmail = 'grace.tarimo@wcf.go.tz';
-  const actualRecipient = to; // Store original for logging
-  
   // Format attachments if provided
   const formattedAttachments = attachments 
     ? (Array.isArray(attachments) && attachments[0]?.filename ? attachments : formatAttachments(attachments))
@@ -202,9 +198,7 @@ const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
   
   const mailOptions = {
     from: 'WCF MAC <noreply.mac@wcf.go.tz>',
-    // to,
-    // subject,
-    to: testEmail, // Always use test email
+    to: to, // Use actual recipient email
     subject: subject,
     html: htmlBody,
     attachments: formattedAttachments,
@@ -217,14 +211,14 @@ const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
   // Use only the primary transporter (WCF settings)
   const startTime = Date.now();
   console.log(`📧 [Email] [${new Date().toISOString()}] Attempting to send email using WCF transporter (non-blocking)...`);
-  console.log(`📧 [Email] Original recipient: ${actualRecipient}, Sending to test email: ${testEmail}`);
+  console.log(`📧 [Email] Sending to: ${to}`);
   
   emailTransporter.sendMail(mailOptions, (error, info) => {
     const duration = Date.now() - startTime;
     if (error) {
       console.error(`❌ [Email] [${new Date().toISOString()}] WCF transporter failed after ${duration}ms:`, error.message);
     } else {
-      console.log(`✅ [Email] [${new Date().toISOString()}] Email sent successfully to test email: ${testEmail} (original: ${actualRecipient}) after ${duration}ms, Message ID: ${info.messageId}`);
+      console.log(`✅ [Email] [${new Date().toISOString()}] Email sent successfully to: ${to} after ${duration}ms, Message ID: ${info.messageId}`);
     }
   });
 };

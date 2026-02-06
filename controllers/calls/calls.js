@@ -51,8 +51,8 @@ const getAgentCdrStats = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition = 'NO ANSWER' THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
@@ -69,8 +69,8 @@ const getAgentCdrStats = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition = 'NO ANSWER' THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
@@ -103,8 +103,8 @@ const getAgentCdrStatsToday = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition = 'NO ANSWER' THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
@@ -121,8 +121,8 @@ const getAgentCdrStatsToday = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition = 'NO ANSWER' THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
@@ -386,7 +386,7 @@ const getLostCalls = async (req, res) => {
         lastapp
       FROM cdr 
       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND lastapp = 'Queue'
+        AND duration > 60
         AND clid IS NOT NULL
         AND clid != ''
       ORDER BY cdrstarttime DESC
@@ -402,7 +402,7 @@ const getLostCalls = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM cdr 
        WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-         AND lastapp = 'Queue'
+         AND duration > 60
          AND clid IS NOT NULL
          AND clid != ''`,
       {
@@ -435,7 +435,7 @@ const getDroppedCalls = async (req, res) => {
         lastapp
       FROM cdr 
       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND (lastapp IS NULL OR lastapp != 'Queue')
+        AND duration <= 60
         AND clid IS NOT NULL
         AND clid != ''
       ORDER BY cdrstarttime DESC
@@ -450,7 +450,7 @@ const getDroppedCalls = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM cdr 
        WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-         AND (lastapp IS NULL OR lastapp != 'Queue')
+         AND duration <= 60
          AND clid IS NOT NULL
          AND clid != ''`,
       {
