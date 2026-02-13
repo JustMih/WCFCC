@@ -731,6 +731,7 @@ const createTicket = async (req, res) => {
     console.log("Subject field received:", req.body.subject);
     console.log("FunctionId field received:", req.body.functionId);
     console.log("Dependents field received:", req.body.dependents);
+    console.log("Is New Registration received:", req.body.is_new_registration, "Type:", typeof req.body.is_new_registration);
 
     const {
       firstName: rawFirstName,
@@ -780,6 +781,10 @@ const createTicket = async (req, res) => {
       representative_relationship,
       // New fields for dependents
       dependents,
+      // Claim number field
+      claimNumber,
+      // New registration flag
+      is_new_registration,
     } = req.body;
 
     // Debug: Log raw representative_name from request
@@ -1363,6 +1368,10 @@ const createTicket = async (req, res) => {
       dependents: Array.isArray(dependents)
         ? dependents.join(", ")
         : dependents,
+      // Add claim number if provided
+      claim_number: claimNumber || null,
+      // Add new registration flag if provided (convert to boolean explicitly)
+      is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
     };
 
     console.log("Final dependents value to be saved:", ticketData.dependents);
