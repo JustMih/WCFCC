@@ -146,9 +146,10 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
 
   // Determine SLA days for this role
   let slaDays = 0;
-  if (ticket.category === "Inquiry") {
-    slaDays = 3; // Inquiries: 3 days
-  } else if (ticket.category === "Complaint") {
+  // if (ticket.category === "Inquiry") {
+  //   slaDays = 3; // Inquiries: 3 days
+  // } else if (ticket.category === "Complaint") {
+ if (ticket.category === "Complaint") {
     slaDays = getSlaDaysForRole(currentRole, complaintType);
   } else {
     return false; // Not applicable
