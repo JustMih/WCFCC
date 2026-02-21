@@ -138,7 +138,7 @@ const listNotifications = async (req, res) => {
     // Filter out notifications for reversed tickets, BUT include:
     // 1. Reversal notifications for the recipient
     // 2. Tagged/mentioned notifications (always include, even if ticket is reversed)
-    const notifications = allNotifications.filter(n => {
+    const notificationsAll = allNotifications.filter(n => {
       if (!n.ticket) return false;
       
       const messageText = (n.message || '').toLowerCase();
@@ -173,7 +173,7 @@ const listNotifications = async (req, res) => {
       return true;
     });
     
-    return res.status(200).json({ notifications });
+    return res.status(200).json({ notificationsAll });
   } catch (error) {
     return res
       .status(500)
@@ -461,6 +461,93 @@ const getNotificationsByTicketAndRecipient = async (req, res) => {
   }
 };
 
+// Get all notifications for a user (for reports - includes read and unread)
+const getAllNotificationsForReport = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    // Get ALL notifications (read and unread) - no status filter
+    const allNotifications = await Notification.findAll({
+      where: {
+        recipient_id: userId,
+      },
+      attributes: ['id', 'ticket_id', 'sender_id', 'recipient_id', 'message', 'channel', 'status', 'comment', 'created_at', 'updated_at', 'category'],
+      include: [
+        {
+          model: Ticket,
+          as: "ticket",
+          attributes: [
+            "id",
+            "ticket_id",
+            "subject",
+            "category",
+            "status",
+            "description",
+          ],
+          required: false // Left join to include notifications even if ticket is deleted
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+    
+    // Filter by date range if provided
+    let filteredNotifications = allNotifications;
+    if (startDate || endDate) {
+      filteredNotifications = allNotifications.filter(n => {
+        if (!n.created_at) return false;
+        const notificationDate = new Date(n.created_at).toISOString().split("T")[0];
+        if (startDate && notificationDate < startDate) return false;
+        if (endDate && notificationDate > endDate) return false;
+        return true;
+      });
+    }
+    
+    // Filter out notifications for reversed tickets, BUT include:
+    // 1. Reversal notifications for the recipient
+    // 2. Tagged/mentioned notifications (always include, even if ticket is reversed)
+    const notifications = filteredNotifications.filter(n => {
+      if (!n.ticket) return true; // Include notifications without tickets for reports
+      
+      const messageText = (n.message || '').toLowerCase();
+      
+      // Always include tagged/mentioned notifications, regardless of ticket status
+      const isTaggedNotification = messageText.includes('mentioned you');
+      
+      if (isTaggedNotification) {
+        return true; // Always include tagged notifications
+      }
+      
+      // If ticket is reversed, only include if it's a reversal notification for this user
+      const ticketStatus = n.ticket.status || '';
+      const isReversedTicket = ticketStatus.toLowerCase() === 'reversed';
+      
+      if (isReversedTicket) {
+        const recipientId = n.recipient_id;
+        const isForCurrentUser = String(recipientId) === String(userId);
+        
+        // Include if it's for current user and message indicates ticket was reversed back to this user
+        return isForCurrentUser && (
+          messageText.includes('reversed back to you') || 
+          messageText.includes('reversed to you') ||
+          messageText.includes('reassigned to focal person') ||
+          (messageText.includes('has been reversed') && messageText.includes('to'))
+        );
+      }
+      
+      // For non-reversed tickets, include all
+      return true;
+    });
+    
+    return res.status(200).json({ notifications });
+  } catch (error) {
+    console.error("Error fetching all notifications for report:", error);
+    return res
+      .status(500)
+      .json({ message: "Error fetching notifications", error: error.message });
+  }
+};
+
 module.exports = {
   createNotification,
   listNotifications,
@@ -471,4 +558,6 @@ module.exports = {
   getNotificationsByTicketId,
   getNotifiedTicketsCount,
   getNotificationsByTicketAndRecipient,
+  getAllNotificationsForReport,
+  notificationsAll
 };

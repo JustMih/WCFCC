@@ -146,9 +146,10 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
 
   // Determine SLA days for this role
   let slaDays = 0;
-  if (ticket.category === "Inquiry") {
-    slaDays = 3; // Inquiries: 3 days
-  } else if (ticket.category === "Complaint") {
+  // if (ticket.category === "Inquiry") {
+  //   slaDays = 3; // Inquiries: 3 days
+  // } else if (ticket.category === "Complaint") {
+ if (ticket.category === "Complaint") {
     slaDays = getSlaDaysForRole(currentRole, complaintType);
   } else {
     return false; // Not applicable
@@ -173,130 +174,98 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   const breached = workingDays > slaDays;
   if (!breached) return false;
 
-  // Determine if ticket is for directorate or unit
-  const isTicketDirectorate = ticket.section && ticket.section.toLowerCase().includes("directorate");
-  const isTicketUnit = ticket.section && ticket.section.toLowerCase() === "unit";
+  // Determine if ticket is for directorate or unit based on section
+  // Check both section and unit_section fields to determine ticket type
+  const sectionLower = (ticket.section || "").toLowerCase();
+  const unitSectionLower = (ticket.unit_section || "").toLowerCase();
+  
+  // More accurate detection: check if section contains "directorate" or equals "unit"
+  const isTicketDirectorate = sectionLower.includes("directorate") || unitSectionLower.includes("directorate");
+  const isTicketUnit = sectionLower === "unit" || unitSectionLower.includes("unit");
 
   // Check if current role is one that needs special escalation handling
-  const isEntryLevelRole = ["attendee", "super-admin", "focal-person", "supervisor", "reviewer"].includes(currentRole);
+  // Entry-level roles: attendee, agent, super-admin, focal-person, supervisor, reviewer
+  const isEntryLevelRole = ["attendee", "agent", "super-admin", "focal-person", "supervisor", "reviewer"].includes(currentRole);
 
   // Determine escalation path based on ticket type and current role
   let nextRole;
   
   if (isEntryLevelRole) {
-    // For attendee, super-admin, focal-person, supervisor, reviewer
+    // For entry-level roles (attendee, agent, super-admin, focal-person, supervisor, reviewer)
+    // Same entry-level roles for both Unit and Directorate
     if (isTicketDirectorate) {
-      // Directorate path: attendee/super-admin/focal-person/supervisor/reviewer → manager → director → director-general
-      if (currentRole === "attendee" || currentRole === "super-admin" || 
-          currentRole === "focal-person" || currentRole === "supervisor" || currentRole === "reviewer") {
-        nextRole = "manager";
-      } else if (currentRole === "manager") {
+      // Directorate path: entry-level → manager → director → director-general
+      nextRole = "manager";
+    } else if (isTicketUnit) {
+      // Unit path: entry-level → head-of-unit → director-general
+      nextRole = "head-of-unit";
+    } else {
+      // Cannot determine if ticket is for directorate or unit
+      console.warn(`Cannot determine ticket type (directorate/unit) for ticket ${ticket.id}. Cannot escalate.`);
+      return false;
+    }
+  } else {
+    // For higher-level roles (manager, director, head-of-unit)
+    if (isTicketDirectorate) {
+      // Directorate path: manager → director → director-general
+      if (currentRole === "manager") {
         nextRole = "director";
       } else if (currentRole === "director") {
         nextRole = "director-general";
-      } else {
+      } else if (currentRole === "director-general") {
         return false; // Already at top
+      } else {
+        // For other roles in directorate, escalate to director-general
+        nextRole = "director-general";
       }
     } else if (isTicketUnit) {
-      // Unit path: head-of-unit (of that unit) → director-general
-      if (currentRole === "attendee" || currentRole === "super-admin" || 
-          currentRole === "focal-person" || currentRole === "supervisor" || currentRole === "reviewer") {
-        nextRole = "head-of-unit";
-      } else if (currentRole === "head-of-unit") {
+      // Unit path: head-of-unit → director-general
+      if (currentRole === "head-of-unit") {
         nextRole = "director-general";
-      } else {
+      } else if (currentRole === "director-general") {
         return false; // Already at top
+      } else {
+        // For other roles in unit, escalate to director-general
+        nextRole = "director-general";
       }
     } else {
-      // Fallback: use old logic for other cases
-      const ESCALATION_PATH = {
-        inquiry: [
-          "reviewer",
-          "head-of-unit",
-          "director-general",
-        ],
-        complaint_minor: ["reviewer", "head-of-unit", "director-general"],
-        complaint_major: [
-          "reviewer",
-          "head-of-unit",
-          "director-general",
-        ],
-      };
-      let path;
-      if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
-      else if (ticket.category === "Complaint" && complaintType === "major")
-        path = ESCALATION_PATH.complaint_major;
-      else if (ticket.category === "Complaint")
-        path = ESCALATION_PATH.complaint_minor;
-      else return false;
-
-      const idx = path.indexOf(currentRole);
-      if (idx === -1 || idx === path.length - 1) return false;
-      nextRole = path[idx + 1];
-    }
-  } else {
-    // For other roles (reviewer, head-of-unit, manager, director, etc.)
-    // Use standard escalation paths
-    const ESCALATION_PATH = {
-      inquiry: [
-        "reviewer",
-        "head-of-unit",
-        "director-general",
-      ],
-      complaint_minor: ["reviewer", "head-of-unit", "director-general"],
-      complaint_major: [
-        "reviewer",
-        "head-of-unit",
-        "director-general",
-      ],
-    };
-    let path;
-    if (ticket.category === "Inquiry") path = ESCALATION_PATH.inquiry;
-    else if (ticket.category === "Complaint" && complaintType === "major")
-      path = ESCALATION_PATH.complaint_major;
-    else if (ticket.category === "Complaint")
-      path = ESCALATION_PATH.complaint_minor;
-    else return false;
-
-    const idx = path.indexOf(currentRole);
-    if (idx === -1 || idx === path.length - 1) return false;
-    nextRole = path[idx + 1];
-  }
-
-  // Find next user in same unit_section or sub_section
-  let sectionValue;
-  
-  if (isTicketDirectorate) {
-    // For directorate: use section to match user's unit_section
-    sectionValue = ticket.section;
-  } else if (isTicketUnit) {
-    // For unit: use sub_section to match user's unit_section
-    sectionValue = ticket.sub_section;
-  } else {
-    // Fallback: use unit_section
-    sectionValue = ticket.unit_section;
-  }
-  
-  const userWhere = { role: nextRole };
-  if (sectionValue) {
-    // Both directorate and unit match by unit_section in users table
-    userWhere.unit_section = sectionValue;
-  }
-  let nextUser = await User.findOne({ where: userWhere });
-  if (!nextUser) {
-    // Fallback: if no user found with role and section, escalate to supervisor
-    console.warn(
-      `No user found for role '${nextRole}' with section '${sectionValue}'. Escalating to supervisor instead.`
-    );
-    nextUser = await User.findOne({ where: { role: "supervisor" } });
-    if (!nextUser) {
-      console.error(
-        `Escalation failed: No supervisor found. Cannot escalate ticket ${ticket.id}.`
-      );
+      // Cannot determine if ticket is for directorate or unit
+      console.warn(`Cannot determine ticket type (directorate/unit) for ticket ${ticket.id}. Cannot escalate.`);
       return false;
     }
-    // Update nextRole to supervisor for assignment
-    nextRole = "supervisor";
+  }
+
+  // Find next user by role and section/sub_section matching ticket details
+  let sectionValue;
+  let sectionField; // 'unit_section' or 'sub_section' on User model
+
+  if (isTicketDirectorate) {
+    // For directorate: role is manager (then director, director-general). Match by sub_section = ticket's sub_section.
+    sectionValue = ticket.sub_section;
+    sectionField = "sub_section";
+  } else if (isTicketUnit) {
+    // For unit: match by unit_section = ticket's sub_section
+    sectionValue = ticket.sub_section;
+    sectionField = "unit_section";
+  } else {
+    // Cannot determine section value
+    console.warn(`Cannot determine section value for ticket ${ticket.id}. Cannot escalate.`);
+    return false;
+  }
+
+  // Find user by role and section field (unit_section or sub_section)
+  const userWhere = { role: nextRole };
+  if (sectionValue && sectionField) {
+    userWhere[sectionField] = sectionValue;
+  }
+  let nextUser = await User.findOne({ where: userWhere });
+
+  // If no user found, cannot escalate
+  if (!nextUser) {
+    console.error(
+      `Escalation failed: No user found for role '${nextRole}' with ${sectionField} '${sectionValue}'. Cannot escalate ticket ${ticket.id}.`
+    );
+    return false;
   }
 
   // Update ticket assignment
@@ -765,6 +734,7 @@ const createTicket = async (req, res) => {
     console.log("Subject field received:", req.body.subject);
     console.log("FunctionId field received:", req.body.functionId);
     console.log("Dependents field received:", req.body.dependents);
+    console.log("Is New Registration received:", req.body.is_new_registration, "Type:", typeof req.body.is_new_registration);
 
     const {
       firstName: rawFirstName,
@@ -814,6 +784,10 @@ const createTicket = async (req, res) => {
       representative_relationship,
       // New fields for dependents
       dependents,
+      // Claim number field
+      claimNumber,
+      // New registration flag
+      is_new_registration,
     } = req.body;
 
     // Debug: Log raw representative_name from request
@@ -1397,6 +1371,10 @@ const createTicket = async (req, res) => {
       dependents: Array.isArray(dependents)
         ? dependents.join(", ")
         : dependents,
+      // Add claim number if provided
+      claim_number: claimNumber || null,
+      // Add new registration flag if provided (convert to boolean explicitly)
+      is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
     };
 
     console.log("Final dependents value to be saved:", ticketData.dependents);
