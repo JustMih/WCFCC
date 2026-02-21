@@ -146,9 +146,10 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
 
   // Determine SLA days for this role
   let slaDays = 0;
-  if (ticket.category === "Inquiry") {
-    slaDays = 3; // Inquiries: 3 days
-  } else if (ticket.category === "Complaint") {
+  // if (ticket.category === "Inquiry") {
+  //   slaDays = 3; // Inquiries: 3 days
+  // } else if (ticket.category === "Complaint") {
+ if (ticket.category === "Complaint") {
     slaDays = getSlaDaysForRole(currentRole, complaintType);
   } else {
     return false; // Not applicable
@@ -234,33 +235,35 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     }
   }
 
-  // Find next user in same unit_section or sub_section
+  // Find next user by role and section/sub_section matching ticket details
   let sectionValue;
-  
+  let sectionField; // 'unit_section' or 'sub_section' on User model
+
   if (isTicketDirectorate) {
-    // For directorate: use section to match user's unit_section
-    sectionValue = ticket.section;
-  } else if (isTicketUnit) {
-    // For unit: use sub_section to match user's unit_section
+    // For directorate: role is manager (then director, director-general). Match by sub_section = ticket's sub_section.
     sectionValue = ticket.sub_section;
+    sectionField = "sub_section";
+  } else if (isTicketUnit) {
+    // For unit: match by unit_section = ticket's sub_section
+    sectionValue = ticket.sub_section;
+    sectionField = "unit_section";
   } else {
     // Cannot determine section value
     console.warn(`Cannot determine section value for ticket ${ticket.id}. Cannot escalate.`);
     return false;
   }
-  
-  // Find user by role and unit_section
+
+  // Find user by role and section field (unit_section or sub_section)
   const userWhere = { role: nextRole };
-  if (sectionValue) {
-    // Both directorate and unit match by unit_section in users table
-    userWhere.unit_section = sectionValue;
+  if (sectionValue && sectionField) {
+    userWhere[sectionField] = sectionValue;
   }
   let nextUser = await User.findOne({ where: userWhere });
 
   // If no user found, cannot escalate
   if (!nextUser) {
     console.error(
-      `Escalation failed: No user found for role '${nextRole}' with section '${sectionValue}'. Cannot escalate ticket ${ticket.id}.`
+      `Escalation failed: No user found for role '${nextRole}' with ${sectionField} '${sectionValue}'. Cannot escalate ticket ${ticket.id}.`
     );
     return false;
   }
