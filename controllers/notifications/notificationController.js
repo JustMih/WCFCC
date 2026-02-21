@@ -558,6 +558,5 @@ module.exports = {
   getNotificationsByTicketId,
   getNotifiedTicketsCount,
   getNotificationsByTicketAndRecipient,
-  getAllNotificationsForReport,
-  notificationsAll
+  getAllNotificationsForReport
 };
