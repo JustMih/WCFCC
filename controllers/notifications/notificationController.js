@@ -138,7 +138,7 @@ const listNotifications = async (req, res) => {
     // Filter out notifications for reversed tickets, BUT include:
     // 1. Reversal notifications for the recipient
     // 2. Tagged/mentioned notifications (always include, even if ticket is reversed)
-    const notificationsAll = allNotifications.filter(n => {
+    const notifications = allNotifications.filter(n => {
       if (!n.ticket) return false;
       
       const messageText = (n.message || '').toLowerCase();
@@ -173,7 +173,7 @@ const listNotifications = async (req, res) => {
       return true;
     });
     
-    return res.status(200).json({ notificationsAll });
+    return res.status(200).json({ notifications });
   } catch (error) {
     return res
       .status(500)
@@ -558,5 +558,5 @@ module.exports = {
   getNotificationsByTicketId,
   getNotifiedTicketsCount,
   getNotificationsByTicketAndRecipient,
-  getAllNotificationsForReport
+  getAllNotificationsForReport,
 };
