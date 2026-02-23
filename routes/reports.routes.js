@@ -48,4 +48,16 @@ router.get(
   reportsController.getTicketAssignmentsReport
 );
 
+// Notifications Report
+router.get(
+  "/notification-report/:startDate/:endDate",
+  reportsController.getNotificationsReport
+);
+
+// Escalation Report
+router.get(
+  "/escalation-report/:startDate/:endDate",
+  reportsController.getEscalationReport
+);
+
 module.exports = router;
