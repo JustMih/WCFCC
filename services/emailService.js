@@ -10,7 +10,7 @@ const fs = require('fs');
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = "https://192.168.21.69/";
+  const portalUrl = "https://contactcenter.wcf.go.tz/";
   
   return `<!doctype html>
     <html>
