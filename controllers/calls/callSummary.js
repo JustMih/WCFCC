@@ -2,181 +2,91 @@ const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
 
 /**
- * Get comprehensive call summary report from call_summary view
- * Supports optional date range filtering via query parameters
+ * Fetch total, answered, dropped, and lost counts from call_summary view for a date range.
+ * Uses `status` column (not cdr_status).
+ */
+async function getCountsForRange(startDate, endDate) {
+  const dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
+  const params = { startDate, endDate };
+
+  const [totalRes, answeredRes, droppedRes, lostRes] = await Promise.all([
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter}`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'ANSWERED'`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'DROPPED'`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'LOST'`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+  ]);
+
+  const toInt = (row) => parseInt(row[0]?.total || 0, 10);
+  return {
+    totalCalls: toInt(totalRes),
+    answered: toInt(answeredRes),
+    dropped: toInt(droppedRes),
+    lost: toInt(lostRes),
+  };
+}
+
+/**
+ * Get call statistics summary from call_summary view.
+ * Returns total calls, answered, dropped, and lost for current day, month, and year.
+ * Uses `status` (not cdr_status).
  * @route GET /api/call-summary/call-summary
- * @query {string} [startDate] - Start date (YYYY-MM-DD or YYYY-MM-DD HH:mm:ss)
- * @query {string} [endDate] - End date (YYYY-MM-DD or YYYY-MM-DD HH:mm:ss)
  */
 const getCallSummary = async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
 
-    // Determine date range - use defaults if not provided
-    let dateFilter = "";
-    let dateParams = {};
-    let actualStartDate, actualEndDate;
+    // Current day: 00:00:00 -> 23:59:59
+    const dayStart = `${y}-${m}-${d} 00:00:00`;
+    const dayEnd = `${y}-${m}-${d} 23:59:59`;
 
-    if (startDate && endDate) {
-      // Use provided date range
-      actualStartDate = startDate.includes(" ") ? startDate : `${startDate} 00:00:00`;
-      actualEndDate = endDate.includes(" ") ? endDate : `${endDate} 23:59:59`;
-      dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
-      dateParams = { startDate: actualStartDate, endDate: actualEndDate };
-    } else {
-      // Use default: current year
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      actualStartDate = `${currentYear}-01-01 00:00:00`;
-      actualEndDate = `${currentYear}-12-31 23:59:59`;
-      dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
-      dateParams = { startDate: actualStartDate, endDate: actualEndDate };
-    }
+    // Current month: first day 00:00:00 -> last day 23:59:59
+    const monthStart = `${y}-${m}-01 00:00:00`;
+    const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+    const monthEnd = `${y}-${m}-${String(lastDay).padStart(2, "0")} 23:59:59`;
 
-    // 1. Total Calls
-    const totalCallsQuery = `
-      SELECT COUNT(*) AS total
-      FROM call_summary
-      ${dateFilter}
-    `;
-    const totalCallsResult = await sequelize.query(totalCallsQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-    const totalCalls = parseInt(totalCallsResult[0]?.total || 0);
+    // Current year
+    const yearStart = `${y}-01-01 00:00:00`;
+    const yearEnd = `${y}-12-31 23:59:59`;
 
-    // 2. Answered Calls
-    const answeredCallsQuery = `
-      SELECT COUNT(*) AS total
-      FROM call_summary
-      ${dateFilter}
-      AND cdr_status = 'ANSWERED'
-    `;
-    const answeredCallsResult = await sequelize.query(answeredCallsQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-    const answeredCalls = parseInt(answeredCallsResult[0]?.total || 0);
+    const [currentDay, currentMonth, currentYear] = await Promise.all([
+      getCountsForRange(dayStart, dayEnd),
+      getCountsForRange(monthStart, monthEnd),
+      getCountsForRange(yearStart, yearEnd),
+    ]);
 
-    // 3. No Answered Calls
-    const noAnsweredCallsQuery = `
-      SELECT COUNT(*) AS total
-      FROM call_summary
-      ${dateFilter}
-      AND cdr_status = 'NO ANSWER'
-    `;
-    const noAnsweredCallsResult = await sequelize.query(noAnsweredCallsQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-    const noAnsweredCalls = parseInt(noAnsweredCallsResult[0]?.total || 0);
-
-    // 4. Busy Calls
-    const busyCallsQuery = `
-      SELECT COUNT(*) AS total
-      FROM call_summary
-      ${dateFilter}
-      AND cdr_status = 'BUSY'
-    `;
-    const busyCallsResult = await sequelize.query(busyCallsQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-    const busyCalls = parseInt(busyCallsResult[0]?.total || 0);
-
-    // 5. Call Trends - Daily
-    const dailyTrendQuery = `
-      SELECT 
-        DATE(call_start) AS date,
-        COUNT(*) AS count
-      FROM call_summary
-      ${dateFilter}
-      GROUP BY DATE(call_start)
-      ORDER BY date DESC
-    `;
-    const dailyTrend = await sequelize.query(dailyTrendQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-
-    // 6. Call Trends - Monthly
-    const monthlyTrendQuery = `
-      SELECT 
-        YEAR(call_start) AS year,
-        MONTH(call_start) AS month,
-        COUNT(*) AS count
-      FROM call_summary
-      ${dateFilter}
-      GROUP BY YEAR(call_start), MONTH(call_start)
-      ORDER BY year DESC, month DESC
-    `;
-    const monthlyTrend = await sequelize.query(monthlyTrendQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-
-    // 7. Call Trends - Yearly
-    const yearlyTrendQuery = `
-      SELECT 
-        YEAR(call_start) AS year,
-        COUNT(*) AS count
-      FROM call_summary
-      ${dateFilter}
-      GROUP BY YEAR(call_start)
-      ORDER BY year DESC
-    `;
-    const yearlyTrend = await sequelize.query(yearlyTrendQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-
-    // 8. Call Status Distribution - Yearly
-    const statusDistributionQuery = `
-      SELECT 
-        YEAR(call_start) AS year,
-        cdr_status AS status,
-        COUNT(*) AS count
-      FROM call_summary
-      ${dateFilter}
-      GROUP BY YEAR(call_start), cdr_status
-      ORDER BY year DESC, cdr_status ASC
-    `;
-    const statusDistribution = await sequelize.query(statusDistributionQuery, {
-      replacements: dateParams,
-      type: QueryTypes.SELECT,
-    });
-
-    // Format response
     const response = {
-      totalCalls,
-      answeredCalls,
-      noAnsweredCalls,
-      busyCalls,
-      trends: {
-        daily: dailyTrend.map((row) => ({
-          date: row.date,
-          count: parseInt(row.count || 0),
-        })),
-        monthly: monthlyTrend.map((row) => ({
-          year: parseInt(row.year || 0),
-          month: parseInt(row.month || 0),
-          count: parseInt(row.count || 0),
-        })),
-        yearly: yearlyTrend.map((row) => ({
-          year: parseInt(row.year || 0),
-          count: parseInt(row.count || 0),
-        })),
+      currentDay: {
+        totalCalls: currentDay.totalCalls,
+        answered: currentDay.answered,
+        dropped: currentDay.dropped,
+        lost: currentDay.lost,
       },
-      statusDistribution: {
-        yearly: statusDistribution.map((row) => ({
-          year: parseInt(row.year || 0),
-          status: row.status,
-          count: parseInt(row.count || 0),
-        })),
+      currentMonth: {
+        totalCalls: currentMonth.totalCalls,
+        answered: currentMonth.answered,
+        dropped: currentMonth.dropped,
+        lost: currentMonth.lost,
       },
-      dateRange: {
-        startDate: actualStartDate || null,
-        endDate: actualEndDate || null,
+      currentYear: {
+        totalCalls: currentYear.totalCalls,
+        answered: currentYear.answered,
+        dropped: currentYear.dropped,
+        lost: currentYear.lost,
       },
       timestamp: new Date().toISOString(),
     };
