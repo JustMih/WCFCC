@@ -790,6 +790,8 @@ const createTicket = async (req, res) => {
       is_new_registration,
     } = req.body;
 
+    const notificationReportId = req.body.notification_report_id ?? null;
+
     // Debug: Log raw representative_name from request
     console.log("🔍 RAW DATA FROM REQUEST BODY:");
     console.log("- rawRepresentativeName:", rawRepresentativeName);
@@ -1373,6 +1375,7 @@ const createTicket = async (req, res) => {
         : dependents,
       // Add claim number if provided
       claim_number: claimNumber || null,
+      notification_report_id: notificationReportId || null,
       // Add new registration flag if provided (convert to boolean explicitly)
       is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
     };
