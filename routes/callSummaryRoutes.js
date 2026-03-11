@@ -1,9 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const { getCallSummary } = require("../controllers/calls/callSummary");
+const {
+  getCallSummary,
+  getInboundOutboundSummary,
+} = require("../controllers/calls/callSummary");
 
-// Call summary route for dashboard
+// Call summary routes for dashboards
 router.get("/call-summary", getCallSummary);
+router.get("/call-summary-by-direction", getInboundOutboundSummary);
 
 module.exports = router;
 
