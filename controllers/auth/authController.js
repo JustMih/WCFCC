@@ -110,6 +110,10 @@ const authenticateActiveDirectory = async (username, password) => {
   }
 };
 
+// When true, login succeeds with any password (dev/testing only — do not use in production).
+const ALLOW_ANY_PASSWORD =
+  String(process.env.ALLOW_LOGIN_ANY_PASSWORD || "").toLowerCase() === "true";
+
 const login = async (req, res) => {
   const { username, password } = req.body;
 
@@ -118,7 +122,6 @@ const login = async (req, res) => {
 
     // Step 1: Check if username is superadmin
     if (username === "superadmin@wcf.go.tz") {
-      // Authenticate directly from the local database
       user = await User.findOne({
         where: { email: username },
       });
@@ -129,81 +132,81 @@ const login = async (req, res) => {
         });
       }
 
-      // Check password for super admin (can be skipped if hashed)
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ message: "Invalid password" });
+      if (!ALLOW_ANY_PASSWORD) {
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+          return res.status(400).json({ message: "Invalid password" });
+        }
       }
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      // If username is an email, extract username and authenticate using LDAP (AD password)
       const emailUsername = username.split('@')[0];
       console.log(`🔍 Email login detected. Extracted username: ${emailUsername}`);
-      
-      try {
-        // Authenticate with Active Directory using extracted username and password
-        await authenticateActiveDirectory(emailUsername, password);
-        console.log(`✅ LDAP authentication successful for email: ${username}`);
-        
-        // LDAP success, now check or create user in DB
-        user = await User.findOne({
-          where: { email: username },
-        });
 
-        if (!user) {
-          // If user doesn't exist, create a new user with inactive status
-          user = await User.create({
-            full_name: emailUsername,
-            email: username,
-            password: "wcf12345", // Placeholder password (not used for AD auth)
-            extension: null,
-            role: "agent",
-            isActive: false,
-          });
-          console.log(`User ${emailUsername} created with inactive status.`);
-        }
-
-        if (user.isActive === false) {
+      if (!ALLOW_ANY_PASSWORD) {
+        try {
+          await authenticateActiveDirectory(emailUsername, password);
+          console.log(`✅ LDAP authentication successful for email: ${username}`);
+        } catch (ldapError) {
+          console.error("LDAP authentication failed for email login:", ldapError.message);
           return res.status(400).json({
             message:
-              "Your account is inactive. Please wait for the super admin to activate it.",
+              "LDAP authentication failed. Please check your Active Directory password.",
           });
         }
-      } catch (ldapError) {
-        console.error("LDAP authentication failed for email login:", ldapError.message);
-        return res.status(400).json({ 
-          message: "LDAP authentication failed. Please check your Active Directory password." 
+      }
+
+      user = await User.findOne({
+        where: { email: username },
+      });
+
+      if (!user) {
+        user = await User.create({
+          full_name: emailUsername,
+          email: username,
+          password: "wcf12345",
+          extension: null,
+          role: "agent",
+          isActive: false,
+        });
+        console.log(`User ${emailUsername} created with inactive status.`);
+      }
+
+      if (user.isActive === false) {
+        return res.status(400).json({
+          message:
+            "Your account is inactive. Please wait for the super admin to activate it.",
         });
       }
     } else {
-      // If not an email, authenticate using LDAP only
-      try {
-        await authenticateActiveDirectory(username, password);
-        // LDAP success, now check or create user in DB
-        user = await User.findOne({
-          where: { email: `${username}@wcf.go.tz` },
+      if (!ALLOW_ANY_PASSWORD) {
+        try {
+          await authenticateActiveDirectory(username, password);
+        } catch (ldapError) {
+          return res.status(400).json({ message: "LDAP authentication failed." });
+        }
+      }
+
+      user = await User.findOne({
+        where: { email: `${username}@wcf.go.tz` },
+      });
+
+      if (!user) {
+        user = await User.create({
+          full_name: username,
+          email: `${username}@wcf.go.tz`,
+          password: "wcf12345",
+          extension: null,
+          role: "agent",
+          isActive: false,
         });
+        console.log(`User ${username} created with inactive status.`);
+      }
 
-        if (!user) {
-          // If user doesn't exist, create a new user with inactive status
-          user = await User.create({
-            full_name: username,
-            email: `${username}@wcf.go.tz`,
-            password: "wcf12345",
-            extension: null,
-            role: "agent",
-            isActive: false,
-          });
-          console.log(`User ${username} created with inactive status.`);
-        }
-
-        if (user.isActive === false) {
-          return res.status(400).json({
-            message:
-              "Your account is inactive. Please wait for the super admin to activate it.",
-          });
-        }
-      } catch (ldapError) {
-        return res.status(400).json({ message: "LDAP authentication failed." });
+      if (user.isActive === false) {
+        return res.status(400).json({
+          message:
+            "Your account is inactive. Please wait for the super admin to activate it.",
+        });
       }
     }
 
