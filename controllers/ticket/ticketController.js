@@ -1376,6 +1376,7 @@ const createTicket = async (req, res) => {
       // Add claim number if provided
       claim_number: claimNumber || null,
       notification_report_id: notificationReportId || null,
+      employer_registration_number: employerRegistrationNumber || null,
       // Add new registration flag if provided (convert to boolean explicitly)
       is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
     };
@@ -4502,9 +4503,16 @@ const assignTicket = async (req, res) => {
       category: ticket.category || "Assignment"
     });
 
-    // Send notification to the new assignee (optional)
-    try {
-      if (assignedTo.email) {
+    // Send email notification to the new assignee (required for assignee to be notified)
+    let assigneeEmail = assignedTo.email && String(assignedTo.email).trim();
+    if (!assigneeEmail && assignedTo.username && String(assignedTo.username).trim()) {
+      assigneeEmail = `${String(assignedTo.username).trim()}@wcf.go.tz`;
+      console.log(`📧 [Assign] Assignee has no email in DB – using fallback ${assigneeEmail} for ticket ${ticket.ticket_id || ticketId}`);
+    }
+    if (!assigneeEmail) {
+      console.warn(`⚠️ [Assign] Assignee ${assignedTo.full_name || assignedTo.username} (id: ${assignedTo.id}) has no email – assignment email not sent for ticket ${ticket.ticket_id || ticketId}`);
+    } else {
+      try {
         const subject = `Ticket Assigned: ${ticket.ticket_id || ticket.id}`;
         const bodyHtml = `
           <p>Hello ${assignedTo.full_name || ""},</p>
@@ -4523,12 +4531,12 @@ const assignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
-        // Send email in background to avoid blocking assignment
-        sendEmailNonBlocking({ to: assignedTo.email, subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: assigneeEmail, subject, htmlBody, attachments: attachments });
+        console.log(`📧 [Assign] Assignment email queued to ${assigneeEmail} for ticket ${ticket.ticket_id || ticketId}`);
+      } catch (notificationError) {
+        console.error("Error sending assignment email:", notificationError);
+        // Do not fail the assignment if notification fails
       }
-    } catch (notificationError) {
-      console.error("Error sending notification:", notificationError);
-      // Do not fail the assignment if notification fails
     }
 
     res.status(200).json({
@@ -5706,12 +5714,19 @@ const reassignTicket = async (req, res) => {
       status: "unread",
     });
 
-    // Resolve new assignee for response message
-    const newAssignee = await User.findByPk(assigned_to_id);
+    // Resolve new assignee for response message and email
+    const newAssignee = await User.findByPk(assigned_to_id, { attributes: ["id", "full_name", "username", "email", "role"] });
 
-    // Send notification to the new assignee (optional)
-    try {
-      if (newAssignee && newAssignee.email) {
+    // Send email notification to the new assignee (required for assignee to be notified)
+    let reassignEmail = newAssignee?.email && String(newAssignee.email).trim();
+    if (!reassignEmail && newAssignee?.username && String(newAssignee.username).trim()) {
+      reassignEmail = `${String(newAssignee.username).trim()}@wcf.go.tz`;
+      console.log(`📧 [Reassign] New assignee has no email in DB – using fallback ${reassignEmail} for ticket ${ticket.ticket_id || ticketId}`);
+    }
+    if (!reassignEmail) {
+      console.warn(`⚠️ [Reassign] New assignee ${newAssignee?.full_name || newAssignee?.username || assigned_to_id} has no email – reassignment email not sent for ticket ${ticket.ticket_id || ticketId}`);
+    } else {
+      try {
         const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
         const bodyHtml = `
           <p>Hello ${newAssignee.full_name || ""},</p>
@@ -5730,12 +5745,12 @@ const reassignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
-        // Send email in background to avoid blocking reassignment
-        sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: reassignEmail, subject, htmlBody, attachments: attachments });
+        console.log(`📧 [Reassign] Reassignment email queued to ${reassignEmail} for ticket ${ticket.ticket_id || ticketId}`);
+      } catch (notificationError) {
+        console.error("Error sending reassignment email:", notificationError);
+        // Do not fail the reassignment if notification fails
       }
-    } catch (notificationError) {
-      console.error("Error sending notification:", notificationError);
-      // Do not fail the reassignment if notification fails
     }
 
     res.status(200).json({

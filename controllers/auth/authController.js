@@ -525,22 +525,35 @@ const loginRedirect = async (req, res) => {
       fullBody: req.body,
     });
 
-    // Extract username from logged-in user
-    // Use username if available, otherwise extract from email (format: username@wcf.go.tz)
-    let username = user.username;
-    if (!username && user.email) {
-      username = user.email.split('@')[0];
-    }
+    // Extract username for MAC/AD
+    // Prefer email prefix (usually matches AD account). Fallback to user.username.
+    const usernameSource =
+      (user.email && user.email.includes("@") ? user.email.split("@")[0] : "") ||
+      user.username ||
+      "";
+    let username = usernameSource;
     if (!username) {
       return res.status(400).json({ 
         message: "User username not found. Cannot proceed with MAC login." 
       });
     }
 
+    // MAC redirect: omit middle name (3+ parts cause "page not found").
+    // Keep separator style: if source uses dots -> "first.last", else -> "first last".
+    const trimmed = String(username).trim();
+    const parts = trimmed.split(/[\s.]+/).filter(Boolean);
+    if (parts.length >= 3) {
+      const sep = trimmed.includes(".") ? "." : " ";
+      username = `${parts[0]}${sep}${parts[parts.length - 1]}`;
+    } else {
+      username = trimmed;
+    }
+
     console.log("🔍 Using logged-in user credentials:", {
       userId: user.id,
-      username: username,
-      email: user.email
+      usernameSource,
+      username,
+      email: user.email,
     });
 
     const auth_data = {

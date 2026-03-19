@@ -114,6 +114,7 @@ const Ticket = sequelize.define(
     dependents: { type: DataTypes.STRING(1000), allowNull: true },
     claim_number: { type: DataTypes.STRING(100), allowNull: true },
     notification_report_id: { type: DataTypes.STRING(100), allowNull: true },
+    employer_registration_number: { type: DataTypes.STRING(100), allowNull: true },
     is_new_registration: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     
     // Workflow Tracking Fields
