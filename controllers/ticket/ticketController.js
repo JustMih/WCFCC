@@ -258,7 +258,70 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (sectionValue && sectionField) {
     userWhere[sectionField] = sectionValue;
   }
-  let nextUser = await User.findOne({ where: userWhere });
+
+  /**
+   * Map ticket context to manager designation for Directorate escalations to `manager`.
+   * CADM = Claims Administration Manager, CM = Compliance Manager (matches managerDesignationMapping elsewhere).
+   */
+  const getManagerDesignationForSubSection = (section) => {
+    const inquiryType = (ticket.inquiry_type || "").toLowerCase();
+    if (inquiryType === "claims") return "CADM";
+    if (inquiryType === "compliance") return "CM";
+
+    const normalized = (section || "").toLowerCase();
+    if (normalized.includes("claims administration")) return "CADM";
+    if (normalized.includes("compliance")) return "CM";
+    return null;
+  };
+
+  let nextUser = null;
+  if (isTicketDirectorate && nextRole === "manager") {
+    const managerDesignation = getManagerDesignationForSubSection(
+      sectionValue || ticket.sub_section
+    );
+    if (managerDesignation) {
+      const designationWhere = {
+        ...userWhere,
+        designation: managerDesignation,
+      };
+
+      console.log("DEBUG: Escalation manager lookup (directorate)", {
+        ticketId: ticket.id,
+        sub_section: ticket.sub_section,
+        inquiry_type: ticket.inquiry_type,
+        sectionValue,
+        sectionField,
+        nextRole,
+        managerDesignation,
+        designationWhere,
+      });
+
+      nextUser = await User.findOne({ where: designationWhere });
+      if (!nextUser) {
+        console.log(
+          "DEBUG: Designation-based manager not found, falling back to sub_section lookup",
+          {
+            ticketId: ticket.id,
+            managerDesignation,
+            originalWhere: userWhere,
+          }
+        );
+      }
+    } else {
+      console.log(
+        "DEBUG: No manager designation mapping for directorate sub_section, using fallback lookup",
+        {
+          ticketId: ticket.id,
+          sub_section: ticket.sub_section,
+          inquiry_type: ticket.inquiry_type,
+        }
+      );
+    }
+  }
+
+  if (!nextUser) {
+    nextUser = await User.findOne({ where: userWhere });
+  }
 
   // If no user found, cannot escalate
   if (!nextUser) {
