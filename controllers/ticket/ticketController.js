@@ -5815,6 +5815,78 @@ const reassignTicket = async (req, res) => {
   }
 };
 
+const exchangeTicketOwnership = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { assigned_to_id, assigned_to_role, reassignment_reason, notes } = req.body;
+    const assigned_by_id = req.user?.userId;
+
+    if (!assigned_to_id || !assigned_to_role) {
+      return res.status(400).json({
+        success: false,
+        message: "assigned_to_id and assigned_to_role are required",
+      });
+    }
+
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    const normalizedStatus = String(ticket.status || "").trim().toLowerCase();
+    if (normalizedStatus === "closed" || normalizedStatus === "resolved") {
+      return res.status(400).json({
+        success: false,
+        message: "Ownership exchange is not allowed for closed/resolved tickets",
+      });
+    }
+
+    await TicketAssignment.create({
+      ticket_id: ticketId,
+      assigned_by_id,
+      assigned_to_id,
+      assigned_to_role,
+      action: "Ownership Exchange",
+      reason: reassignment_reason || notes || "Ticket ownership exchanged",
+      created_at: new Date(),
+    });
+
+    await Ticket.update(
+      {
+        assigned_to_id,
+        assigned_to_role,
+        status: "Assigned",
+      },
+      { where: { id: ticketId } }
+    );
+
+    await Notification.create({
+      ticket_id: ticketId,
+      sender_id: assigned_by_id,
+      recipient_id: assigned_to_id,
+      message: `Ticket ownership transferred to you: ${ticket.subject || ticket.ticket_id}`,
+      channel: "In-System",
+      status: "unread",
+    });
+
+    const newAssignee = await User.findByPk(assigned_to_id);
+    res.status(200).json({
+      success: true,
+      message: `Ticket ownership exchanged successfully to ${newAssignee?.full_name || newAssignee?.username || assigned_to_id} (${newAssignee?.role || assigned_to_role || "user"})`,
+    });
+  } catch (error) {
+    console.error("Error in exchangeTicketOwnership:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to exchange ticket ownership",
+      error: error.message,
+    });
+  }
+};
+
 
 const getInProgressAssignments = async (req, res) => {
   try {
@@ -8960,6 +9032,7 @@ module.exports = {
   getAssignedNotifiedTickets,
   getDashboardCounts,
   reassignTicket,
+  exchangeTicketOwnership,
   getInProgressAssignments,
   reverseTicket,
   getOpenTicketsCount,
