@@ -31,6 +31,20 @@ const getTicketAttachments = (ticket) => {
   return attachmentPath ? [attachmentPath] : [];
 };
 
+/**
+ * Ticket notification emails:
+ * - Default / false / unset: all go to sandbox (not real DB emails) — TICKET_EMAIL_OVERRIDE or reynah762@gmail.com
+ * - Production only: TICKET_EMAIL_USE_REAL_RECIPIENTS=true (exactly 1/true/yes)
+ */
+function ticketEmailTo(actualTo) {
+  if (actualTo == null || actualTo === "") return actualTo;
+  const flag = String(process.env.TICKET_EMAIL_USE_REAL_RECIPIENTS || "").trim().toLowerCase();
+  const useRealRecipients = ["1", "true", "yes"].includes(flag);
+  if (useRealRecipients) return actualTo;
+  const testInbox = (process.env.TICKET_EMAIL_OVERRIDE || "reynah762@gmail.com").trim();
+  return testInbox || actualTo;
+}
+
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
  * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.
@@ -315,7 +329,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        to: previousAssignee.email,
+        to: ticketEmailTo(previousAssignee.email),
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -347,7 +361,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        to: nextUser.email,
+        to: ticketEmailTo(nextUser.email),
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -1548,7 +1562,7 @@ const createTicket = async (req, res) => {
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       const attachments = getTicketAttachments(newTicket);
       // Send emails in background to avoid blocking the assignment
-      sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: ticketEmailTo(assignedUser.email), subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
     if (!shouldClose) {
@@ -1590,7 +1604,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: supervisor.email,
+          to: ticketEmailTo(supervisor.email),
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
           attachments: attachments,
@@ -1635,7 +1649,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: supervisor.email,
+              to: ticketEmailTo(supervisor.email),
               subject: inquirySupervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1677,7 +1691,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: creatorUser.email,
+          to: ticketEmailTo(creatorUser.email),
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
           attachments: attachments,
@@ -1728,7 +1742,7 @@ const createTicket = async (req, res) => {
         `;
         const attachments = getTicketAttachments(newTicket);
         sendEmail({
-          to: headOfUnit.email,
+          to: ticketEmailTo(headOfUnit.email),
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -1894,7 +1908,7 @@ const createTicket = async (req, res) => {
           const attachments = getTicketAttachments(newTicket);
           
           sendEmail({
-            to: creatorUser.email,
+            to: ticketEmailTo(creatorUser.email),
             subject: emailSubject,
             htmlBody: htmlBody,
             attachments: attachments,
@@ -1935,7 +1949,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: supervisor.email,
+              to: ticketEmailTo(supervisor.email),
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1980,7 +1994,7 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       
       sendEmail({
-        to: assignedUser.email,
+        to: ticketEmailTo(assignedUser.email),
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -2027,7 +2041,7 @@ const createTicket = async (req, res) => {
         const attachments = getTicketAttachments(newTicket);
         
         sendEmail({
-          to: closingAgent.email,
+          to: ticketEmailTo(closingAgent.email),
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -3713,7 +3727,7 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          to: user.email,
+          to: ticketEmailTo(user.email),
           subject,
           htmlBody,
           attachments: attachments,
@@ -3944,7 +3958,7 @@ const closeTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: supervisor.email,
+          to: ticketEmailTo(supervisor.email),
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
@@ -4110,7 +4124,7 @@ const closeTicket = async (req, res) => {
         const attachments = getTicketAttachments(ticket);
         
         sendEmail({
-          to: ticket.creator.email,
+          to: ticketEmailTo(ticket.creator.email),
           subject: emailSubject,
           htmlBody: htmlBody,
           attachments: attachments,
@@ -4329,7 +4343,7 @@ const closeReviewerTicket = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       sendEmail({
-        to: ticket.creator.email,
+        to: ticketEmailTo(ticket.creator.email),
         subject: emailSubject,
         htmlBody: htmlBody,
         attachments: attachments,
@@ -4531,7 +4545,7 @@ const assignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
-        sendEmailNonBlocking({ to: assigneeEmail, subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: ticketEmailTo(assigneeEmail), subject, htmlBody, attachments: attachments });
         console.log(`📧 [Assign] Assignment email queued to ${assigneeEmail} for ticket ${ticket.ticket_id || ticketId}`);
       } catch (notificationError) {
         console.error("Error sending assignment email:", notificationError);
@@ -5745,7 +5759,7 @@ const reassignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
-        sendEmailNonBlocking({ to: reassignEmail, subject, htmlBody, attachments: attachments });
+        sendEmailNonBlocking({ to: ticketEmailTo(reassignEmail), subject, htmlBody, attachments: attachments });
         console.log(`📧 [Reassign] Reassignment email queued to ${reassignEmail} for ticket ${ticket.ticket_id || ticketId}`);
       } catch (notificationError) {
         console.error("Error sending reassignment email:", notificationError);
@@ -5927,7 +5941,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
-        to: prevUser.email,
+        to: ticketEmailTo(prevUser.email),
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments
@@ -7011,7 +7025,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: directorGeneral.email,
+            to: ticketEmailTo(directorGeneral.email),
             subject: emailSubject,
             htmlBody: emailHtmlBody,
             attachments: attachments
@@ -7565,7 +7579,7 @@ const reverseComplaint = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       // Send email in background to avoid blocking
-      sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: ticketEmailTo(targetUser.email), subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7699,7 +7713,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: reviewer.email,
+            to: ticketEmailTo(reviewer.email),
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7823,7 +7837,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: reviewer.email,
+            to: ticketEmailTo(reviewer.email),
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -8144,7 +8158,7 @@ const managerAttendMajor = async (req, res) => {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        to: headOfUnit.email,
+        to: ticketEmailTo(headOfUnit.email),
         subject: emailSubject,
         htmlBody: emailBody,
         attachments: attachments
@@ -8772,7 +8786,7 @@ const managerSendToDirector = async (req, res) => {
       // Get attachments for email
       const attachments = getTicketAttachments(ticket);
       
-      sendEmailNonBlocking({ to: director.email, subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: ticketEmailTo(director.email), subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({
