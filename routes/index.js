@@ -28,6 +28,7 @@ const ticketUpdateRoutes = require("./ticketUpdateRoutes");
 const ticketChartRoutes = require("./ticketChartRoutes");
 const ticketSummaryRoutes = require("./ticketSummaryRoutes");
 const callSummaryRoutes = require("./callSummaryRoutes");
+const logRoutes = require("./logRoutes");
 const router = express.Router();
 // const monitorRoutes = require("./monitorRoutes");
 const missedCallRoutes = require("./missedCallRoutes");
@@ -72,6 +73,7 @@ router.use("/complaints", complaintWorkflowRoutes);
 router.use("/focal-person", focalPersonRoutes);
 router.use("/lookup-tables", lookupTableRoutes);
 router.use("/reports", reportsRoutes);
+router.use("/logs", logRoutes);
 router.use("/", instagramComments);
 
 module.exports = router;

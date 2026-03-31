@@ -2,20 +2,25 @@ const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
 
 /**
- * Fetch total, answered, dropped, and lost counts from call_summary view for a date range.
+ * Fetch total, answered (with agent), IVR (answered without agent),
+ * dropped, and lost counts from call_summary view for a date range.
  * Uses `status` column (not cdr_status).
  */
 async function getCountsForRange(startDate, endDate) {
   const dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
   const params = { startDate, endDate };
 
-  const [totalRes, answeredRes, droppedRes, lostRes] = await Promise.all([
+  const [totalRes, answeredRes, ivrRes, droppedRes, lostRes] = await Promise.all([
     sequelize.query(
       `SELECT COUNT(*) AS total FROM call_summary ${dateFilter}`,
       { replacements: params, type: QueryTypes.SELECT }
     ),
     sequelize.query(
-      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'ANSWERED'`,
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'ANSWERED' AND agent IS NOT NULL`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'ANSWERED' AND agent IS NULL`,
       { replacements: params, type: QueryTypes.SELECT }
     ),
     sequelize.query(
@@ -32,6 +37,49 @@ async function getCountsForRange(startDate, endDate) {
   return {
     totalCalls: toInt(totalRes),
     answered: toInt(answeredRes),
+    ivr: toInt(ivrRes),
+    dropped: toInt(droppedRes),
+    lost: toInt(lostRes),
+  };
+}
+
+/**
+ * Fetch answered, IVR, dropped, and lost counts from call_summary
+ * for a given date range and direction (e.g. 'INBOUND' or 'OUTBOUND').
+ * Assumes call_summary has a `direction` column.
+ */
+async function getCountsForRangeByDirection(startDate, endDate, direction) {
+  const dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
+  const params = { startDate, endDate, direction };
+
+  const [totalRes, answeredRes, ivrRes, droppedRes, lostRes] = await Promise.all([
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND direction = :direction`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'ANSWERED' AND agent IS NOT NULL AND direction = :direction`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'ANSWERED' AND agent IS NULL AND direction = :direction`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'DROPPED' AND direction = :direction`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND status = 'LOST' AND direction = :direction`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+  ]);
+
+  const toInt = (row) => parseInt(row[0]?.total || 0, 10);
+  return {
+    totalCalls: toInt(totalRes),
+    answered: toInt(answeredRes),
+    ivr: toInt(ivrRes),
     dropped: toInt(droppedRes),
     lost: toInt(lostRes),
   };
@@ -39,7 +87,8 @@ async function getCountsForRange(startDate, endDate) {
 
 /**
  * Get call statistics summary from call_summary view.
- * Returns total calls, answered, dropped, and lost for current day, month, and year.
+ * Returns total calls, answered (with agent), IVR (answered without agent),
+ * dropped, and lost for current day, month, and year.
  * Uses `status` (not cdr_status).
  * @route GET /api/call-summary/call-summary
  */
@@ -73,18 +122,21 @@ const getCallSummary = async (req, res) => {
       currentDay: {
         totalCalls: currentDay.totalCalls,
         answered: currentDay.answered,
+        ivr: currentDay.ivr,
         dropped: currentDay.dropped,
         lost: currentDay.lost,
       },
       currentMonth: {
         totalCalls: currentMonth.totalCalls,
         answered: currentMonth.answered,
+        ivr: currentMonth.ivr,
         dropped: currentMonth.dropped,
         lost: currentMonth.lost,
       },
       currentYear: {
         totalCalls: currentYear.totalCalls,
         answered: currentYear.answered,
+        ivr: currentYear.ivr,
         dropped: currentYear.dropped,
         lost: currentYear.lost,
       },
@@ -101,7 +153,44 @@ const getCallSummary = async (req, res) => {
   }
 };
 
+/**
+ * Get inbound vs outbound call statistics summary from call_summary view
+ * for the current day only.
+ * Each section returns total, answered (with agent), IVR (answered without agent),
+ * dropped, and lost.
+ * @route GET /api/call-summary/call-summary-by-direction
+ */
+const getInboundOutboundSummary = async (req, res) => {
+  try {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+
+    const dayStart = `${y}-${m}-${d} 00:00:00`;
+    const dayEnd = `${y}-${m}-${d} 23:59:59`;
+
+    const [inbound, outbound] = await Promise.all([
+      getCountsForRangeByDirection(dayStart, dayEnd, "INBOUND"),
+      getCountsForRangeByDirection(dayStart, dayEnd, "OUTBOUND"),
+    ]);
+
+    res.json({
+      inbound,
+      outbound,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Error retrieving inbound/outbound call summary data:", err.message);
+    res.status(500).json({
+      error: "Internal Server Error",
+      message: err.message,
+    });
+  }
+};
+
 module.exports = {
   getCallSummary,
+  getInboundOutboundSummary,
 };
 

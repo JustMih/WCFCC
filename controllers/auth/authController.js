@@ -569,17 +569,11 @@ const loginRedirect = async (req, res) => {
     // 3. Encrypt token
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
-    // 4. Build MAC App URL (include claim number in URL so MAC can read it)
+    // 4. Build MAC App URL
     const macAppUrl = process.env.MAC_APP_URL || "https://mac.wcf.go.tz/";
-    const baseUrl = `${macAppUrl}login_redirect?token=${encodeURIComponent(
+    const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
       encryptedToken
     )}`;
-    const claimIdStr = idRaw != null ? String(idRaw).trim() : "";
-    const hasValidClaimId =
-      claimIdStr !== "" && claimIdStr !== "0" && idRaw !== 0;
-    const url = hasValidClaimId
-      ? `${baseUrl}&notification_report_id=${encodeURIComponent(claimIdStr)}`
-      : baseUrl;
 
     // 5. Respond appropriately
     const acceptsJson =

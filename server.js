@@ -99,6 +99,10 @@ app.use(
     credentials: true,
   })
 );
+
+// Request logging middleware (must come after JSON/CORS, before routes)
+const { requestLogger } = require("./middleware/requestLogger");
+app.use(requestLogger);
 setInterval(() => {
   if (!amiLive?.getLiveQueueCalls) return;
 

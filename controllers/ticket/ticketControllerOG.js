@@ -31,20 +31,6 @@ const getTicketAttachments = (ticket) => {
   return attachmentPath ? [attachmentPath] : [];
 };
 
-/**
- * Ticket notification emails:
- * - Default / false / unset: all go to sandbox (not real DB emails) — TICKET_EMAIL_OVERRIDE or reynah762@gmail.com
- * - Production only: TICKET_EMAIL_USE_REAL_RECIPIENTS=true (exactly 1/true/yes)
- */
-function ticketEmailTo(actualTo) {
-  if (actualTo == null || actualTo === "") return actualTo;
-  const flag = String(process.env.TICKET_EMAIL_USE_REAL_RECIPIENTS || "").trim().toLowerCase();
-  const useRealRecipients = ["1", "true", "yes"].includes(flag);
-  if (useRealRecipients) return actualTo;
-  const testInbox = (process.env.TICKET_EMAIL_OVERRIDE || "reynah762@gmail.com").trim();
-  return testInbox || actualTo;
-}
-
 // Utility: Calculate working days between two dates, excluding weekends and optional holidays
 /**
  * Calculate the number of working days (Mon-Fri) between two dates, excluding optional holidays.
@@ -272,70 +258,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   if (sectionValue && sectionField) {
     userWhere[sectionField] = sectionValue;
   }
-
-  /**
-   * Map ticket context to manager designation for Directorate escalations to `manager`.
-   * CADM = Claims Administration Manager, CM = Compliance Manager (matches managerDesignationMapping elsewhere).
-   */
-  const getManagerDesignationForSubSection = (section) => {
-    const inquiryType = (ticket.inquiry_type || "").toLowerCase();
-    if (inquiryType === "claims") return "CADM";
-    if (inquiryType === "compliance") return "CM";
-
-    const normalized = (section || "").toLowerCase();
-    if (normalized.includes("claims administration")) return "CADM";
-    if (normalized.includes("compliance")) return "CM";
-    return null;
-  };
-
-  let nextUser = null;
-  if (isTicketDirectorate && nextRole === "manager") {
-    const managerDesignation = getManagerDesignationForSubSection(
-      sectionValue || ticket.sub_section
-    );
-    if (managerDesignation) {
-      const designationWhere = {
-        ...userWhere,
-        designation: managerDesignation,
-      };
-
-      console.log("DEBUG: Escalation manager lookup (directorate)", {
-        ticketId: ticket.id,
-        sub_section: ticket.sub_section,
-        inquiry_type: ticket.inquiry_type,
-        sectionValue,
-        sectionField,
-        nextRole,
-        managerDesignation,
-        designationWhere,
-      });
-
-      nextUser = await User.findOne({ where: designationWhere });
-      if (!nextUser) {
-        console.log(
-          "DEBUG: Designation-based manager not found, falling back to sub_section lookup",
-          {
-            ticketId: ticket.id,
-            managerDesignation,
-            originalWhere: userWhere,
-          }
-        );
-      }
-    } else {
-      console.log(
-        "DEBUG: No manager designation mapping for directorate sub_section, using fallback lookup",
-        {
-          ticketId: ticket.id,
-          sub_section: ticket.sub_section,
-          inquiry_type: ticket.inquiry_type,
-        }
-      );
-    }
-  }
-
-  if (!nextUser) {
-    nextUser = await User.findOne({ where: userWhere });
-  }
+  let nextUser = await User.findOne({ where: userWhere });
 
   // If no user found, cannot escalate
   if (!nextUser) {
@@ -392,7 +315,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        to: ticketEmailTo(previousAssignee.email),
+        to: previousAssignee.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -424,7 +347,7 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        to: ticketEmailTo(nextUser.email),
+        to: nextUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -866,8 +789,6 @@ const createTicket = async (req, res) => {
       // New registration flag
       is_new_registration,
     } = req.body;
-
-    const notificationReportId = req.body.notification_report_id ?? null;
 
     // Debug: Log raw representative_name from request
     console.log("🔍 RAW DATA FROM REQUEST BODY:");
@@ -1452,8 +1373,6 @@ const createTicket = async (req, res) => {
         : dependents,
       // Add claim number if provided
       claim_number: claimNumber || null,
-      notification_report_id: notificationReportId || null,
-      employer_registration_number: employerRegistrationNumber || null,
       // Add new registration flag if provided (convert to boolean explicitly)
       is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
     };
@@ -1625,7 +1544,7 @@ const createTicket = async (req, res) => {
       const emailHtmlBody = renderEmailCard(emailSubject, bodyHtml, detailsHtml);
       const attachments = getTicketAttachments(newTicket);
       // Send emails in background to avoid blocking the assignment
-      sendEmailNonBlocking({ to: ticketEmailTo(assignedUser.email), subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: assignedUser.email, subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
     if (!shouldClose) {
@@ -1667,7 +1586,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: ticketEmailTo(supervisor.email),
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
           attachments: attachments,
@@ -1712,7 +1631,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: ticketEmailTo(supervisor.email),
+              to: supervisor.email,
               subject: inquirySupervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -1754,7 +1673,7 @@ const createTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: ticketEmailTo(creatorUser.email),
+          to: creatorUser.email,
           subject: creatorEmailSubject,
           htmlBody: creatorEmailHtmlBody,
           attachments: attachments,
@@ -1805,7 +1724,7 @@ const createTicket = async (req, res) => {
         `;
         const attachments = getTicketAttachments(newTicket);
         sendEmail({
-          to: ticketEmailTo(headOfUnit.email),
+          to: headOfUnit.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -1971,7 +1890,7 @@ const createTicket = async (req, res) => {
           const attachments = getTicketAttachments(newTicket);
           
           sendEmail({
-            to: ticketEmailTo(creatorUser.email),
+            to: creatorUser.email,
             subject: emailSubject,
             htmlBody: htmlBody,
             attachments: attachments,
@@ -2012,7 +1931,7 @@ const createTicket = async (req, res) => {
             
             // Send email in background to avoid blocking
             sendEmailNonBlocking({
-              to: ticketEmailTo(supervisor.email),
+              to: supervisor.email,
               subject: supervisorEmailSubject,
               htmlBody: supervisorEmailHtmlBody,
               attachments: attachments,
@@ -2057,7 +1976,7 @@ const createTicket = async (req, res) => {
       const attachments = getTicketAttachments(newTicket);
       
       sendEmail({
-        to: ticketEmailTo(assignedUser.email),
+        to: assignedUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments,
@@ -2104,7 +2023,7 @@ const createTicket = async (req, res) => {
         const attachments = getTicketAttachments(newTicket);
         
         sendEmail({
-          to: ticketEmailTo(closingAgent.email),
+          to: closingAgent.email,
           subject: emailSubject,
           htmlBody: emailBody,
           attachments: attachments,
@@ -3790,7 +3709,7 @@ async function notifyUsersByRole(
     if (user.email) {
       setImmediate(() => {
         sendEmail({
-          to: ticketEmailTo(user.email),
+          to: user.email,
           subject,
           htmlBody,
           attachments: attachments,
@@ -4021,7 +3940,7 @@ const closeTicket = async (req, res) => {
         
         // Send email in background to avoid blocking
         sendEmailNonBlocking({
-          to: ticketEmailTo(supervisor.email),
+          to: supervisor.email,
           subject: supervisorEmailSubject,
           htmlBody: supervisorEmailHtmlBody,
             attachments: attachments,
@@ -4187,7 +4106,7 @@ const closeTicket = async (req, res) => {
         const attachments = getTicketAttachments(ticket);
         
         sendEmail({
-          to: ticketEmailTo(ticket.creator.email),
+          to: ticket.creator.email,
           subject: emailSubject,
           htmlBody: htmlBody,
           attachments: attachments,
@@ -4406,7 +4325,7 @@ const closeReviewerTicket = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       sendEmail({
-        to: ticketEmailTo(ticket.creator.email),
+        to: ticket.creator.email,
         subject: emailSubject,
         htmlBody: htmlBody,
         attachments: attachments,
@@ -4580,16 +4499,9 @@ const assignTicket = async (req, res) => {
       category: ticket.category || "Assignment"
     });
 
-    // Send email notification to the new assignee (required for assignee to be notified)
-    let assigneeEmail = assignedTo.email && String(assignedTo.email).trim();
-    if (!assigneeEmail && assignedTo.username && String(assignedTo.username).trim()) {
-      assigneeEmail = `${String(assignedTo.username).trim()}@wcf.go.tz`;
-      console.log(`📧 [Assign] Assignee has no email in DB – using fallback ${assigneeEmail} for ticket ${ticket.ticket_id || ticketId}`);
-    }
-    if (!assigneeEmail) {
-      console.warn(`⚠️ [Assign] Assignee ${assignedTo.full_name || assignedTo.username} (id: ${assignedTo.id}) has no email – assignment email not sent for ticket ${ticket.ticket_id || ticketId}`);
-    } else {
-      try {
+    // Send notification to the new assignee (optional)
+    try {
+      if (assignedTo.email) {
         const subject = `Ticket Assigned: ${ticket.ticket_id || ticket.id}`;
         const bodyHtml = `
           <p>Hello ${assignedTo.full_name || ""},</p>
@@ -4608,12 +4520,12 @@ const assignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
-        sendEmailNonBlocking({ to: ticketEmailTo(assigneeEmail), subject, htmlBody, attachments: attachments });
-        console.log(`📧 [Assign] Assignment email queued to ${assigneeEmail} for ticket ${ticket.ticket_id || ticketId}`);
-      } catch (notificationError) {
-        console.error("Error sending assignment email:", notificationError);
-        // Do not fail the assignment if notification fails
+        // Send email in background to avoid blocking assignment
+        sendEmailNonBlocking({ to: assignedTo.email, subject, htmlBody, attachments: attachments });
       }
+    } catch (notificationError) {
+      console.error("Error sending notification:", notificationError);
+      // Do not fail the assignment if notification fails
     }
 
     res.status(200).json({
@@ -5791,19 +5703,12 @@ const reassignTicket = async (req, res) => {
       status: "unread",
     });
 
-    // Resolve new assignee for response message and email
-    const newAssignee = await User.findByPk(assigned_to_id, { attributes: ["id", "full_name", "username", "email", "role"] });
+    // Resolve new assignee for response message
+    const newAssignee = await User.findByPk(assigned_to_id);
 
-    // Send email notification to the new assignee (required for assignee to be notified)
-    let reassignEmail = newAssignee?.email && String(newAssignee.email).trim();
-    if (!reassignEmail && newAssignee?.username && String(newAssignee.username).trim()) {
-      reassignEmail = `${String(newAssignee.username).trim()}@wcf.go.tz`;
-      console.log(`📧 [Reassign] New assignee has no email in DB – using fallback ${reassignEmail} for ticket ${ticket.ticket_id || ticketId}`);
-    }
-    if (!reassignEmail) {
-      console.warn(`⚠️ [Reassign] New assignee ${newAssignee?.full_name || newAssignee?.username || assigned_to_id} has no email – reassignment email not sent for ticket ${ticket.ticket_id || ticketId}`);
-    } else {
-      try {
+    // Send notification to the new assignee (optional)
+    try {
+      if (newAssignee && newAssignee.email) {
         const subject = `Ticket Reassigned: ${ticket.ticket_id || ticket.id}`;
         const bodyHtml = `
           <p>Hello ${newAssignee.full_name || ""},</p>
@@ -5822,12 +5727,12 @@ const reassignTicket = async (req, res) => {
         `;
         const htmlBody = renderEmailCard(subject, bodyHtml, detailsHtml);
         const attachments = getTicketAttachments(ticket);
-        sendEmailNonBlocking({ to: ticketEmailTo(reassignEmail), subject, htmlBody, attachments: attachments });
-        console.log(`📧 [Reassign] Reassignment email queued to ${reassignEmail} for ticket ${ticket.ticket_id || ticketId}`);
-      } catch (notificationError) {
-        console.error("Error sending reassignment email:", notificationError);
-        // Do not fail the reassignment if notification fails
+        // Send email in background to avoid blocking reassignment
+        sendEmailNonBlocking({ to: newAssignee.email, subject, htmlBody, attachments: attachments });
       }
+    } catch (notificationError) {
+      console.error("Error sending notification:", notificationError);
+      // Do not fail the reassignment if notification fails
     }
 
     res.status(200).json({
@@ -5839,78 +5744,6 @@ const reassignTicket = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to reassign ticket",
-      error: error.message,
-    });
-  }
-};
-
-const exchangeTicketOwnership = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const { assigned_to_id, assigned_to_role, reassignment_reason, notes } = req.body;
-    const assigned_by_id = req.user?.userId;
-
-    if (!assigned_to_id || !assigned_to_role) {
-      return res.status(400).json({
-        success: false,
-        message: "assigned_to_id and assigned_to_role are required",
-      });
-    }
-
-    const ticket = await Ticket.findByPk(ticketId);
-    if (!ticket) {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket not found",
-      });
-    }
-
-    const normalizedStatus = String(ticket.status || "").trim().toLowerCase();
-    if (normalizedStatus === "closed" || normalizedStatus === "resolved") {
-      return res.status(400).json({
-        success: false,
-        message: "Ownership exchange is not allowed for closed/resolved tickets",
-      });
-    }
-
-    await TicketAssignment.create({
-      ticket_id: ticketId,
-      assigned_by_id,
-      assigned_to_id,
-      assigned_to_role,
-      action: "Ownership Exchange",
-      reason: reassignment_reason || notes || "Ticket ownership exchanged",
-      created_at: new Date(),
-    });
-
-    await Ticket.update(
-      {
-        assigned_to_id,
-        assigned_to_role,
-        status: "Assigned",
-      },
-      { where: { id: ticketId } }
-    );
-
-    await Notification.create({
-      ticket_id: ticketId,
-      sender_id: assigned_by_id,
-      recipient_id: assigned_to_id,
-      message: `Ticket ownership transferred to you: ${ticket.subject || ticket.ticket_id}`,
-      channel: "In-System",
-      status: "unread",
-    });
-
-    const newAssignee = await User.findByPk(assigned_to_id);
-    res.status(200).json({
-      success: true,
-      message: `Ticket ownership exchanged successfully to ${newAssignee?.full_name || newAssignee?.username || assigned_to_id} (${newAssignee?.role || assigned_to_role || "user"})`,
-    });
-  } catch (error) {
-    console.error("Error in exchangeTicketOwnership:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to exchange ticket ownership",
       error: error.message,
     });
   }
@@ -6076,7 +5909,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
 
       // Send email in background to avoid blocking
       sendEmailNonBlocking({
-        to: ticketEmailTo(prevUser.email),
+        to: prevUser.email,
         subject: emailSubject,
         htmlBody: emailHtmlBody,
         attachments: attachments
@@ -7160,7 +6993,7 @@ const forwardToDirectorGeneral = async (req, res) => {
         // Send assignment email in background
         setImmediate(() => {
           sendEmail({
-            to: ticketEmailTo(directorGeneral.email),
+            to: directorGeneral.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody,
             attachments: attachments
@@ -7714,7 +7547,7 @@ const reverseComplaint = async (req, res) => {
       const attachments = getTicketAttachments(ticket);
       
       // Send email in background to avoid blocking
-      sendEmailNonBlocking({ to: ticketEmailTo(targetUser.email), subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: targetUser.email, subject, htmlBody, attachments: attachments });
     }
 
     // Determine action message based on workflow
@@ -7848,7 +7681,7 @@ const approveAndForwardToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ticketEmailTo(reviewer.email),
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -7972,7 +7805,7 @@ const reverseAndAssignToReviewer = async (req, res) => {
       try {
         setImmediate(() => {
           sendEmail({
-            to: ticketEmailTo(reviewer.email),
+            to: reviewer.email,
             subject: emailSubject,
             htmlBody: emailHtmlBody
           }).catch(emailError => {
@@ -8293,7 +8126,7 @@ const managerAttendMajor = async (req, res) => {
       
       const attachments = getTicketAttachments(ticket);
       sendEmail({
-        to: ticketEmailTo(headOfUnit.email),
+        to: headOfUnit.email,
         subject: emailSubject,
         htmlBody: emailBody,
         attachments: attachments
@@ -8921,7 +8754,7 @@ const managerSendToDirector = async (req, res) => {
       // Get attachments for email
       const attachments = getTicketAttachments(ticket);
       
-      sendEmailNonBlocking({ to: ticketEmailTo(director.email), subject, htmlBody, attachments: attachments });
+      sendEmailNonBlocking({ to: director.email, subject, htmlBody, attachments: attachments });
     }
 
     res.status(200).json({
@@ -9061,7 +8894,6 @@ module.exports = {
   getAssignedNotifiedTickets,
   getDashboardCounts,
   reassignTicket,
-  exchangeTicketOwnership,
   getInProgressAssignments,
   reverseTicket,
   getOpenTicketsCount,
