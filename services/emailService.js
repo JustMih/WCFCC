@@ -2,6 +2,8 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 
+const SIP_DOMAIN = process.env.SIP_DOMAIN || '';
+
 /**
  * Render a standardized email card with consistent styling
  * @param {string} subject - Email subject (used as header)
@@ -10,7 +12,7 @@ const fs = require('fs');
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = "https://192.168.21.69/";
+  const portalUrl = `${SIP_DOMAIN}/`;
   
   return `<!doctype html>
     <html>

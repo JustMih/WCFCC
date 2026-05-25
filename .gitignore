@@ -9,7 +9,7 @@ rtp-sniffer.js
 middleware\corsConfig.js
 # server.js
 utils\celPoller.js
-services\emailService.js    
+#services\emailService.js    
 controllers\ticket\ticketController.js
 test-socket-connection.js   
 

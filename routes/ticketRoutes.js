@@ -10,7 +10,7 @@ const {
   getAssignedNotifiedTickets, getDashboardCounts, getInProgressAssignments, reverseTicket,
   getOpenTicketsCount, getAssignedTicketsCount, getInprogressTicketsCount, getCarriedForwardTicketsCount, getClosedTicketsCount, getOverdueTicketsCount,
   getEscalatedTicketsForUser, getEverAssignedTickets, getEverAssignedTicketsCount, getAllTicketsCount,
-  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, managerSendToDirector, updateReversedTicketDetails, getWorkflowTickets
+  forwardToDirectorGeneral, getUserAgingStats, reassignTicket, exchangeTicketOwnership, reverseComplaint, approveAndForwardToReviewer, reverseAndAssignToReviewer, managerAttendMajor, managerSendToDirector, updateReversedTicketDetails, getWorkflowTickets
 } = require("../controllers/ticket/ticketController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -182,6 +182,13 @@ router.post(
   authMiddleware,
   // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'reviewer']),
   reassignTicket
+);
+
+router.post(
+  '/:ticketId/ownership-exchange',
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin"]),
+  exchangeTicketOwnership
 );
 
 // Add after other ticket routes
