@@ -46,7 +46,7 @@ function requestLogger(req, res, next) {
       userId,
       role,
       userAgent: req.headers["user-agent"],
-      requestId: req.headers["x-request-id"] || null,
+      requestId: req.requestId || req.headers["x-request-id"] || null,
     });
   };
 

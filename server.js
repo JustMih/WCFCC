@@ -96,14 +96,18 @@ app.use(
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-request-id"],
     credentials: true,
   })
 );
 
+const { attachRequestContext } = require("./middleware/requestContext");
 // Request logging middleware (must come after JSON/CORS, before routes)
 const { requestLogger } = require("./middleware/requestLogger");
+const { auditLogger } = require("./middleware/auditLogger");
+app.use(attachRequestContext);
 app.use(requestLogger);
+app.use(auditLogger);
 setInterval(() => {
   if (!amiLive?.getLiveQueueCalls) return;
 
