@@ -1,85 +1,77 @@
-
-// Safely require models with error handling
-let VoiceNote,
-  CDR,
-  IVRDTMFMapping,
-  IVRAction,
-  IVRVoice,
-  Ticket,
-  User,
-  Notification,
-  TicketAssignment,
-  RequesterDetails,
-  IVRDTMFLog;
-try {
-  console.log("Loading VoiceNote model...");
-  VoiceNote = require("../../models/voice_notes.model");
-  console.log("Loading CDR model...");
-  CDR = require("../../models/cdr.model");
-  console.log("Loading IVRDTMFMapping model...");
-  IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
-  console.log("Loading Ticket model...");
-  Ticket = require("../../models/Ticket");
-  console.log("Loading User model...");
-  User = require("../../models/User");
-  console.log("Loading Notification model...");
-  Notification = require("../../models/Notification");
-  console.log("Loading TicketAssignment model...");
-  TicketAssignment = require("../../models/TicketAssignment");
-  console.log("Loading RequesterDetails model...");
-  RequesterDetails = require("../../models/RequesterDetails");
-  console.log("Loading models index...");
-  let models;
-  try {
-    models = require("../../models");
-    console.log("Models loaded, available keys:", Object.keys(models || {}));
-    // Safely get IVRAction, IVRVoice, and IVRDTMFLog with fallback
-    if (models) {
-      IVRAction = models.IVRAction;
-      IVRVoice = models.IVRVoice;
-      IVRDTMFLog = models.IVRDTMFLog;
-    }
-  } catch (modelsError) {
-    console.error(
-      "Error loading models index, trying direct require:",
-      modelsError.message
-    );
-  }
-
-  // Fallback: try direct require if models index failed
-  if (!IVRAction) {
-    try {
-      IVRAction = require("../../models/IVRAction");
-    } catch (e) {
-      console.error("Failed to load IVRAction:", e.message);
-    }
-  }
-  if (!IVRVoice) {
-    try {
-      IVRVoice = require("../../models/IVRVoice");
-    } catch (e) {
-      console.error("Failed to load IVRVoice:", e.message);
-    }
-  }
-  if (!IVRDTMFLog) {
-    try {
-      const DataTypes = require("sequelize").DataTypes;
-      IVRDTMFLog = require("../../models/IVRDTMFLog")(sequelize, DataTypes);
-    } catch (e) {
-      console.error("Failed to load IVRDTMFLog:", e.message);
-    }
-  }
-  console.log("Model loading complete");
-} catch (error) {
-  console.error("Error loading models in reports controller:", error);
-  console.error("Error stack:", error.stack);
-  // Models will be undefined, but we'll handle this in the functions
-}
-
 const path = require("path");
 const fs = require("fs");
-const sequelize = require("../../config/mysql_connection"); // Adjust the path as necessary
+const sequelize = require("../../config/mysql_connection");
 const { Op } = require("sequelize");
+const {
+  buildHolidaySet,
+  filterOffHoursRecords,
+  buildSummary,
+} = require("../../utils/offHoursHelper");
+const {
+  buildPlayablePath,
+  resolveVoiceNoteFilePath,
+} = require("../../utils/voiceNoteAudio");
+const {
+  enrichCdrRecord,
+  dedupeCdrLegs,
+  enrichVoiceNoteRecord,
+  enrichMissedCallRecord,
+  syncMissedCallCallbacksInRange,
+  buildEmergencyLookup,
+  applySessionRouting,
+  fetchCdrRoutingHints,
+  buildCdrRoutingIndex,
+} = require("../../utils/offHoursReportHelper");
+const { dedupeLostCalls } = require("../../utils/missedCallHelper");
+const { getCdrLinkedidSelect } = require("../../utils/cdrSchemaHelper");
+
+let VoiceNote;
+let CDR;
+let IVRDTMFMapping;
+let IVRAction;
+let IVRVoice;
+let Ticket;
+let User;
+let Notification;
+let TicketAssignment;
+let RequesterDetails;
+let IVRDTMFLog;
+let Holiday;
+
+try {
+  VoiceNote = require("../../models/voice_notes.model");
+  CDR = require("../../models/cdr.model");
+  IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
+  Ticket = require("../../models/Ticket");
+  User = require("../../models/User");
+  Notification = require("../../models/Notification");
+  TicketAssignment = require("../../models/TicketAssignment");
+  RequesterDetails = require("../../models/RequesterDetails");
+
+  const models = require("../../models");
+  IVRAction = models.IVRAction;
+  IVRVoice = models.IVRVoice;
+  IVRDTMFLog = models.IVRDTMFLog;
+  Holiday = models.holidays;
+} catch (error) {
+  console.error("Error loading models in reports controller:", error.message);
+  try {
+    IVRAction = require("../../models/IVRAction");
+  } catch (e) {
+    /* optional */
+  }
+  try {
+    IVRVoice = require("../../models/IVRVoice");
+  } catch (e) {
+    /* optional */
+  }
+  try {
+    const { DataTypes } = require("sequelize");
+    IVRDTMFLog = require("../../models/IVRDTMFLog")(sequelize, DataTypes);
+  } catch (e) {
+    /* optional */
+  }
+}
 
 exports.getVoiceNotes = async (req, res) => {
   try {
@@ -100,19 +92,28 @@ exports.streamVoiceNote = async (req, res) => {
     const voiceNote = await VoiceNote.findByPk(id);
 
     if (!voiceNote || !voiceNote.recording_path) {
-      return res.status(404).send("Voice note not found in database");
+      return res.status(404).json({ error: "Voice note not found in database" });
     }
 
-    const filePath = path.resolve(voiceNote.recording_path);
+    const filePath = resolveVoiceNoteFilePath(voiceNote.recording_path);
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).send("Voice file not found on disk");
+    if (!filePath) {
+      console.warn(
+        "Voice file missing on disk:",
+        id,
+        voiceNote.recording_path
+      );
+      return res.status(404).json({
+        error: "Voice file not found on disk",
+        recording_path: voiceNote.recording_path,
+        hint: "Use /voice/custom/... URL from the live server if running API locally",
+      });
     }
 
     res.sendFile(filePath, { headers: { "Content-Type": "audio/wav" } });
   } catch (error) {
     console.error("Error streaming voice note:", error);
-    res.status(500).send("Internal server error");
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -304,7 +305,7 @@ exports.getCDRReport = (req, res) => {
       .json({ error: "Start date and end date are required" });
   }
 
-  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN :startDate AND :endDate`;
+  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`;
   let replacements = { startDate, endDate };
 
   // Add disposition filter if provided
@@ -652,7 +653,145 @@ exports.getTicketAssignmentsReport = async (req, res) => {
   }
 };
 
-// Notifications Report
+exports.getOffHoursReport = async (req, res) => {
+  const { startDate, endDate } = req.params;
+  const source = req.query.source || "voice-notes";
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  try {
+    let holidayRows = [];
+    if (Holiday) {
+      holidayRows = await Holiday.findAll({
+        attributes: ["holiday_date", "name"],
+      });
+    } else {
+      holidayRows = await sequelize.query(
+        `SELECT holiday_date, name FROM holidays`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+    }
+    const holidayDates = buildHolidaySet(holidayRows);
+
+    let emergencyRows = [];
+    try {
+      emergencyRows = await sequelize.query(
+        `SELECT id, phone_number, priority FROM emergency_numbers ORDER BY priority ASC`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+    } catch (e) {
+      console.warn("emergency_numbers lookup skipped:", e.message);
+    }
+    const { byPhone: emergencyByPhone } = buildEmergencyLookup(emergencyRows);
+
+    let records = [];
+    let timestampField = "created_at";
+
+    if (source === "cdr") {
+      timestampField = "cdrstarttime";
+      const linkedidCol = await getCdrLinkedidSelect(sequelize);
+      records = await sequelize.query(
+        `SELECT id, clid, src, dst, did, dcontext, channel, dstchannel, disposition,
+                duration, billsec, ${linkedidCol}uniqueid, lastapp, lastdata, userfield,
+                cdrstarttime
+         FROM cdr
+         WHERE cdrstarttime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
+         ORDER BY cdrstarttime DESC`,
+        {
+          replacements: { startDate, endDate },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+    } else if (source === "missed-calls") {
+      timestampField = "time";
+      await syncMissedCallCallbacksInRange(sequelize, startDate, endDate);
+      records = await sequelize.query(
+        `SELECT mc.id, mc.caller, mc.time, mc.status, mc.agentId, mc.linkedid,
+                mc.called_back_by, mc.called_back_at, mc.billsec,
+                u.full_name AS callback_agent_name
+         FROM MissedCalls mc
+         LEFT JOIN Users u ON u.extension = mc.called_back_by
+         WHERE mc.time BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
+           AND (mc.archived = 0 OR mc.archived IS NULL)
+         ORDER BY mc.time DESC`,
+        {
+          replacements: { startDate, endDate },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+    } else {
+      records = await sequelize.query(
+        `SELECT id, recording_path, clid, assigned_extension, assigned_agent_id, is_played,
+                duration_seconds, transcription, created_at
+         FROM Voice_Notes
+         WHERE created_at BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
+         ORDER BY created_at DESC`,
+        {
+          replacements: { startDate, endDate },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      records = records.map((record) => ({
+        ...record,
+        playable_path: buildPlayablePath(record.recording_path),
+      }));
+    }
+
+    let offHoursRecords = filterOffHoursRecords(
+      records,
+      timestampField,
+      holidayDates
+    );
+
+    if (source === "cdr") {
+      offHoursRecords = applySessionRouting(offHoursRecords, emergencyByPhone);
+      offHoursRecords = dedupeCdrLegs(
+        offHoursRecords.map((r) => enrichCdrRecord(r, emergencyByPhone))
+      );
+    } else if (source === "missed-calls") {
+      offHoursRecords = dedupeLostCalls(
+        offHoursRecords.map((r) => enrichMissedCallRecord(r)),
+        "time"
+      );
+    } else {
+      const cdrHints = await fetchCdrRoutingHints(sequelize, startDate, endDate);
+      const filteredHints = filterOffHoursRecords(
+        cdrHints,
+        "cdrstarttime",
+        holidayDates
+      );
+      const hintsWithRouting = applySessionRouting(
+        filteredHints,
+        emergencyByPhone
+      );
+      const enrichedHints = dedupeCdrLegs(
+        hintsWithRouting.map((r) => enrichCdrRecord(r, emergencyByPhone))
+      );
+      const cdrIndex = buildCdrRoutingIndex(enrichedHints);
+      offHoursRecords = offHoursRecords.map((r) =>
+        enrichVoiceNoteRecord(r, emergencyByPhone, cdrIndex)
+      );
+    }
+
+    const summary = buildSummary(offHoursRecords);
+
+    res.json({
+      summary,
+      records: offHoursRecords,
+      source,
+      dateRange: { startDate, endDate },
+      emergency_numbers: emergencyRows,
+    });
+  } catch (error) {
+    console.error("Error fetching off-hours report:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 exports.getNotificationsReport = async (req, res) => {
   const { startDate, endDate } = req.params;
 
@@ -663,7 +802,6 @@ exports.getNotificationsReport = async (req, res) => {
   }
 
   try {
-    // Use raw SQL query to get ALL notifications with related data
     let query = `
       SELECT 
         n.id,
@@ -853,7 +991,7 @@ exports.getEscalationReport = async (req, res) => {
       return res.status(404).json({ message: "No escalated tickets found" });
     }
 
-    res.json(formattedEscalations);
+    res.json(formattedEscalations); 
   } catch (error) {
     console.error("Error fetching escalation report:", error);
     res.status(500).json({ error: error.message });

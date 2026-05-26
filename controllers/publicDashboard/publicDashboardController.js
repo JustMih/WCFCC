@@ -8,6 +8,14 @@ const CEL = require("../../models/CEL")(
   require("sequelize").DataTypes
 );
 const QueueStatus = db.QueueStatus;
+const {
+  DEDUP_WINDOW_SECONDS,
+  normalizeCaller,
+  callerMatchKey,
+  dedupeLostCalls,
+  dedupeIncomingLostCdrs,
+} = require("../../utils/missedCallHelper");
+const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 
 /* ================= SOCKET.IO ================= */
 let ioInstance = null;
@@ -45,35 +53,78 @@ const getPublicDashboardData = async (req, res) => {
     /* =====================================================
        LOST CALL INSERTION (KEEP AS-IS)
     ====================================================== */
-    const lostCdrs = await sequelize.query(
+    const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+    const lostCdrsRaw = await sequelize.query(
       `
-      SELECT uniqueid, src AS caller, cdrstarttime AS call_time
-      FROM cdr
-      WHERE DATE(cdrstarttime) = CURDATE()
-        AND disposition = 'NO ANSWER'
-        AND lastapp = 'Queue'
-        AND uniqueid NOT IN (
-          SELECT linkedid
-          FROM MissedCalls
-          WHERE DATE(time) = CURDATE()
-            AND linkedid IS NOT NULL
-        )
-      ORDER BY cdrstarttime DESC
-      LIMIT 100
+      SELECT
+        ${sessionIdExpr} AS session_id,
+        MIN(
+          COALESCE(
+            NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(c.clid, '<', -1), '>', 1)), ''),
+            NULLIF(TRIM(c.src), ''),
+            NULLIF(TRIM(c.clid), '')
+          )
+        ) AS caller,
+        MIN(c.cdrstarttime) AS call_time
+      FROM cdr c
+      WHERE DATE(c.cdrstarttime) = CURDATE()
+        AND c.disposition = 'NO ANSWER'
+        AND c.lastapp = 'Queue'
+        AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
+      GROUP BY ${sessionIdExpr}
+      ORDER BY call_time DESC
+      LIMIT 200
       `,
       { type: QueryTypes.SELECT }
     );
 
+    const lostCdrs = dedupeIncomingLostCdrs(lostCdrsRaw);
+
     for (const cdr of lostCdrs) {
-      let caller = (cdr.caller || "UNKNOWN").replace(/[^+\d]/g, "");
-      if (caller.startsWith("255")) caller = "0" + caller.slice(3);
-      if (caller.startsWith("+255")) caller = "0" + caller.slice(4);
-      if (!caller.startsWith("0") && caller.length === 9) caller = "0" + caller;
-      if (!caller || caller.length < 9) caller = "UNKNOWN";
+      const caller = normalizeCaller(cdr.caller);
+      if (caller === "UNKNOWN") continue;
+
+      const matchKey = callerMatchKey(caller);
+      const existingRows = await sequelize.query(
+        `
+        SELECT id, caller, time
+        FROM MissedCalls
+        WHERE DATE(time) = CURDATE()
+          AND (archived = 0 OR archived IS NULL)
+          AND ABS(TIMESTAMPDIFF(SECOND, time, :time)) <= :windowSec
+        `,
+        {
+          replacements: {
+            time: cdr.call_time,
+            windowSec: DEDUP_WINDOW_SECONDS,
+          },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      const duplicate = existingRows.some(
+        (row) => callerMatchKey(row.caller) === matchKey
+      );
+      if (duplicate) continue;
+
+      const linkedExists = await sequelize.query(
+        `
+        SELECT id FROM MissedCalls
+        WHERE DATE(time) = CURDATE()
+          AND linkedid = :linkedid
+          AND linkedid IS NOT NULL
+        LIMIT 1
+        `,
+        {
+          replacements: { linkedid: cdr.session_id },
+          type: QueryTypes.SELECT,
+        }
+      );
+      if (linkedExists.length > 0) continue;
 
       await sequelize.query(
         `
-        INSERT IGNORE INTO MissedCalls
+        INSERT INTO MissedCalls
           (caller, time, agentId, linkedid, status, createdAt, updatedAt)
         VALUES
           (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
@@ -82,7 +133,7 @@ const getPublicDashboardData = async (req, res) => {
           replacements: {
             caller,
             time: cdr.call_time,
-            linkedid: cdr.uniqueid,
+            linkedid: cdr.session_id,
           },
           type: QueryTypes.INSERT,
         }
@@ -376,7 +427,7 @@ const getLostCallsToday = async (req, res) => {
       `,
       { type: QueryTypes.SELECT }
     );
-    res.json(rows);
+    res.json(dedupeLostCalls(rows, "lost_time"));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch lost calls" });
   }

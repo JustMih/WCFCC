@@ -48,8 +48,7 @@ router.use("/pjsip_endpoints", pjsipEndpointsRoutes);
 router.use("/admin-dashboard", adminDashboardRoutes);
 router.use("/ivr", voiceRoutes);
 router.use("/ivr-actions", ivrActionRoutes);
-router.use("/voice-notes", recordingRoutes);
-router.use("/voicenotes", recordingRoutes);
+// voice-notes API mounted in server.js at /api/voice-notes
 router.use("/ticket", ticketRoutes);
 router.use("/reviewer", reviewerRoutes);
 router.use("/section", sectionRoutes);

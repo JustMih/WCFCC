@@ -34,6 +34,16 @@ const VoiceNote = sequelize.define(
       defaultValue: 0,
     },
 
+    duration_seconds: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    transcription: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
     played_by: {
       type: DataTypes.STRING(20),
       allowNull: true,

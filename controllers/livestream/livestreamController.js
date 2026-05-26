@@ -3,6 +3,7 @@
 
 /* ============================== LIVE CALL CACHE ============================== */
 let liveCallsCache = [];
+let lastCacheRefresh = 0;
 
 const sequelize = require("../../config/mysql_connection");
 const { DataTypes, Op } = require("sequelize");
@@ -97,6 +98,7 @@ const getAllLiveCalls = async (req, res) => {
         voicemail_path: null,
 
         agent_extension: null,
+        agent_channel: null,
         agent_name: "Unassigned",
       };
 
@@ -116,16 +118,24 @@ const getAllLiveCalls = async (req, res) => {
         case "BRIDGE_ENTER":
           c.status = "active";
 
-          // ✅ ensure spyCallId is ALWAYS populated
-          if (!c.spyCallId && row.channame) {
-            c.spyCallId = row.channame;
-          }
-          // ✅ PRIMARY AGENT SOURCE → CEL
-          if (!c.agent_extension) {
+          {
+            const bridgeChan = row.channame || row.channel;
             const ext = extractExtension(
               row.channel || row.peer || row.channame
             );
-            if (ext) c.agent_extension = ext;
+            if (ext) {
+              c.agent_extension = c.agent_extension || ext;
+              if (
+                bridgeChan &&
+                bridgeChan.includes("PJSIP/") &&
+                bridgeChan.includes(`/${ext}-`)
+              ) {
+                c.agent_channel = bridgeChan;
+                c.spyCallId = bridgeChan;
+              }
+            } else if (bridgeChan && !c.spyCallId) {
+              c.spyCallId = bridgeChan;
+            }
           }
           break;
 
@@ -230,9 +240,10 @@ const getAllLiveCalls = async (req, res) => {
     });
 
     /* ✅ UPDATE LIVE CALL CACHE */
-liveCallsCache = result;
+    liveCallsCache = result;
+    lastCacheRefresh = Date.now();
 
-res.json(result);
+    res.json(result);
 
   } catch (err) {
     console.error("❌ Livestream error:", err);
@@ -241,10 +252,27 @@ res.json(result);
 };
 const getLiveCallsCache = () => liveCallsCache;
 
+/** Refresh cache before spy if stale (no poll in last 8s) */
+const refreshLiveCallsCacheIfStale = async () => {
+  if (Date.now() - lastCacheRefresh < 8000 && liveCallsCache.length > 0) {
+    return liveCallsCache;
+  }
+  const fakeRes = {
+    json: (data) => {
+      liveCallsCache = data;
+      lastCacheRefresh = Date.now();
+    },
+    status: () => ({ json: () => {} }),
+  };
+  await getAllLiveCalls({}, fakeRes);
+  return liveCallsCache;
+};
+
 /* ============================== EXPORTS ============================== */
 module.exports = {
   setupSocket,
   emitLiveCall,
   getAllLiveCalls,
-  getLiveCallsCache, // 👈 ADD THIS
+  getLiveCallsCache,
+  refreshLiveCallsCacheIfStale,
 };
