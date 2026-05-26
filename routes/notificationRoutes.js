@@ -9,7 +9,8 @@ const {
   getNotificationById,
   getNotificationsByTicketId,
   getNotifiedTicketsCount,
-  getNotificationsByTicketAndRecipient
+  getNotificationsByTicketAndRecipient,
+  getAllNotificationsForReport
 } = require('../controllers/notifications/notificationController');
 const { authMiddleware } = require("../middleware/authMiddleware");
 
@@ -21,7 +22,13 @@ router.post('/notify',
     authMiddleware,
      createNotification);
 
-// List notifications for a user
+// Get all notifications for a user (for reports - includes read and unread)
+// This must come before /user/:userId to avoid route conflict
+router.get('/all/:userId',
+  authMiddleware,
+  getAllNotificationsForReport);
+
+// List notifications for a user (unread only)
 router.get('/user/:userId',
   authMiddleware,
   listNotifications);
@@ -41,18 +48,18 @@ router.get('/unread-tickets-count/:userId',
   authMiddleware,
   getUnreadTicketsCount);
 
-// Get single notification
-router.get('/:notificationId', getNotificationById);
-
-// Get notifications by ticket ID
-router.get('/ticket/:ticketId', getNotificationsByTicketId);
-
 // Get notified tickets count for a user
 router.get('/notified-tickets-count/:userId', 
   authMiddleware,
   getNotifiedTicketsCount);
 
+// Get notifications by ticket ID
+router.get('/ticket/:ticketId', getNotificationsByTicketId);
+
 router.get('/ticket/:ticketId/user/:userId', 
   getNotificationsByTicketAndRecipient);
+
+// Get single notification (must be last to avoid matching other routes)
+router.get('/:notificationId', getNotificationById);
 
 module.exports = router; 

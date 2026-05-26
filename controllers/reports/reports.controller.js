@@ -7,6 +7,9 @@ let VoiceNote,
   IVRVoice,
   Ticket,
   User,
+  Notification,
+  TicketAssignment,
+  RequesterDetails,
   IVRDTMFLog;
 try {
   console.log("Loading VoiceNote model...");
@@ -19,6 +22,12 @@ try {
   Ticket = require("../../models/Ticket");
   console.log("Loading User model...");
   User = require("../../models/User");
+  console.log("Loading Notification model...");
+  Notification = require("../../models/Notification");
+  console.log("Loading TicketAssignment model...");
+  TicketAssignment = require("../../models/TicketAssignment");
+  console.log("Loading RequesterDetails model...");
+  RequesterDetails = require("../../models/RequesterDetails");
   console.log("Loading models index...");
   let models;
   try {
@@ -670,9 +679,15 @@ exports.getTicketAssignmentsReport = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 exports.getOffHoursReport = async (req, res) => {
   const { startDate, endDate } = req.params;
   const source = req.query.source || "voice-notes";
+=======
+// Notifications Report
+exports.getNotificationsReport = async (req, res) => {
+  const { startDate, endDate } = req.params;
+>>>>>>> da1e64c523b2db90aaa7ef5b8e081ee002af2467
 
   if (!startDate || !endDate) {
     return res
@@ -681,6 +696,7 @@ exports.getOffHoursReport = async (req, res) => {
   }
 
   try {
+<<<<<<< HEAD
     let holidayRows = [];
     if (Holiday) {
       holidayRows = await Holiday.findAll({
@@ -805,6 +821,201 @@ exports.getOffHoursReport = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching off-hours report:", error);
+=======
+    // Use raw SQL query to get ALL notifications with related data
+    let query = `
+      SELECT 
+        n.id,
+        n.ticket_id,
+        n.sender_id,
+        n.recipient_id,
+        n.message,
+        n.channel,
+        n.status,
+        n.comment,
+        n.created_at,
+        n.updated_at,
+        t.ticket_id as ticket_number,
+        t.subject as ticket_subject,
+        t.category as ticket_category,
+        t.status as ticket_status,
+        t.description as ticket_description,
+        u1.full_name as sender_name,
+        u1.email as sender_email,
+        u2.full_name as recipient_name,
+        u2.email as recipient_email
+      FROM Notifications n
+      LEFT JOIN Tickets t ON n.ticket_id = t.id
+      LEFT JOIN Users u1 ON n.sender_id = u1.id
+      LEFT JOIN Users u2 ON n.recipient_id = u2.id
+      WHERE n.created_at BETWEEN :startDate AND :endDate
+    `;
+
+    const replacements = { 
+      startDate: `${startDate} 00:00:00`,
+      endDate: `${endDate} 23:59:59`
+    };
+
+    query += ` ORDER BY n.created_at DESC`;
+
+    const notifications = await sequelize.query(query, {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    // Format the response
+    const formattedNotifications = notifications.map((notification) => ({
+      id: notification.id,
+      ticket_id: notification.ticket_id,
+      sender_id: notification.sender_id,
+      recipient_id: notification.recipient_id,
+      message: notification.message,
+      channel: notification.channel,
+      status: notification.status,
+      comment: notification.comment,
+      created_at: notification.created_at,
+      updated_at: notification.updated_at,
+      ticket: notification.ticket_id ? {
+        id: notification.ticket_id,
+        ticket_id: notification.ticket_number,
+        subject: notification.ticket_subject,
+        category: notification.ticket_category,
+        status: notification.ticket_status,
+        description: notification.ticket_description,
+      } : null,
+      sender: notification.sender_id ? {
+        id: notification.sender_id,
+        full_name: notification.sender_name,
+        email: notification.sender_email,
+      } : null,
+      recipient: notification.recipient_id ? {
+        id: notification.recipient_id,
+        full_name: notification.recipient_name,
+        email: notification.recipient_email,
+      } : null,
+    }));
+
+    if (formattedNotifications.length === 0) {
+      return res.status(404).json({ message: "No notifications found" });
+    }
+
+    res.json(formattedNotifications);
+  } catch (error) {
+    console.error("Error fetching notifications report:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Escalation Report
+exports.getEscalationReport = async (req, res) => {
+  const { startDate, endDate } = req.params;
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  try {
+    // Use raw SQL query to get escalated tickets with related data
+    // Escalated tickets can be identified by:
+    // 1. Tickets with status = 'Escalated'
+    // 2. Tickets with is_escalated = true
+    // 3. Tickets that have TicketAssignment records with action = 'Escalated'
+    let query = `
+      SELECT DISTINCT
+        t.*,
+        t.ticket_id as ticket_number,
+        u1.full_name as assigned_to_name,
+        u1.email as assigned_to_email,
+        u2.full_name as creator_name,
+        u2.email as creator_email,
+        u3.full_name as attended_by_name,
+        u4.full_name as rated_by_name,
+        ta_escalated.id as escalation_assignment_id,
+        ta_escalated.created_at as escalated_at,
+        ta_escalated.reason as escalation_reason,
+        ta_escalated.assigned_to_id as escalated_to_id,
+        u5.full_name as escalated_to_name,
+        u5.email as escalated_to_email
+      FROM Tickets t
+      LEFT JOIN Users u1 ON t.assigned_to_id = u1.id
+      LEFT JOIN Users u2 ON t.created_by = u2.id
+      LEFT JOIN Users u3 ON t.attended_by_id = u3.id
+      LEFT JOIN Users u4 ON t.rated_by_id = u4.id
+      LEFT JOIN Ticket_assignments ta_escalated ON t.id = ta_escalated.ticket_id 
+        AND ta_escalated.action = 'Escalated'
+        AND ta_escalated.created_at = (
+          SELECT MAX(created_at) 
+          FROM Ticket_assignments 
+          WHERE ticket_id = t.id AND action = 'Escalated'
+        )
+      LEFT JOIN Users u5 ON ta_escalated.assigned_to_id = u5.id
+      WHERE (
+        t.status = 'Escalated' 
+        OR t.is_escalated = 1
+        OR EXISTS (
+          SELECT 1 
+          FROM Ticket_assignments ta 
+          WHERE ta.ticket_id = t.id 
+          AND ta.action = 'Escalated'
+        )
+      )
+      AND (
+        t.created_at BETWEEN :startDate AND :endDate
+        OR ta_escalated.created_at BETWEEN :startDate AND :endDate
+      )
+    `;
+
+    const replacements = { 
+      startDate: `${startDate} 00:00:00`,
+      endDate: `${endDate} 23:59:59`
+    };
+
+    query += ` ORDER BY COALESCE(ta_escalated.created_at, t.created_at) DESC`;
+
+    const escalatedTickets = await sequelize.query(query, {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    // Format the response
+    const formattedEscalations = escalatedTickets.map((ticket) => ({
+      id: ticket.id,
+      ticket_id: ticket.ticket_number || ticket.ticket_id,
+      subject: ticket.subject,
+      status: ticket.status,
+      category: ticket.category,
+      description: ticket.description,
+      complaint_type: ticket.complaint_type,
+      priority: ticket.priority,
+      created_at: ticket.created_at,
+      updated_at: ticket.updated_at,
+      escalated_at: ticket.escalated_at || ticket.updated_at,
+      escalation_reason: ticket.escalation_reason,
+      is_escalated: ticket.is_escalated,
+      assigned_to_id: ticket.assigned_to_id,
+      assigned_to_name: ticket.assigned_to_name,
+      assigned_to_email: ticket.assigned_to_email,
+      escalated_to_id: ticket.escalated_to_id,
+      escalated_to_name: ticket.escalated_to_name,
+      escalated_to_email: ticket.escalated_to_email,
+      creator_name: ticket.creator_name,
+      creator_email: ticket.creator_email,
+      attended_by_name: ticket.attended_by_name,
+      rated_by_name: ticket.rated_by_name,
+      // Include all other ticket fields
+      ...ticket,
+    }));
+
+    if (formattedEscalations.length === 0) {
+      return res.status(404).json({ message: "No escalated tickets found" });
+    }
+
+    res.json(formattedEscalations);
+  } catch (error) {
+    console.error("Error fetching escalation report:", error);
+>>>>>>> da1e64c523b2db90aaa7ef5b8e081ee002af2467
     res.status(500).json({ error: error.message });
   }
 };

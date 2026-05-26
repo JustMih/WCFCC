@@ -90,6 +90,7 @@ app.use(
       "https://demoportal.wcf.go.tz",
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
+      "https://contactcenter.wcf.go.tz",
       // Allow any origin in development (you can remove this in production)
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
@@ -98,6 +99,10 @@ app.use(
     credentials: true,
   })
 );
+
+// Request logging middleware (must come after JSON/CORS, before routes)
+const { requestLogger } = require("./middleware/requestLogger");
+app.use(requestLogger);
 setInterval(() => {
   if (!amiLive?.getLiveQueueCalls) return;
 
@@ -234,6 +239,7 @@ const io = new Server(server, {
       "https://demoportal.wcf.go.tz",
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
+      "https://contactcenter.wcf.go.tz",
       // Allow any origin in development
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
@@ -480,6 +486,7 @@ sequelize
             "https://demoportal.wcf.go.tz",
             "https://portal.wcf.go.tz",
             "https://essp.wcf.go.tz",
+            "https://contactcenter.wcf.go.tz",
             process.env.NODE_ENV === "development" ? true : false,
           ].filter(Boolean),
           methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -551,6 +558,7 @@ sequelize
               "https://demoportal.wcf.go.tz",
               "https://portal.wcf.go.tz",
               "https://essp.wcf.go.tz",
+              "https://contactcenter.wcf.go.tz",
               process.env.NODE_ENV === "development" ? true : false,
             ].filter(Boolean),
             methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
