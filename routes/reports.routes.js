@@ -18,6 +18,12 @@ router.get(
   reportsController.getVoiceReport
 );
 
+// Off-hours calls (weekend, holiday, after-work) matching Asterisk routing
+router.get(
+  "/off-hours-report/:startDate/:endDate",
+  reportsController.getOffHoursReport
+);
+
 // get CDR report by date range and disposition
 router.get(
   "/cdr-report/:startDate/:endDate/:disposition",

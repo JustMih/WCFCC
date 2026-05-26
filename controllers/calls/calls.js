@@ -1,6 +1,13 @@
 const sequelize = require("../../config/database");
 const { Op } = require("sequelize");
 const CDR = require("../../models/CDR");
+const {
+  DEDUP_WINDOW_SECONDS,
+  normalizeCaller,
+  callerMatchKey,
+  dedupeLostCalls,
+} = require("../../utils/missedCallHelper");
+const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 
 // Controller to get data for different time frames (Total, Monthly, Weekly, Daily)
 const getCdrCounts = async (req, res) => {
@@ -143,35 +150,78 @@ const getAgentCdrStatsToday = async (req, res) => {
   }
 };
 const syncMissedCallsFromCdrToday = async () => {
-  await sequelize.query(
+  const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+  const rows = await sequelize.query(
     `
-    INSERT INTO MissedCalls
-      (caller, time, agentId, status, archived, createdAt, updatedAt, linkedid)
     SELECT
-      c.clid AS caller,
+      ${sessionIdExpr} AS linkedid,
+      COALESCE(
+        NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(c.clid, '<', -1), '>', 1)), ''),
+        NULLIF(TRIM(c.src), ''),
+        NULLIF(TRIM(c.clid), '')
+      ) AS caller_raw,
       c.cdrstarttime AS time,
-      SUBSTRING_INDEX(c.dstchannel, '/', -1) AS agentId,
-      'pending' AS status,
-      0 AS archived,
-      NOW(),
-      NOW(),
-      c.linkedid
+      SUBSTRING_INDEX(c.dstchannel, '/', -1) AS agentId
     FROM cdr c
-    WHERE
-      c.lastapp = 'Queue'
+    WHERE c.lastapp = 'Queue'
       AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
       AND DATE(c.cdrstarttime) = CURDATE()
-      AND c.clid IS NOT NULL
-      AND c.clid != ''
-      AND NOT EXISTS (
-        SELECT 1
-        FROM MissedCalls mc
-        WHERE mc.caller = c.clid
-          AND mc.time = c.cdrstarttime
-          AND mc.agentId = SUBSTRING_INDEX(c.dstchannel, '/', -1)
-      )
-    `
+      AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
+    ORDER BY c.cdrstarttime ASC
+    `,
+    { type: sequelize.QueryTypes.SELECT }
   );
+
+  const lastByCaller = new Map();
+
+  for (const row of rows) {
+    const caller = normalizeCaller(row.caller_raw);
+    if (caller === "UNKNOWN") continue;
+
+    const t = new Date(row.time).getTime();
+    const prev = lastByCaller.get(caller);
+    if (prev != null && t - prev <= DEDUP_WINDOW_SECONDS * 1000) {
+      continue;
+    }
+    lastByCaller.set(caller, t);
+
+    const matchKey = callerMatchKey(caller);
+    const existingRows = await sequelize.query(
+      `
+      SELECT id, caller FROM MissedCalls
+      WHERE DATE(time) = CURDATE()
+        AND (archived = 0 OR archived IS NULL)
+        AND ABS(TIMESTAMPDIFF(SECOND, time, :time)) <= :windowSec
+      `,
+      {
+        replacements: { time: row.time, windowSec: DEDUP_WINDOW_SECONDS },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const duplicate = existingRows.some(
+      (mc) => callerMatchKey(mc.caller) === matchKey
+    );
+    if (duplicate) continue;
+
+    await sequelize.query(
+      `
+      INSERT INTO MissedCalls
+        (caller, time, agentId, status, archived, createdAt, updatedAt, linkedid)
+      VALUES
+        (:caller, :time, :agentId, 'pending', 0, NOW(), NOW(), :linkedid)
+      `,
+      {
+        replacements: {
+          caller,
+          time: row.time,
+          agentId: row.agentId || null,
+          linkedid: row.linkedid || null,
+        },
+        type: sequelize.QueryTypes.INSERT,
+      }
+    );
+  }
 };
 
 // Get lost calls for today with phone numbers
@@ -184,7 +234,7 @@ const getLostCallsToday = async (req, res) => {
       }
     );
 
-    res.json(lostCalls);
+    res.json(dedupeLostCalls(lostCalls, "call_time"));
   } catch (err) {
     console.error("Error retrieving lost calls:", err.message);
     res.status(500).send("Internal Server Error");

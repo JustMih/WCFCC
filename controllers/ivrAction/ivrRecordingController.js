@@ -1,5 +1,6 @@
-const sequelize = require("../../config/mysql_connection");  
-const VoiceNote = require("../../models/VoiceNote");
+const sequelize = require("../../config/mysql_connection");
+const VoiceNote = require("../../models/voice_notes.model");
+const User = require("../../models/User");
 
 const getAllVoiceNotes = async (req, res) => {
   try {
@@ -89,7 +90,48 @@ const updateVoiceNote = async (req, res) => {
 };
 
 
+const markVoiceNotePlayed = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    let playedBy = null;
+    if (userId) {
+      const user = await User.findByPk(userId, {
+        attributes: ["extension", "username", "full_name"],
+      });
+      if (user) {
+        playedBy =
+          user.extension ||
+          user.username ||
+          user.full_name ||
+          String(userId);
+      }
+    }
+
+    const [updatedRows] = await VoiceNote.update(
+      {
+        is_played: 1,
+        played_by: playedBy,
+        played_at: new Date(),
+        status: "LISTENED",
+      },
+      { where: { id } }
+    );
+
+    if (updatedRows === 0) {
+      return res.status(404).json({ error: "Voice note not found" });
+    }
+
+    res.json({ success: true, id: Number(id), is_played: true, played_by: playedBy });
+  } catch (error) {
+    console.error("Error marking voice note as played:", error);
+    res.status(500).json({ error: "Failed to mark voice note as played" });
+  }
+};
+
 module.exports = {
   getAllVoiceNotes,
-  updateVoiceNote // ✅ include this so it's usable in routes
+  updateVoiceNote,
+  markVoiceNotePlayed,
 };
