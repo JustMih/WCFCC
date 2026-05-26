@@ -31,6 +31,7 @@ const server = http.createServer(app);
 const ChatMassage = require("./models/chart_message");
 const InstagramComment = require("./models/instagram_comment");
 const VoiceNote = require("./models/voice_notes.model");
+const { streamVoiceNote } = require("./controllers/reports/reports.controller");
 
 /* ------------------------------ CONTROLLERS ------------------------------ */
 /* ------------------------------ CONTROLLERS ------------------------------ */
@@ -124,31 +125,7 @@ setInterval(() => {
 }, 2000);
 
 /* ------------------------------ STATIC FILES ------------------------------ */
-// Voice note audio files
-app.get("/api/voice-notes/:id/audio", async (req, res) => {
-  const { id } = req.params;
-  try {
-    const voiceNote = await VoiceNote.findByPk(id);
-    if (!voiceNote || !voiceNote.recording_path) {
-      return res.status(404).send("Voice note not found");
-    }
-
-    const filePath = path.resolve(voiceNote.recording_path);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).send("Voice file not found on disk");
-    }
-
-    res.sendFile(filePath, (err) => {
-      if (err) {
-        console.error("Failed to send audio file:", err);
-        res.status(500).send("Error sending file");
-      }
-    });
-  } catch (error) {
-    console.error("Unexpected error fetching voice note:", error);
-    res.status(500).send("Internal server error");
-  }
-});
+app.get("/api/voice-notes/:id/audio", streamVoiceNote);
 
 // Static folders for voice and recorded audio
 app.use(
@@ -212,7 +189,8 @@ app.use("/api", (req, res, next) => {
 // API routes
 app.use("/api", routes);
 app.use("/api", ivrDtmfRoutes);
-app.use("/api", recordingRoutes);
+app.use("/api/voice-notes", recordingRoutes);
+app.post("/api/voicenotes", require("./controllers/voiceNoteController").captureVoiceNote);
 app.use("/api/holidays", holidayRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/reports", reportsRoutes);

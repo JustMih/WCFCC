@@ -4,7 +4,8 @@ const User = require("../../models/User");
 
 const getAllVoiceNotes = async (req, res) => {
   try {
- const [voiceNotes] = await sequelize.query(`
+    const voiceNotes = await sequelize.query(
+      `
 SELECT 
   vn.id,
   vn.recording_path,
@@ -27,9 +28,10 @@ SELECT
 FROM Voice_Notes vn
 LEFT JOIN Users u
   ON u.extension = vn.assigned_extension
-ORDER BY vn.created_at DESC;
-
-`);
+ORDER BY vn.created_at DESC
+      `,
+      { type: sequelize.QueryTypes.SELECT }
+    );
 
     res.status(200).json({ voiceNotes });
   } catch (error) {
@@ -93,6 +95,7 @@ const updateVoiceNote = async (req, res) => {
 const markVoiceNotePlayed = async (req, res) => {
   try {
     const { id } = req.params;
+    const { duration_seconds: durationFromBody } = req.body || {};
     const userId = req.user?.userId;
 
     let playedBy = null;
@@ -109,15 +112,26 @@ const markVoiceNotePlayed = async (req, res) => {
       }
     }
 
-    const [updatedRows] = await VoiceNote.update(
-      {
-        is_played: 1,
-        played_by: playedBy,
-        played_at: new Date(),
-        status: "LISTENED",
-      },
-      { where: { id } }
-    );
+    const existing = await VoiceNote.findByPk(id, {
+      attributes: ["id", "duration_seconds"],
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Voice note not found" });
+    }
+
+    const payload = {
+      is_played: 1,
+      played_by: playedBy,
+      played_at: new Date(),
+      status: "LISTENED",
+    };
+
+    const parsedDuration = parseInt(durationFromBody, 10);
+    if (!Number.isNaN(parsedDuration) && parsedDuration > 0) {
+      payload.duration_seconds = parsedDuration;
+    }
+
+    const [updatedRows] = await VoiceNote.update(payload, { where: { id } });
 
     if (updatedRows === 0) {
       return res.status(404).json({ error: "Voice note not found" });
