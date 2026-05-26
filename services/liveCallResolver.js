@@ -29,10 +29,10 @@ exports.getLiveChannelByExtension = async (extension) => {
       return null;
     }
 
-    // Prefer agent leg
     const channel =
       call.agent_channel ||
       call.spyCallId ||
+      (call.agent_extension ? `PJSIP/${call.agent_extension}` : null) ||
       call.channel;
 
     console.log("🧪 Found channel:", channel);
