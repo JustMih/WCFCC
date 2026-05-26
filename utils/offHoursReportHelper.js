@@ -48,6 +48,18 @@ function isAsteriskExtensionDst(dst) {
 }
 
 /** Dial(PJSIP/${NUMBER_TO_CALL}@eGA,30) from [emergency-dial] */
+function extractPjsipEgaTargets(text) {
+  if (!text) return [];
+  const out = [];
+  const re = /PJSIP\/([^@,\s/]+)@eGA/gi;
+  let m;
+  while ((m = re.exec(String(text))) !== null) {
+    const token = m[1].trim();
+    if (token) out.push(token);
+  }
+  return out;
+}
+
 function extractPjsipDialTargets(text) {
   if (!text) return [];
   const out = [];
@@ -60,10 +72,23 @@ function extractPjsipDialTargets(text) {
   return out;
 }
 
+/** Reject uniqueid/timestamp noise (e.g. 1769842920398) mistaken for a phone */
+function isPlausibleTanzaniaPhone(normalized) {
+  if (!normalized) return false;
+  const d = String(normalized).replace(/\D/g, "");
+  return d.length === 10 && d.startsWith("0");
+}
+
 function extractPhonesFromText(text) {
   if (!text) return [];
   const matches = String(text).match(/\+?\d{9,15}/g) || [];
-  return [...new Set(matches.map((m) => normalizePhone(m)).filter((p) => p.length >= 9))];
+  return [
+    ...new Set(
+      matches
+        .map((m) => normalizePhone(m))
+        .filter((p) => isPlausibleTanzaniaPhone(p))
+    ),
+  ];
 }
 
 function extractExtensionFromChannel(channel) {
@@ -77,10 +102,8 @@ function extractExtensionFromChannel(channel) {
 
 function isValidRouteValue(raw) {
   if (!raw) return false;
-  const s = String(raw).trim();
-  if (s.length < 3) return false;
-  const digits = s.replace(/\D/g, "");
-  return digits.length >= 9;
+  const normalized = normalizePhone(raw);
+  return isPlausibleTanzaniaPhone(normalized);
 }
 
 function buildEmergencyLookup(emergencyRows) {
@@ -110,61 +133,102 @@ function buildRouteLabel(raw, emergency) {
   return raw;
 }
 
-/** Collect routing targets from one CDR leg */
-function collectRouteCandidates(record) {
+/** Collect routing targets from one CDR leg (tiered lists) */
+function collectRouteCandidates(record, emergencyByPhone) {
   const seen = new Set();
-  const out = [];
+  const ega = [];
+  const pjsip = [];
+  const other = [];
 
-  const add = (raw, priority = false) => {
+  const add = (raw, bucket, priority = false) => {
     if (!raw) return;
     const s = String(raw).trim();
     if (!s || seen.has(s)) return;
     const normalized = normalizePhone(s);
     if (EXCLUDED_ROUTING_NORMALIZED.has(normalized)) return;
+
+    const emergency = matchEmergencyNumber(normalized, emergencyByPhone);
+    if (!emergency && !isPlausibleTanzaniaPhone(normalized)) return;
+
     seen.add(s);
-    if (priority) out.unshift(s);
-    else out.push(s);
+    if (priority) bucket.unshift(s);
+    else bucket.push(s);
   };
 
-  // Highest priority: outbound emergency dial string
   for (const field of [record.lastdata, record.dstchannel]) {
-    for (const target of extractPjsipDialTargets(field)) {
-      add(target, true);
+    for (const target of extractPjsipEgaTargets(field)) {
+      add(target, ega, true);
     }
   }
 
-  if (!isAsteriskExtensionDst(record.dst) && isValidRouteValue(record.dst)) {
-    add(record.dst);
+  for (const field of [record.lastdata, record.dstchannel]) {
+    for (const target of extractPjsipDialTargets(field)) {
+      if (!String(field).includes("@eGA")) add(target, pjsip, true);
+    }
   }
-  if (isValidRouteValue(record.did)) add(record.did);
+
+  if (
+    isEmergencyDialContext(record) &&
+    !isAsteriskExtensionDst(record.dst) &&
+    isValidRouteValue(record.dst)
+  ) {
+    add(record.dst, other);
+  }
+  if (isEmergencyDialContext(record) && isValidRouteValue(record.did)) {
+    add(record.did, other);
+  }
 
   for (const phone of extractPhonesFromText(record.lastdata)) {
-    add(phone);
-  }
-  for (const phone of extractPhonesFromText(record.dstchannel)) {
-    add(phone);
-  }
-  for (const phone of extractPhonesFromText(record.channel)) {
-    add(phone);
+    add(phone, other);
   }
 
-  const ext = extractExtensionFromChannel(record.dstchannel || record.channel);
-  if (ext) add(ext);
-
-  return out;
+  return { ega, pjsip, other };
 }
 
-function pickBestRoute(candidates, callerPhone, emergencyByPhone) {
+function collectPhonesToExcludeFromLegs(legs) {
+  const exclude = new Set(EXCLUDED_ROUTING_NORMALIZED);
+  const egaDialTargets = new Set();
+
+  for (const leg of legs) {
+    for (const field of [leg.lastdata, leg.dstchannel]) {
+      for (const target of extractPjsipEgaTargets(field)) {
+        const n = normalizePhone(target);
+        if (n) egaDialTargets.add(n);
+      }
+    }
+  }
+
+  for (const leg of legs) {
+    const caller = parseCallerPhone(leg.clid, leg.src);
+    if (caller && !egaDialTargets.has(caller)) exclude.add(caller);
+    if (!isEmergencyDialContext(leg)) {
+      const srcP = normalizePhone(leg.src);
+      if (isPlausibleTanzaniaPhone(srcP) && !egaDialTargets.has(srcP)) {
+        exclude.add(srcP);
+      }
+      for (const p of extractPhonesFromText(leg.clid)) {
+        if (!egaDialTargets.has(p)) exclude.add(p);
+      }
+    }
+  }
+  return exclude;
+}
+
+function pickBestRoute(candidates, callerPhone, emergencyByPhone, excludePhones) {
+  const exclude = excludePhones || new Set();
   let best = null;
   let bestScore = -1;
 
   for (const raw of candidates) {
     const normalized = normalizePhone(raw);
-    if (!normalized || normalized.length < 9) continue;
+    if (!normalized) continue;
     if (normalized === callerPhone) continue;
+    if (exclude.has(normalized)) continue;
     if (EXCLUDED_ROUTING_NORMALIZED.has(normalized)) continue;
 
     const emergency = matchEmergencyNumber(normalized, emergencyByPhone);
+    if (!emergency && !isPlausibleTanzaniaPhone(normalized)) continue;
+
     let score = 10;
     if (emergency) score += 100;
     if (raw === emergency?.phone_number) score += 5;
@@ -193,6 +257,26 @@ function pickBestRoute(candidates, callerPhone, emergencyByPhone) {
   );
 }
 
+function pickRouteFromTiered(tiered, callerPhone, emergencyByPhone, excludePhones) {
+  const tryLists = [tiered.ega, tiered.pjsip, tiered.other];
+  for (const list of tryLists) {
+    const picked = pickBestRoute(list, callerPhone, emergencyByPhone, excludePhones);
+    if (picked.routed_to) return picked;
+  }
+  return pickBestRoute([], callerPhone, emergencyByPhone, excludePhones);
+}
+
+function mergeTieredCandidates(legs, emergencyByPhone) {
+  const merged = { ega: [], pjsip: [], other: [] };
+  for (const leg of legs) {
+    const tiered = collectRouteCandidates(leg, emergencyByPhone);
+    merged.ega.push(...tiered.ega);
+    merged.pjsip.push(...tiered.pjsip);
+    merged.other.push(...tiered.other);
+  }
+  return merged;
+}
+
 function sessionKey(record) {
   const caller = parseCallerPhone(record.clid, record.src);
   const t = record.cdrstarttime
@@ -203,13 +287,10 @@ function sessionKey(record) {
 
 /** Merge all legs of one call — find Dial/emergency destination */
 function resolveRoutedToFromSession(legs, emergencyByPhone) {
-  const allCandidates = [];
-  for (const leg of legs) {
-    allCandidates.push(...collectRouteCandidates(leg));
-  }
-
   const callerPhone = parseCallerPhone(legs[0]?.clid, legs[0]?.src);
-  return pickBestRoute(allCandidates, callerPhone, emergencyByPhone);
+  const exclude = collectPhonesToExcludeFromLegs(legs);
+  const tiered = mergeTieredCandidates(legs, emergencyByPhone);
+  return pickRouteFromTiered(tiered, callerPhone, emergencyByPhone, exclude);
 }
 
 function applySessionRouting(records, emergencyByPhone) {
@@ -238,6 +319,7 @@ function scoreCdrLeg(record) {
   if (record.routed_to && record.caller_phone !== record.routed_to_normalized) {
     score += 10;
   }
+  if (extractPjsipEgaTargets(record.lastdata).length > 0) score += 40;
   if (String(record.lastdata || "").includes("@eGA")) score += 15;
   if (Number(record.billsec) > 0) score += 5;
   if (record.lastapp === "Dial") score += 8;
@@ -263,7 +345,12 @@ function enrichCdrRecord(record, emergencyByPhone) {
   const caller_phone = parseCallerPhone(record.clid, record.src);
   const routed =
     record._sessionRouting ||
-    pickBestRoute(collectRouteCandidates(record), caller_phone, emergencyByPhone);
+    pickRouteFromTiered(
+      collectRouteCandidates(record, emergencyByPhone),
+      caller_phone,
+      emergencyByPhone,
+      new Set([caller_phone].filter(Boolean))
+    );
 
   return {
     ...record,
