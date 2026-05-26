@@ -1,5 +1,10 @@
 const User = require("../../models/User");
+const AgentPauseSession = require("../../models/agent_pause_sessions");
 const AgentLoginLog = require("../../models/agent_activity_logs");
+const {
+  getAllowedSecondsForActivity,
+  computePauseLiveMetrics,
+} = require("../../utils/pauseActivities");
 const ChatMassage = require("../../models/chart_message");
 const Pjsip_Endpoints = require("../../models/pjsip_endpoints");
 const { Op } = require("sequelize");
@@ -814,35 +819,292 @@ const getOnlineUser = async (req, res) => {
   }
 };
 
+const VALID_USER_STATUSES = [
+  "online",
+  "offline",
+  "idle",
+  "pause",
+  "active",
+  "force-pause",
+  "mission",
+];
+
+const closeActivePauseSession = async (userId, endedAt = new Date()) => {
+  const session = await AgentPauseSession.findOne({
+    where: { userId, ended_at: null },
+    order: [["started_at", "DESC"]],
+  });
+  if (!session) return null;
+
+  const started = new Date(session.started_at).getTime();
+  const ended = new Date(endedAt).getTime();
+  const durationSeconds = Math.max(
+    0,
+    Math.floor((ended - started) / 1000)
+  );
+  const exceededSeconds = Math.max(
+    0,
+    durationSeconds - (session.allowed_seconds || 0)
+  );
+
+  await session.update({
+    ended_at: endedAt,
+    duration_seconds: durationSeconds,
+    exceeded_seconds: exceededSeconds,
+  });
+  return session;
+};
+
+const createActivePauseSession = async (
+  userId,
+  pauseActivity,
+  startedAt,
+  allowedSeconds
+) => {
+  await closeActivePauseSession(userId, startedAt);
+  return AgentPauseSession.create({
+    userId,
+    pause_activity: pauseActivity,
+    started_at: startedAt,
+    allowed_seconds: allowedSeconds,
+    exceeded_seconds: 0,
+  });
+};
+
+const buildStatusUpdateFields = (body) => {
+  const { status, pause_activity, pause_started_at } = body;
+  const fields = { status };
+
+  if (status === "online") {
+    fields.pause_activity = null;
+    fields.pause_started_at = null;
+    fields.pause_allowed_seconds = null;
+  } else if (status === "pause") {
+    if (!pause_activity || !String(pause_activity).trim()) {
+      return {
+        error: "pause_activity is required when status is pause",
+      };
+    }
+    const activity = String(pause_activity).trim();
+    fields.pause_activity = activity;
+    fields.pause_started_at = pause_started_at
+      ? new Date(pause_started_at)
+      : new Date();
+    if (Number.isNaN(fields.pause_started_at.getTime())) {
+      return { error: "Invalid pause_started_at" };
+    }
+    fields.pause_allowed_seconds = getAllowedSecondsForActivity(activity);
+  }
+
+  return { fields };
+};
+
+const attachPauseMetricsToAgent = (agent) => {
+  const plain = agent.toJSON ? agent.toJSON() : { ...agent };
+  if (plain.status !== "pause") return plain;
+  const metrics = computePauseLiveMetrics(plain);
+  return { ...plain, ...metrics };
+};
+
 const getAgentOnline = async (req, res) => {
   try {
     const agents = await User.findAll({
-      where: { role: "agent", status: "online" },
+      where: {
+        role: "agent",
+        status: { [Op.in]: ["online", "pause"] },
+      },
+      attributes: [
+        "id",
+        "full_name",
+        "extension",
+        "status",
+        "pause_activity",
+        "pause_started_at",
+        "pause_allowed_seconds",
+      ],
     });
 
-    const agentCount = agents.length;
+    const onlineAgents = agents.filter((a) => a.status === "online");
+    const agentCount = onlineAgents.length;
+    const agentsWithMetrics = agents.map(attachPauseMetricsToAgent);
 
-    // Debugging: Check how many online agents were found
-    console.log(`Found ${agentCount} online agents`);
+    console.log(
+      `Found ${agents.length} active agents (${agentCount} online, ${agents.length - agentCount} paused)`
+    );
 
-    res.status(200).json({ agents, agentCount });
+    res.status(200).json({ agents: agentsWithMetrics, agentCount });
   } catch (error) {
     console.error("Error fetching online agents:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-const updateAgentStatus = async (req, res) => {
+const getAgentPauseState = async (req, res) => {
   const { userId } = req.params;
-  const { status } = req.body;
 
   try {
-    await User.update({ status }, { where: { id: userId } });
-    res.json({ message: "Status updated" });
+    const user = await User.findByPk(userId, {
+      attributes: [
+        "id",
+        "status",
+        "pause_activity",
+        "pause_started_at",
+        "pause_allowed_seconds",
+      ],
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const metrics = computePauseLiveMetrics(user);
+
+    res.status(200).json({
+      status: user.status,
+      pause_activity: user.pause_activity,
+      pause_started_at: user.pause_started_at,
+      pause_allowed_seconds: metrics.pause_allowed_seconds,
+      remaining_seconds: metrics.remaining_seconds,
+      exceeded_seconds: metrics.exceeded_seconds,
+      is_exceeded: metrics.is_exceeded,
+    });
   } catch (error) {
-    console.error("Error updating status:", error);
-    res.status(500).json({ error: "Server error" });
+    console.error("Error fetching agent pause state:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
+};
+
+const markPauseExceeded = async (req, res) => {
+  const { userId } = req.params;
+  const requesterId = req.user?.userId;
+
+  try {
+    if (
+      requesterId &&
+      requesterId !== userId &&
+      !["supervisor", "admin", "super-admin"].includes(req.user?.role)
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const session = await AgentPauseSession.findOne({
+      where: { userId, ended_at: null },
+      order: [["started_at", "DESC"]],
+    });
+
+    if (!session) {
+      return res.status(404).json({ message: "No active pause session" });
+    }
+
+    if (!session.exceeded_at) {
+      await session.update({ exceeded_at: new Date() });
+    }
+
+    const user = await User.findByPk(userId, {
+      attributes: [
+        "status",
+        "pause_activity",
+        "pause_started_at",
+        "pause_allowed_seconds",
+      ],
+    });
+    const metrics = user ? computePauseLiveMetrics(user) : {};
+
+    res.status(200).json({
+      message: "Pause marked as exceeded",
+      exceeded_at: session.exceeded_at,
+      ...metrics,
+    });
+  } catch (error) {
+    console.error("Error marking pause exceeded:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getPauseReport = async (req, res) => {
+  try {
+    const { startDate, endDate, userId: filterUserId } = req.query;
+    const requesterRole = req.user?.role;
+    const requesterId = req.user?.userId;
+
+    const where = {};
+    if (startDate || endDate) {
+      where.started_at = {};
+      if (startDate) {
+        where.started_at[Op.gte] = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        where.started_at[Op.lte] = end;
+      }
+    }
+
+    if (requesterRole === "agent") {
+      where.userId = requesterId;
+    } else if (
+      filterUserId &&
+      ["supervisor", "admin", "super-admin"].includes(requesterRole)
+    ) {
+      where.userId = filterUserId;
+    }
+
+    const sessions = await AgentPauseSession.findAll({
+      where,
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "full_name", "extension"],
+        },
+      ],
+      order: [["started_at", "DESC"]],
+    });
+
+    const rows = sessions.map((s) => {
+      const plain = s.toJSON();
+      const user = plain.user || {};
+      const isActive = !plain.ended_at;
+      let durationSeconds = plain.duration_seconds;
+      let exceededSeconds = plain.exceeded_seconds || 0;
+
+      if (isActive && plain.started_at) {
+        const started = new Date(plain.started_at).getTime();
+        durationSeconds = Math.max(
+          0,
+          Math.floor((Date.now() - started) / 1000)
+        );
+        exceededSeconds = Math.max(
+          0,
+          durationSeconds - (plain.allowed_seconds || 0)
+        );
+      }
+
+      return {
+        id: plain.id,
+        userId: plain.userId,
+        full_name: user.full_name,
+        extension: user.extension,
+        pause_activity: plain.pause_activity,
+        started_at: plain.started_at,
+        ended_at: plain.ended_at,
+        exceeded_at: plain.exceeded_at,
+        allowed_seconds: plain.allowed_seconds,
+        duration_seconds: durationSeconds,
+        exceeded_seconds: exceededSeconds,
+        is_active: isActive,
+      };
+    });
+
+    res.status(200).json({ sessions: rows });
+  } catch (error) {
+    console.error("Error fetching pause report:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const updateAgentStatus = async (req, res) => {
+  return updateUserStatus(req, res);
 };
 
 const getAgentIdle = async (req, res) => {
@@ -1479,28 +1741,54 @@ const updateUser = async (req, res) => {
 
 // Update the user status by ID
 const updateUserStatus = async (req, res) => {
-  const { userId } = req.params; // Get userId from the request params
-  const { status } = req.body; // Get the new status from the request body
+  const { userId } = req.params;
+  const { status } = req.body;
 
   try {
-    // Check if the status value is valid (you can adjust this validation as per your requirements)
-    const validStatuses = [
-      "online",
-      "offline",
-      "idle",
-      "pause",
-      "active",
-      "force-pause",
-      "mission",
-    ];
-    if (!validStatuses.includes(status)) {
+    if (!VALID_USER_STATUSES.includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    // Update the status for the user with the given userId
-    await User.update({ status }, { where: { id: userId } });
+    const built = buildStatusUpdateFields(req.body);
+    if (built.error) {
+      return res.status(400).json({ message: built.error });
+    }
 
-    res.status(200).json({ message: "User status updated successfully" });
+    if (status === "online") {
+      await closeActivePauseSession(userId);
+    } else if (status === "pause") {
+      await createActivePauseSession(
+        userId,
+        built.fields.pause_activity,
+        built.fields.pause_started_at,
+        built.fields.pause_allowed_seconds
+      );
+    }
+
+    await User.update(built.fields, { where: { id: userId } });
+
+    const user = await User.findByPk(userId, {
+      attributes: [
+        "id",
+        "status",
+        "pause_activity",
+        "pause_started_at",
+        "pause_allowed_seconds",
+      ],
+    });
+
+    const metrics = user ? computePauseLiveMetrics(user) : {};
+
+    res.status(200).json({
+      message: "User status updated successfully",
+      status: user?.status,
+      pause_activity: user?.pause_activity ?? null,
+      pause_started_at: user?.pause_started_at ?? null,
+      pause_allowed_seconds: metrics.pause_allowed_seconds ?? null,
+      remaining_seconds: metrics.remaining_seconds ?? 0,
+      exceeded_seconds: metrics.exceeded_seconds ?? 0,
+      is_exceeded: metrics.is_exceeded ?? false,
+    });
   } catch (error) {
     console.error("Error updating status:", error);
     res.status(500).json({ error: "Server error" });
@@ -1565,6 +1853,9 @@ module.exports = {
   createMessage,
   updateAgentStatus,
   updateUserStatus,
+  getAgentPauseState,
+  markPauseExceeded,
+  getPauseReport,
   getUsersByRole,
   unReadMessage,
   getSenderReceiverUnreadCount,

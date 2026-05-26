@@ -1,151 +1,215 @@
 # External API Documentation
 
-## Ticket Status Lookup API
+APIs for external systems (ESSP portal, WCF portal, etc.) to interact with the contact center.
 
-This endpoint allows external systems to query ticket status information using the ticket ID.
+**ESSP create ticket:** `https://contactcenter.wcf.go.tz/api/essp`  
+**External ticket status:** `https://contactcenter.wcf.go.tz/api/external`
+
+---
+
+## Authentication (create-ticket)
+
+Ticket creation requires an API key:
+
+| Header | Value |
+|--------|--------|
+| `x-api-key` | Your assigned API key |
+| or `Authorization` | `Bearer <your-api-key>` |
+
+Configure keys on the server:
+
+```env
+VALID_API_KEYS=essp-prod-key-here,essp-staging-key-here
+ALLOWED_ORIGINS=https://essp.wcf.go.tz,https://portal.wcf.go.tz
+```
+
+**Ticket status lookup** (`POST /api/external/ticket-status`) does not require an API key but is rate-limited and CORS-restricted.
+
+---
+
+## Create Ticket (ESSP)
+
+Allows the Employee Self Service Portal to create contact-center tickets.
 
 ### Endpoint
 
 ```
-GET /api/external/ticket-status/:ticketId
+POST /api/essp/create-ticket
 ```
 
-### Parameters
+### Headers
 
-- `ticketId` (path parameter): The unique identifier of the ticket
+```
+Content-Type: application/json
+x-api-key: YOUR_ESSP_API_KEY
+```
 
-### Authentication
+### Request body
 
-This endpoint is **public** and does not require authentication.
+Wrap fields in a `payload` object (recommended) or send flat JSON.
 
-### Response Format
+| Field | Required | Description |
+|-------|----------|-------------|
+| `phoneNumber` | Yes | Requester phone (e.g. `255684012920`) |
+| `requester` | Yes | e.g. `Employee`, `Employer` |
+| `category` | Yes | `Inquiry`, `Complaint`, `Suggestion`, `Compliment`, `Congrats` |
+| `subject` | Yes | Ticket subject |
+| `description` | Yes | Ticket description |
+| `firstName`, `middleName`, `lastName` | No | Requester names |
+| `nidaNumber` | No | NIDA number |
+| `institution`, `channel`, `region`, `district` | No | Defaults: `channel` → `ESSP` if omitted |
+| `functionId`, `responsible_unit_id`, `responsible_unit_name` | No | Routing / unit |
+| `section`, `sub_section` | No | Section labels |
+| `inquiry_type` | No | `Claims` or `Compliance` |
+| `status`, `shouldClose` | No | Default `Open` |
+| `employerAllocatedStaffUsername` | No | Assign to this WCF user when provided (ESSP priority) |
+| `employerRegistrationNumber`, `employerName`, etc. | No | Employer details |
+| `requesterName`, `requesterEmail`, `requesterPhoneNumber`, `requesterAddress` | No | Stored in RequesterDetails when provided |
+| `relationshipToEmployee` | No | e.g. `Self` |
 
-#### Success Response (200)
+### Example request
+
+```json
+{
+  "payload": {
+    "firstName": "MARIKI",
+    "middleName": "EDWARD",
+    "lastName": "MSAKI",
+    "phoneNumber": "255684012920",
+    "nidaNumber": "19830622114700000121",
+    "requester": "Employee",
+    "institution": "Workers Compensation Fund (WCF)",
+    "channel": "ESSP",
+    "category": "Complaint",
+    "inquiry_type": "Compliance",
+    "functionId": 15,
+    "responsible_unit_id": 15,
+    "responsible_unit_name": "Compliance",
+    "section": "Compliance",
+    "subject": "Compliance enquiry",
+    "description": "Test message",
+    "status": "Open",
+    "shouldClose": false,
+    "requesterName": "MARIKI EDWARD MSAKI",
+    "requesterPhoneNumber": "255684012920",
+    "requesterEmail": "mariki.msaki@wcf.go.tz",
+    "relationshipToEmployee": "Self",
+    "employerRegistrationNumber": "4038",
+    "employerName": "Workers Compensation Fund (WCF)",
+    "employerAllocatedStaffUsername": "mariam.mlilapi",
+    "is_new_registration": false
+  }
+}
+```
+
+### Success response (201)
 
 ```json
 {
   "success": true,
-  "ticket": {
-    "id": 123,
-    "ticket_id": "TKT-2024-001",
-    "status": "Open",
-    "category": "Complaint",
-    "complaint_type": "Minor",
-    "subject": "Service inquiry",
-    "phone_number": "255123456789",
-    "region": "Dar es Salaam",
-    "responsible_unit": "Customer Service",
-    "created_at": "2024-01-15T10:30:00.000Z",
-    "updated_at": "2024-01-15T14:45:00.000Z",
-    "age_in_days": 5,
-    "current_assignee": {
-      "id": 456,
-      "name": "John Doe",
-      "role": "agent"
-    },
-    "last_assignment": {
-      "assigned_at": "2024-01-15T11:00:00.000Z",
-      "assigned_to": {
-        "id": 456,
+  "message": "Ticket created successfully and assigned to Mariam Mlilapi",
+  "ticket_id": "WCF-CC-20260526-000001",
+  "ticket": { },
+  "assigned_to": {
+    "id": "...",
+    "full_name": "Mariam Mlilapi",
+    "role": "focal-person"
+  }
+}
+```
+
+### Error responses
+
+| Status | error | When |
+|--------|-------|------|
+| 400 | `VALIDATION_ERROR` | Missing required fields |
+| 400 | `ALLOCATED_USER_NOT_FOUND` | `employerAllocatedStaffUsername` not in system |
+| 400 | `NO_ASSIGNEE_FOUND` | No reviewer/focal-person for category |
+| 401 | `MISSING_API_KEY` | No API key header |
+| 401 | `INVALID_API_KEY` | Wrong key |
+| 500 | `SYSTEM_USER_NOT_CONFIGURED` | `system` user missing in DB |
+| 500 | `API_KEYS_NOT_CONFIGURED` | `VALID_API_KEYS` env empty |
+| 429 | `RATE_LIMIT_EXCEEDED` | Too many requests |
+
+### cURL example
+
+```bash
+curl -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ESSP_API_KEY" \
+  -d '{
+    "payload": {
+      "firstName": "MARIKI",
+      "lastName": "MSAKI",
+      "phoneNumber": "255684012920",
+      "requester": "Employee",
+      "category": "Complaint",
+      "subject": "Compliance enquiry",
+      "description": "Test message",
+      "employerAllocatedStaffUsername": "mariam.mlilapi"
+    }
+  }'
+```
+
+### Assignment rules (ESSP)
+
+1. If `employerAllocatedStaffUsername` is set → assign to that user (any category).
+2. Otherwise same rules as contact center: Inquiry → allocated user / focal-person; Complaint → reviewer.
+3. Complaints without `complaint_type` default to `Minor`.
+
+---
+
+## Ticket Status Lookup
+
+Query ticket status by phone number and/or ticket number.
+
+### Endpoint
+
+```
+POST /api/external/ticket-status
+```
+
+### Request body
+
+```json
+{
+  "phone_number": "255123456789",
+  "ticket_number": "WCF-CC-20251226-000002"
+}
+```
+
+At least one of `phone_number` or `ticket_number` is required.
+
+### Success response (200)
+
+```json
+{
+  "success": true,
+  "total_tickets": 1,
+  "tickets": [
+    {
+      "ticket_number": "WCF-CC-20251226-000002",
+      "status": "Open",
+      "category": "Complaint",
+      "subject": "Service inquiry",
+      "phone_number": "255123456789",
+      "age_in_days": 5,
+      "current_assignee": {
+        "id": "...",
         "name": "John Doe",
-        "role": "agent"
+        "role": "reviewer"
       }
     }
-  },
-  "timestamp": "2024-01-20T15:30:00.000Z"
+  ]
 }
 ```
 
-#### Error Responses
+### Rate limiting
 
-**400 Bad Request - Missing Ticket ID**
-```json
-{
-  "success": false,
-  "message": "Ticket ID is required",
-  "error": "MISSING_TICKET_ID"
-}
-```
+- **100 requests per 15 minutes** per IP on external routes.
 
-**404 Not Found - Ticket Not Found**
-```json
-{
-  "success": false,
-  "message": "Ticket not found",
-  "error": "TICKET_NOT_FOUND",
-  "ticket_id": "123"
-}
-```
+### Security notes
 
-**500 Internal Server Error**
-```json
-{
-  "success": false,
-  "message": "Internal server error",
-  "error": "INTERNAL_ERROR"
-}
-```
-
-### Example Usage
-
-#### cURL
-```bash
-curl -X GET "http://your-domain.com/api/external/ticket-status/123"
-```
-
-#### JavaScript (Fetch)
-```javascript
-const response = await fetch('http://your-domain.com/api/external/ticket-status/123');
-const data = await response.json();
-
-if (data.success) {
-  console.log('Ticket Status:', data.ticket.status);
-  console.log('Assigned To:', data.ticket.current_assignee?.name);
-} else {
-  console.error('Error:', data.message);
-}
-```
-
-#### Python (requests)
-```python
-import requests
-
-response = requests.get('http://your-domain.com/api/external/ticket-status/123')
-data = response.json()
-
-if data['success']:
-    print(f"Ticket Status: {data['ticket']['status']}")
-    print(f"Assigned To: {data['ticket']['current_assignee']['name'] if data['ticket']['current_assignee'] else 'Unassigned'}")
-else:
-    print(f"Error: {data['message']}")
-```
-
-### Response Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | number | Internal ticket ID |
-| `ticket_id` | string | Human-readable ticket ID |
-| `status` | string | Current ticket status (Open, Assigned, In Progress, Closed, etc.) |
-| `category` | string | Ticket category (Complaint, Inquiry, etc.) |
-| `complaint_type` | string | Complaint rating (Minor, Major) |
-| `subject` | string | Ticket subject/description |
-| `phone_number` | string | Contact phone number |
-| `region` | string | Geographic region |
-| `responsible_unit` | string | Responsible department/unit |
-| `created_at` | string | Ticket creation timestamp |
-| `updated_at` | string | Last update timestamp |
-| `age_in_days` | number | Days since ticket creation |
-| `current_assignee` | object | Currently assigned user (null if unassigned) |
-| `last_assignment` | object | Most recent assignment details |
-
-### Rate Limiting
-
-This endpoint is designed for external system integration. Please implement appropriate rate limiting on your client side to avoid overwhelming the server.
-
-### Security Notes
-
-- This endpoint is public and accessible without authentication
-- Only basic ticket information is exposed (no sensitive personal data)
-- Consider implementing IP-based rate limiting if needed
-- Monitor usage for potential abuse 
+- Create-ticket requires a valid API key (`VALID_API_KEYS`).
+- CORS allows configured origins (`ALLOWED_ORIGINS` / defaults include `https://essp.wcf.go.tz`).
+- Status lookup is public but rate-limited; do not expose sensitive data in client logs.

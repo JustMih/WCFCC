@@ -54,6 +54,18 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: "offline",
     },
+    pause_activity: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    pause_started_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    pause_allowed_seconds: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     extension: {
       type: DataTypes.INTEGER,
       allowNull: true,

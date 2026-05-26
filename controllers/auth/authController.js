@@ -9,6 +9,12 @@ const { Op } = require("sequelize");
 // const { getEffectiveRoles } = require("../../utils/roleMapper");
 require("dotenv").config();
 
+/** true unless USE_LDAP=false in .env */
+const useLdap = () => {
+  const v = (process.env.USE_LDAP ?? "true").trim().toLowerCase();
+  return v !== "false";
+};
+
 /**
  * Returns seconds until the next daily logout time (default 2:00 PM / 14:00 server local time).
  * Uses DAILY_LOGOUT_TIME env (e.g. "14:00" or "14:00:00"); TZ env controls timezone.
@@ -110,15 +116,50 @@ const authenticateActiveDirectory = async (username, password) => {
   }
 };
 
+/** Look up or create app user by login username (email or AD-style name). No password check. */
+const resolveOrCreateUser = async (username) => {
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username);
+  const email = isEmail ? username : `${username}@wcf.go.tz`;
+  const localPart = isEmail ? username.split("@")[0] : username;
+
+  let user = await User.findOne({ where: { email } });
+
+  if (!user) {
+    user = await User.create({
+      full_name: localPart,
+      email,
+      password: "wcf12345",
+      extension: null,
+      role: "agent",
+      isActive: false,
+    });
+    console.log(`User ${localPart} created with inactive status.`);
+  }
+
+  if (user.isActive === false) {
+    const err = new Error(
+      "Your account is inactive. Please wait for the super admin to activate it."
+    );
+    err.code = "INACTIVE";
+    throw err;
+  }
+
+  return user;
+};
+
 const login = async (req, res) => {
   const { username, password } = req.body;
 
   try {
     let user;
+    const ldapEnabled = useLdap();
+
+    if (!ldapEnabled) {
+      console.log("LDAP disabled (USE_LDAP=false): username-only login");
+    }
 
     // Step 1: Check if username is superadmin
     if (username === "superadmin@wcf.go.tz") {
-      // Authenticate directly from the local database
       user = await User.findOne({
         where: { email: username },
       });
@@ -129,80 +170,47 @@ const login = async (req, res) => {
         });
       }
 
-      // Check password for super admin (can be skipped if hashed)
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ message: "Invalid password" });
+      if (ldapEnabled) {
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+          return res.status(400).json({ message: "Invalid password" });
+        }
+      }
+    } else if (!ldapEnabled) {
+      try {
+        user = await resolveOrCreateUser(username);
+      } catch (err) {
+        if (err.code === "INACTIVE") {
+          return res.status(400).json({ message: err.message });
+        }
+        throw err;
       }
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      // If username is an email, extract username and authenticate using LDAP (AD password)
-      const emailUsername = username.split('@')[0];
+      const emailUsername = username.split("@")[0];
       console.log(`🔍 Email login detected. Extracted username: ${emailUsername}`);
-      
+
       try {
-        // Authenticate with Active Directory using extracted username and password
         await authenticateActiveDirectory(emailUsername, password);
         console.log(`✅ LDAP authentication successful for email: ${username}`);
-        
-        // LDAP success, now check or create user in DB
-        user = await User.findOne({
-          where: { email: username },
-        });
-
-        if (!user) {
-          // If user doesn't exist, create a new user with inactive status
-          user = await User.create({
-            full_name: emailUsername,
-            email: username,
-            password: "wcf12345", // Placeholder password (not used for AD auth)
-            extension: null,
-            role: "agent",
-            isActive: false,
-          });
-          console.log(`User ${emailUsername} created with inactive status.`);
-        }
-
-        if (user.isActive === false) {
-          return res.status(400).json({
-            message:
-              "Your account is inactive. Please wait for the super admin to activate it.",
-          });
-        }
+        user = await resolveOrCreateUser(username);
       } catch (ldapError) {
+        if (ldapError.code === "INACTIVE") {
+          return res.status(400).json({ message: ldapError.message });
+        }
         console.error("LDAP authentication failed for email login:", ldapError.message);
-        return res.status(400).json({ 
-          message: "LDAP authentication failed. Please check your Active Directory password." 
+        return res.status(400).json({
+          message:
+            "LDAP authentication failed. Please check your Active Directory password.",
         });
       }
     } else {
-      // If not an email, authenticate using LDAP only
       try {
         await authenticateActiveDirectory(username, password);
-        // LDAP success, now check or create user in DB
-        user = await User.findOne({
-          where: { email: `${username}@wcf.go.tz` },
-        });
-
-        if (!user) {
-          // If user doesn't exist, create a new user with inactive status
-          user = await User.create({
-            full_name: username,
-            email: `${username}@wcf.go.tz`,
-            password: "wcf12345",
-            extension: null,
-            role: "agent",
-            isActive: false,
-          });
-          console.log(`User ${username} created with inactive status.`);
-        }
-
-        if (user.isActive === false) {
-          return res.status(400).json({
-            message:
-              "Your account is inactive. Please wait for the super admin to activate it.",
-          });
-        }
+        user = await resolveOrCreateUser(username);
       } catch (ldapError) {
+        if (ldapError.code === "INACTIVE") {
+          return res.status(400).json({ message: ldapError.message });
+        }
         return res.status(400).json({ message: "LDAP authentication failed." });
       }
     }
