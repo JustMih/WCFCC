@@ -85,6 +85,9 @@ function parseEndpointLineFromList(output, extension) {
     if (/\bNot in use\b/i.test(line)) {
       return { registered: true, state: "Not in use", line: line.trim() };
     }
+    if (/\bRinging\b/i.test(line) && !/\bUnavailable\b/i.test(line)) {
+      return { registered: true, state: "Ringing", line: line.trim() };
+    }
     if (/\bUnavailable\b/i.test(line)) {
       return { registered: false, state: "Unavailable", line: line.trim() };
     }
@@ -105,6 +108,74 @@ function parseEndpointFromShow(output) {
     return { registered: false, state: "Unavailable" };
   }
   return { registered: false, state: "unknown" };
+}
+
+function isValidSpyChannel(channel) {
+  if (!channel || channel === "-") return false;
+  const ch = String(channel);
+  if (!ch.includes("PJSIP/") || !ch.includes("-")) return false;
+  if (/PJSIP\/[a-z]$/i.test(ch)) return false;
+  return true;
+}
+
+/**
+ * Resolve live agent channel from AMI (more reliable than CEL during active bridge).
+ */
+async function findLiveSpyChannelViaAmi(ami, linkedid, agentExtension) {
+  if (!ami) return null;
+
+  return new Promise((resolve) => {
+    const channels = [];
+    const ext = agentExtension ? String(agentExtension) : null;
+    const lid = linkedid ? String(linkedid) : null;
+
+    const onEvent = (event) => {
+      const name = event?.Event || event?.event;
+      if (name === "CoreShowChannel") {
+        channels.push(event);
+      }
+      if (name === "CoreShowChannelsComplete") {
+        ami.removeListener("managerevent", onEvent);
+        finish();
+      }
+    };
+
+    const finish = () => {
+      for (const row of channels) {
+        const ch = row.Channel || row.channel;
+        if (!isValidSpyChannel(ch)) continue;
+        const rowLid = row.Linkedid || row.LinkedID || row.linkedid;
+        if (lid && rowLid && String(rowLid) !== lid) continue;
+        if (ext && !ch.includes(`/${ext}-`)) continue;
+        resolve(ch);
+        return;
+      }
+
+      for (const row of channels) {
+        const ch = row.Channel || row.channel;
+        if (!isValidSpyChannel(ch)) continue;
+        if (ext && !ch.includes(`/${ext}-`)) continue;
+        resolve(ch);
+        return;
+      }
+
+      resolve(null);
+    };
+
+    const timeout = setTimeout(() => {
+      ami.removeListener("managerevent", onEvent);
+      finish();
+    }, 3000);
+
+    ami.on("managerevent", onEvent);
+    ami.action({ Action: "CoreShowChannels" }, (err) => {
+      if (err) {
+        clearTimeout(timeout);
+        ami.removeListener("managerevent", onEvent);
+        resolve(null);
+      }
+    });
+  });
 }
 
 async function isExtensionReachable(ami, extension) {
@@ -175,6 +246,8 @@ async function isExtensionReachable(ami, extension) {
 
 module.exports = {
   findAgentChannelFromCel,
+  findLiveSpyChannelViaAmi,
+  isValidSpyChannel,
   isExtensionReachable,
   runAmiCommand,
   parseEndpointLineFromList,

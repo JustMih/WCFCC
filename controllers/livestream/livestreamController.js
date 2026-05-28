@@ -39,6 +39,26 @@ const setupSocket = (io) => {
 
 /* ============================== HELPERS ============================== */
 
+/** Avoid showing Asterisk dialplan tokens (s, t, h) as customer destination */
+function resolveCalleeFromCelRow(row) {
+  const dnid = row.cid_dnid;
+  const peer = row.peer;
+  const exten = row.exten;
+
+  const isUseful = (v) => {
+    if (v == null || v === "" || v === "-") return false;
+    const s = String(v).trim();
+    if (s.length <= 2) return false;
+    if (/^[sthi]$/i.test(s)) return false;
+    return true;
+  };
+
+  if (isUseful(dnid)) return String(dnid).trim();
+  if (isUseful(peer)) return String(peer).trim();
+  if (isUseful(exten)) return String(exten).trim();
+  return dnid || peer || exten || "-";
+}
+
 /* ============================== SOCKET EMITTER ============================== */
 const emitLiveCall = (callData) => {
   if (!ioInstance) return;
@@ -84,7 +104,7 @@ const getAllLiveCalls = async (req, res) => {
       calls[key] ??= {
         linkedid: key,
         caller: row.cid_num || "-",
-        callee: row.cid_dnid || row.peer || row.exten || "-",
+        callee: resolveCalleeFromCelRow(row),
         channel: row.channame || row.channel || "-",
         spyCallId: row.channame || row.channel || null,
         call_start: null,

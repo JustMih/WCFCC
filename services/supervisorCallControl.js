@@ -4,6 +4,8 @@ const User = require("../models/User");
 const { getAmi, isAmiConfigured } = require("./amiService");
 const {
   findAgentChannelFromCel,
+  findLiveSpyChannelViaAmi,
+  isValidSpyChannel,
   isExtensionReachable,
 } = require("./amiChannelHelper");
 
@@ -64,8 +66,17 @@ async function getSupervisorExtension(userId, overrideExtension) {
 }
 
 async function resolveSpyChannelDeep(call) {
+  const ami = getAmi();
+
+  const fromAmi = await findLiveSpyChannelViaAmi(
+    ami,
+    call.linkedid,
+    call.agent_extension
+  );
+  if (fromAmi) return fromAmi;
+
   const fromCall = resolveSpyChannel(call);
-  if (fromCall && fromCall.includes("-")) {
+  if (isValidSpyChannel(fromCall)) {
     return fromCall;
   }
 
@@ -75,7 +86,11 @@ async function resolveSpyChannelDeep(call) {
   );
   if (fromCel) return fromCel;
 
-  return fromCall;
+  if (call.agent_extension) {
+    return `PJSIP/${call.agent_extension}`;
+  }
+
+  return null;
 }
 
 function findActiveCallByLinkedId(calls, linkedid) {
@@ -103,7 +118,7 @@ function originateChanSpy(supervisorExtension, spyChannel, mode) {
         Channel: `PJSIP/${supervisorExtension}`,
         Application: "ChanSpy",
         Data: `${spyChannel},${option}`,
-        Async: "false",
+        Async: "true",
         Timeout: "30000",
         CallerID: `Supervisor <${supervisorExtension}>`,
       },
@@ -112,7 +127,12 @@ function originateChanSpy(supervisorExtension, spyChannel, mode) {
           return reject(err);
         }
         if (res && String(res.response).toLowerCase() === "error") {
-          return reject(new Error(res.message || "AMI Originate failed"));
+          const msg = res.message || "AMI Originate failed";
+          return reject(
+            new Error(
+              `${msg} (supervisor PJSIP/${supervisorExtension} → spy ${spyChannel})`
+            )
+          );
         }
         resolve(res);
       }
@@ -177,6 +197,15 @@ async function supervisorSpyOnLinkedCall({
     });
   }
 
+  if (!call.agent_extension) {
+    throw Object.assign(
+      new Error(
+        "Call is not connected to an agent yet. Wait until status is active with an agent, then try Listen."
+      ),
+      { statusCode: 409 }
+    );
+  }
+
   const spyChannel = await resolveSpyChannelDeep(call);
   if (!spyChannel) {
     throw Object.assign(new Error("Could not resolve agent channel to spy on"), {
@@ -196,14 +225,9 @@ async function supervisorSpyOnLinkedCall({
     linkedid,
     ami_message: amiResult?.message || "Originate accepted",
     instructions: [
-      `Your desk phone / softphone (extension ${supExt}) should ring now.`,
-      "Answer it — you will hear the agent call (listen-only).",
-      "If nothing rings: confirm Zoiper/WebRTC is registered as extension " +
-        supExt +
-        " on " +
-        (process.env.SIP_DOMAIN || process.env.AMI_HOST || "the PBX") +
-        ".",
-      "Do not use the agent extension; supervisor must use their own extension.",
+      `Extension ${supExt} on this dashboard should ring now — click Answer on the yellow bar above.`,
+      "You hear the agent call in the browser (no Agent Dashboard needed).",
+      "If nothing rings: wait until SIP status is Idle/Ready, then try Listen again.",
     ],
   };
 }

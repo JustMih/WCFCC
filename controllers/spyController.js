@@ -23,6 +23,10 @@ const spyOnCall = async (req, res) => {
       getLiveCalls,
     });
 
+    console.log(
+      `🎧 Spy ${result.mode}: sup ${result.supervisor_extension} → ${result.spy_channel} (${linkedid})`
+    );
+
     return res.json(result);
   } catch (err) {
     const status = err.statusCode || 500;
