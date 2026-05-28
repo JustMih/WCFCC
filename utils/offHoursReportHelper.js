@@ -148,7 +148,7 @@ function collectRouteCandidates(record, emergencyByPhone) {
     if (EXCLUDED_ROUTING_NORMALIZED.has(normalized)) return;
 
     const emergency = matchEmergencyNumber(normalized, emergencyByPhone);
-    if (!emergency && !isPlausibleTanzaniaPhone(normalized)) return;
+    if (!emergency) return;
 
     seen.add(s);
     if (priority) bucket.unshift(s);
@@ -176,10 +176,6 @@ function collectRouteCandidates(record, emergencyByPhone) {
   }
   if (isEmergencyDialContext(record) && isValidRouteValue(record.did)) {
     add(record.did, other);
-  }
-
-  for (const phone of extractPhonesFromText(record.lastdata)) {
-    add(phone, other);
   }
 
   return { ega, pjsip, other };
@@ -227,22 +223,18 @@ function pickBestRoute(candidates, callerPhone, emergencyByPhone, excludePhones)
     if (EXCLUDED_ROUTING_NORMALIZED.has(normalized)) continue;
 
     const emergency = matchEmergencyNumber(normalized, emergencyByPhone);
-    if (!emergency && !isPlausibleTanzaniaPhone(normalized)) continue;
+    if (!emergency) continue;
 
-    let score = 10;
-    if (emergency) score += 100;
-    if (raw === emergency?.phone_number) score += 5;
+    let score = 100;
+    if (raw === emergency.phone_number) score += 5;
 
     if (score > bestScore) {
       bestScore = score;
       best = {
-        routed_to: emergency?.phone_number || raw,
+        routed_to: emergency.phone_number,
         routed_to_normalized: normalized,
         emergency_match: emergency,
-        routed_to_label: buildRouteLabel(
-          emergency?.phone_number || raw,
-          emergency
-        ),
+        routed_to_label: buildRouteLabel(emergency.phone_number, emergency),
       };
     }
   }
@@ -358,7 +350,6 @@ function enrichCdrRecord(record, emergencyByPhone) {
     caller_display: caller_phone || record.clid || record.src || "—",
     routed_to: routed.routed_to,
     routed_to_label: routed.routed_to_label,
-    destination_display: routed.routed_to_label,
     emergency_match: routed.emergency_match,
     is_emergency_route:
       Boolean(routed.emergency_match) || isEmergencyDialContext(record),
@@ -371,7 +362,7 @@ function enrichVoiceNoteRecord(record, emergencyByPhone, cdrByCaller) {
 
   if (caller_phone && cdrByCaller) {
     const related = cdrByCaller.get(caller_phone);
-    if (related?.routed_to) {
+    if (related?.routed_to && related?.emergency_match) {
       routed = {
         routed_to: related.routed_to,
         routed_to_normalized: related.routed_to_normalized,
@@ -387,7 +378,6 @@ function enrichVoiceNoteRecord(record, emergencyByPhone, cdrByCaller) {
     caller_display: caller_phone || record.clid || "—",
     routed_to: routed.routed_to,
     routed_to_label: routed.routed_to_label,
-    destination_display: routed.routed_to_label,
     emergency_match: routed.emergency_match,
     is_emergency_route: Boolean(routed.emergency_match),
   };
@@ -396,7 +386,7 @@ function enrichVoiceNoteRecord(record, emergencyByPhone, cdrByCaller) {
 function buildCdrRoutingIndex(cdrEnriched) {
   const index = new Map();
   for (const c of cdrEnriched) {
-    if (!c.caller_phone || !c.routed_to) continue;
+    if (!c.caller_phone || !c.routed_to || !c.emergency_match) continue;
     const prev = index.get(c.caller_phone);
     if (!prev || scoreCdrLeg(c) > scoreCdrLeg(prev)) {
       index.set(c.caller_phone, c);
