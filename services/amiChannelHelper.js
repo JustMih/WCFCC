@@ -47,15 +47,6 @@ async function findAgentChannelFromCel(linkedid, agentExtension) {
   return null;
 }
 
-function parsePjsipEndpointAvailable(commandOutput) {
-  const text = String(commandOutput || "");
-  if (/Unavailable/i.test(text) && !/Avail/i.test(text)) return false;
-  if (/Contact:\s+\S+@/i.test(text)) return true;
-  if (/Endpoint:\s+.*\s+Avail/i.test(text)) return true;
-  if (/Not in use/i.test(text)) return true;
-  return false;
-}
-
 function runAmiCommand(ami, command) {
   return new Promise((resolve, reject) => {
     const lines = [];
@@ -73,29 +64,112 @@ function runAmiCommand(ami, command) {
         if (err) return reject(err);
         if (res?.output) lines.push(res.output);
         resolve(lines.join("\n"));
-      }, 600);
+      }, 1500);
     });
   });
 }
 
+/**
+ * Parse state from `pjsip list endpoints` (same view as CLI on server).
+ * Registered idle = "Not in use". Not registered = "Unavailable".
+ */
+function parseEndpointLineFromList(output, extension) {
+  const ext = String(extension).trim();
+  const lines = String(output || "").split("\n");
+
+  for (const line of lines) {
+    if (!line.includes(ext)) continue;
+    if (!new RegExp(`\\s${ext}\\s|\\s${ext}$|^${ext}\\s`).test(line)) {
+      if (!line.includes(`/${ext}`) && !line.startsWith(`${ext} `)) continue;
+    }
+    if (/\bNot in use\b/i.test(line)) {
+      return { registered: true, state: "Not in use", line: line.trim() };
+    }
+    if (/\bUnavailable\b/i.test(line)) {
+      return { registered: false, state: "Unavailable", line: line.trim() };
+    }
+  }
+
+  return { registered: false, state: "not_found", line: "" };
+}
+
+function parseEndpointFromShow(output) {
+  const text = String(output || "");
+  if (/\bNot in use\b/i.test(text)) {
+    return { registered: true, state: "Not in use" };
+  }
+  if (/Contact:\s*\S+sip:\S+@\S+/i.test(text) || /Contact:\s+\S+@/i.test(text)) {
+    return { registered: true, state: "has_contact" };
+  }
+  if (/\bUnavailable\b/i.test(text)) {
+    return { registered: false, state: "Unavailable" };
+  }
+  return { registered: false, state: "unknown" };
+}
+
 async function isExtensionReachable(ami, extension) {
-  if (!ami || !extension) return { reachable: false, detail: "AMI or extension missing" };
+  if (!ami || !extension) {
+    return { reachable: false, detail: "AMI or extension missing", asterisk_state: null };
+  }
+
+  if (
+    String(process.env.SPY_SKIP_REGISTRATION_CHECK || "").toLowerCase() ===
+    "true"
+  ) {
+    return {
+      reachable: true,
+      detail: "Registration check skipped (SPY_SKIP_REGISTRATION_CHECK=true)",
+      asterisk_state: "skipped",
+    };
+  }
 
   try {
-    const output = await runAmiCommand(
-      ami,
-      `pjsip show endpoint ${extension}`
-    );
-    const reachable = parsePjsipEndpointAvailable(output);
+    const listOut = await runAmiCommand(ami, "pjsip list endpoints");
+    const fromList = parseEndpointLineFromList(listOut, extension);
+
+    if (fromList.registered) {
+      return {
+        reachable: true,
+        detail: `Asterisk reports extension ${extension} as "${fromList.state}" (registered)`,
+        asterisk_state: fromList.state,
+        endpoint_line: fromList.line,
+      };
+    }
+
+    const showOut = await runAmiCommand(ami, `pjsip show endpoint ${extension}`);
+    const fromShow = parseEndpointFromShow(showOut);
+
+    if (fromShow.registered) {
+      return {
+        reachable: true,
+        detail: `Asterisk reports extension ${extension} is registered`,
+        asterisk_state: fromShow.state,
+      };
+    }
+
+    const state = fromList.state || fromShow.state || "Unavailable";
+    const sipDomain =
+      process.env.SIP_DOMAIN ||
+      process.env.SIP_DOMAIN_CONFIG ||
+      "contactcenter.wcf.go.tz";
+
     return {
-      reachable,
-      detail: reachable
-        ? "PJSIP endpoint has active contact"
-        : "PJSIP endpoint not registered — open your softphone and register first",
-      output: output.slice(0, 500),
+      reachable: false,
+      asterisk_state: state,
+      endpoint_line: fromList.line,
+      detail:
+        `Extension ${extension} is in WCF but Asterisk shows "${state}" (not registered). ` +
+        `Open the Agent Dashboard phone (or Zoiper), register as ext ${extension} ` +
+        `to ${sipDomain}, then run: asterisk -rx "pjsip list endpoints" — ` +
+        `it must show "Not in use", not "Unavailable".`,
     };
   } catch (err) {
-    return { reachable: true, detail: "Could not verify registration (proceeding)" };
+    console.warn("PJSIP registration check failed:", err.message);
+    return {
+      reachable: true,
+      detail: "Could not verify registration (will attempt originate)",
+      asterisk_state: "check_failed",
+    };
   }
 }
 
@@ -103,4 +177,5 @@ module.exports = {
   findAgentChannelFromCel,
   isExtensionReachable,
   runAmiCommand,
+  parseEndpointLineFromList,
 };

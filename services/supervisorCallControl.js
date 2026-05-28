@@ -158,10 +158,12 @@ async function supervisorSpyOnLinkedCall({
   const reg = await isExtensionReachable(ami, supExt);
   if (!reg.reachable) {
     throw Object.assign(
-      new Error(
-        `${reg.detail}. Register softphone as extension ${supExt} (same as Agent Dashboard SIP), then try Listen again.`
-      ),
-      { statusCode: 409 }
+      new Error(reg.detail),
+      {
+        statusCode: 409,
+        asterisk_state: reg.asterisk_state,
+        endpoint_line: reg.endpoint_line,
+      }
     );
   }
 
