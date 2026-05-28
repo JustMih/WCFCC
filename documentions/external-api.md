@@ -2,8 +2,17 @@
 
 APIs for external systems (ESSP portal, WCF portal, etc.) to interact with the contact center.
 
-**ESSP create ticket:** `https://contactcenter.wcf.go.tz/api/essp`  
-**External ticket status:** `https://contactcenter.wcf.go.tz/api/external`
+**Production**
+
+- ESSP create ticket: `https://contactcenter.wcf.go.tz/api/essp`
+- External ticket status: `https://contactcenter.wcf.go.tz/api/external`
+
+**Demo / staging (internal DNS or hosts file)**
+
+- ESSP create ticket: `https://democc.wcf.go.tz/api/essp`
+- External ticket status: `https://democc.wcf.go.tz/api/external`
+
+> `democc.wcf.go.tz` is on the WCF internal network (typically `192.168.21.70`). Use VPN/office DNS, or map the host locally (see below) before calling with curl.
 
 ---
 
@@ -131,7 +140,7 @@ Wrap fields in a `payload` object (recommended) or send flat JSON.
 | 500 | `API_KEYS_NOT_CONFIGURED` | `VALID_API_KEYS` env empty |
 | 429 | `RATE_LIMIT_EXCEEDED` | Too many requests |
 
-### cURL example
+### cURL example (production)
 
 ```bash
 curl -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
@@ -150,6 +159,33 @@ curl -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
     }
   }'
 ```
+
+### cURL example (demo — `democc.wcf.go.tz`)
+
+1. **Resolve the host** (pick one):
+   - Connect to WCF VPN / use internal DNS, or
+   - On your Mac, add to `/etc/hosts`: `192.168.21.70 democc.wcf.go.tz`
+2. **Call the API** (use `-k` only if the demo server uses a self-signed TLS certificate):
+
+```bash
+curl -k -X POST "https://democc.wcf.go.tz/api/essp/create-ticket" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ESSP_API_KEY" \
+  -d '{
+    "payload": {
+      "firstName": "MARIKI",
+      "lastName": "MSAKI",
+      "phoneNumber": "255684012920",
+      "requester": "Employee",
+      "category": "Complaint",
+      "subject": "Compliance enquiry",
+      "description": "Test message",
+      "employerAllocatedStaffUsername": "mariam.mlilapi"
+    }
+  }'
+```
+
+Ensure `VALID_API_KEYS` on the **democc server** includes the same key you send in `x-api-key`.
 
 ### Assignment rules (ESSP)
 
