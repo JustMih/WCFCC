@@ -19,6 +19,13 @@ const TicketUpdate = require("../../models/TicketUpdate");
 const TicketClarification = require("../../models/TicketClarification");
 const { calculateAssignmentsAging, getAgingStatus, formatAging } = require('../../utils/agingCalculator');
 const workflowService = require("../../services/workflowCommunicationService");
+const {
+  addEffectiveRole,
+  canActOnTicketByEffectiveRole,
+  isHandoverParticipant,
+  getTicketActorPolicy,
+  getEffectiveActorRole,
+} = require("../../services/handoverService");
 
 /**
  * Helper function to get attachments array from ticket
@@ -119,6 +126,10 @@ function checkTicketSlaBreach(ticket, holidays = []) {
   const breached = workingDays > slaDays;
 
   return { workingDays, slaDays, breached };
+}
+
+function canUserActOnTicket(ticket, userId, actorRole) {
+  return getTicketActorPolicy(ticket, userId, actorRole);
 }
 
 /**
@@ -2347,6 +2358,7 @@ const getOpenTickets = async (req, res) => {
     // Modify response to include created_by (user.name) and assignment history
     const response = tickets.map((ticket) => {
       const t = ticket.toJSON();
+      const actorPolicy = getTicketActorPolicy(t, userId, user.role);
       t.assignments = (t.assignments || [])
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map((a) => ({
@@ -2365,8 +2377,17 @@ const getOpenTickets = async (req, res) => {
         t.RequesterDetail
       );
       return {
-        ...t,
+        ...addEffectiveRole(t),
         created_by: user.full_name,
+        can_act_as_delegate: actorPolicy.isDelegate,
+        can_act_as_original_owner: actorPolicy.isOriginalOwner && actorPolicy.canMutate,
+        handover_block_reason: actorPolicy.blockReason,
+        can_act_with_effective_role: canActOnTicketByEffectiveRole(
+          ["agent", "attendee", "reviewer", "head-of-unit", "manager", "director", "director-general", "focal-person"],
+          t,
+          userId,
+          user.role
+        ),
       };
     });
     console.log("all ticketd open", response);
@@ -3241,10 +3262,27 @@ const getAllCustomersTickets = async (req, res) => {
       ],
     });
 
+    const response = tickets.map((ticket) => {
+      const t = ticket.toJSON ? ticket.toJSON() : ticket;
+      const actorPolicy = getTicketActorPolicy(t, userId, user.role);
+      return {
+        ...addEffectiveRole(t),
+        can_act_as_delegate: actorPolicy.isDelegate,
+        can_act_as_original_owner: actorPolicy.isOriginalOwner && actorPolicy.canMutate,
+        handover_block_reason: actorPolicy.blockReason,
+        can_act_with_effective_role: canActOnTicketByEffectiveRole(
+          ["agent", "attendee", "reviewer", "head-of-unit", "manager", "director", "director-general", "focal-person"],
+          t,
+          userId,
+          user.role
+        ),
+      };
+    });
+
     return res.status(200).json({
       message: "Tickets fetched successfully",
       totalTickets: tickets.length,
-      tickets,
+      tickets: response,
     });
   } catch (error) {
     console.error("Error fetching tickets:", error.stack);
@@ -3746,7 +3784,21 @@ const getTicketById = async (req, res) => {
     }
     // Debug: Log the RequesterDetail association
     console.log("RequesterDetail", ticket?.RequesterDetail);
-    return res.status(200).json({ ticket: ticket.toJSON() });
+    const payload = ticket.toJSON();
+    const actorId = req.user?.id || req.query?.userId || null;
+    const actorRole = req.user?.role || null;
+    const actorPolicy = actorId
+      ? getTicketActorPolicy(payload, actorId, actorRole)
+      : null;
+    return res.status(200).json({
+      ticket: {
+        ...addEffectiveRole(payload),
+        can_act_as_delegate: actorPolicy ? actorPolicy.isDelegate : false,
+        can_act_as_original_owner:
+          actorPolicy ? actorPolicy.isOriginalOwner && actorPolicy.canMutate : false,
+        handover_block_reason: actorPolicy?.blockReason || null,
+      },
+    });
   } catch (error) {
     console.error("Error fetching ticket:", error);
     return res
@@ -3866,6 +3918,14 @@ const closeTicket = async (req, res) => {
     if (!ticket) {
       console.log("❌ ERROR: Ticket not found with ID:", ticketId);
       return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    const actor = await User.findByPk(userId, { attributes: ["id", "role"] });
+    const actorPolicy = canUserActOnTicket(ticket, userId, actor?.role);
+    if (!actorPolicy.canMutate) {
+      return res.status(403).json({
+        message: actorPolicy.blockReason || "You are not allowed to act on this ticket",
+      });
     }
     
     console.log("✅ Ticket found:");
@@ -8181,12 +8241,20 @@ const managerAttendMajor = async (req, res) => {
 
     // Verify the user is a manager and the ticket is assigned to them
     const manager = await User.findByPk(userId);
-    if (!manager || manager.role !== "manager") {
-      return res.status(403).json({ message: "Only managers can perform this action" });
+    if (!manager) {
+      return res.status(403).json({ message: "User not found" });
     }
 
-    if (ticket.assigned_to_id !== userId) {
-      return res.status(403).json({ message: "Ticket is not assigned to you" });
+    const managerPolicy = canUserActOnTicket(ticket, userId, manager.role);
+    if (!managerPolicy.canMutate) {
+      return res.status(403).json({
+        message: managerPolicy.blockReason || "Ticket is not assigned to you",
+      });
+    }
+
+    const effectiveActorRole = getEffectiveActorRole(ticket, userId, manager.role);
+    if (effectiveActorRole !== "manager") {
+      return res.status(403).json({ message: "Only managers can perform this action" });
     }
 
     // Allow: Minor Complaints, Unrated (N/A) Complaints, Suggestion, or Compliment
@@ -8693,8 +8761,8 @@ const managerSendToDirector = async (req, res) => {
 
     // Get the current user
     const manager = await User.findByPk(userId);
-    if (!manager || manager.role !== "manager") {
-      return res.status(403).json({ message: "Only managers can perform this action" });
+    if (!manager) {
+      return res.status(403).json({ message: "User not found" });
     }
 
     // Find the ticket
@@ -8714,8 +8782,16 @@ const managerSendToDirector = async (req, res) => {
     }
 
     // Verify ticket is assigned to this manager
-    if (ticket.assigned_to_id !== userId) {
-      return res.status(403).json({ message: "Ticket is not assigned to you" });
+    const managerPolicy = canUserActOnTicket(ticket, userId, manager.role);
+    if (!managerPolicy.canMutate) {
+      return res.status(403).json({
+        message: managerPolicy.blockReason || "Ticket is not assigned to you",
+      });
+    }
+
+    const effectiveActorRole = getEffectiveActorRole(ticket, userId, manager.role);
+    if (effectiveActorRole !== "manager") {
+      return res.status(403).json({ message: "Only managers can perform this action" });
     }
 
     // Check if this is a Complaint (Major or Minor)

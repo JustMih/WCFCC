@@ -31,6 +31,9 @@ const {
   updateIsRead,
   getOnlineUser,
   getInActiveUser,
+  startUserHandover,
+  revokeUserHandover,
+  getActiveHandovers,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -127,6 +130,10 @@ router.get(
   authMiddleware,
   getCRMUsers
 );
+
+router.post("/handover/start", authMiddleware, startUserHandover);
+router.post("/handover/:id/revoke", authMiddleware, revokeUserHandover);
+router.get("/handover/active", authMiddleware, getActiveHandovers);
 
 // route to get users by role
 router.get(
