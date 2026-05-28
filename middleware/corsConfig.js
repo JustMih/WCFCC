@@ -17,6 +17,7 @@ const externalCorsOptions = {
         // 'http://10.52.0.19:5070',
         'http://192.168.21.69:5070', 'https://demoportal.wcf.go.tz',
         'https://portal.wcf.go.tz', 'https://essp.wcf.go.tz', 'https://192.168.21.69',
+        'https://democc.wcf.go.tz', 'http://democc.wcf.go.tz',
       ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
