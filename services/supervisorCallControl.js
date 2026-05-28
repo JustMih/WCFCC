@@ -2,6 +2,10 @@
 
 const User = require("../models/User");
 const { getAmi, isAmiConfigured } = require("./amiService");
+const {
+  findAgentChannelFromCel,
+  isExtensionReachable,
+} = require("./amiChannelHelper");
 
 const MODE_MAP = {
   listen: "q",
@@ -42,10 +46,6 @@ function resolveSpyChannel(call) {
 }
 
 async function getSupervisorExtension(userId, overrideExtension) {
-  if (overrideExtension) {
-    return String(overrideExtension).trim();
-  }
-
   if (userId) {
     const user = await User.findByPk(userId, {
       attributes: ["extension", "role", "full_name"],
@@ -55,8 +55,27 @@ async function getSupervisorExtension(userId, overrideExtension) {
     }
   }
 
+  if (overrideExtension) {
+    return String(overrideExtension).trim();
+  }
+
   const fallback = process.env.SUPERVISOR_SPY_EXTENSION;
   return fallback ? String(fallback).trim() : null;
+}
+
+async function resolveSpyChannelDeep(call) {
+  const fromCall = resolveSpyChannel(call);
+  if (fromCall && fromCall.includes("-")) {
+    return fromCall;
+  }
+
+  const fromCel = await findAgentChannelFromCel(
+    call.linkedid,
+    call.agent_extension
+  );
+  if (fromCel) return fromCel;
+
+  return fromCall;
 }
 
 function findActiveCallByLinkedId(calls, linkedid) {
@@ -84,7 +103,7 @@ function originateChanSpy(supervisorExtension, spyChannel, mode) {
         Channel: `PJSIP/${supervisorExtension}`,
         Application: "ChanSpy",
         Data: `${spyChannel},${option}`,
-        Async: "true",
+        Async: "false",
         Timeout: "30000",
         CallerID: `Supervisor <${supervisorExtension}>`,
       },
@@ -129,9 +148,20 @@ async function supervisorSpyOnLinkedCall({
   if (!supExt) {
     throw Object.assign(
       new Error(
-        "Supervisor extension not found. Add extension on your user profile or set SUPERVISOR_SPY_EXTENSION."
+        "Supervisor extension not found. Add your extension in User profile (WCF admin), then log in again."
       ),
       { statusCode: 400 }
+    );
+  }
+
+  const ami = getAmi();
+  const reg = await isExtensionReachable(ami, supExt);
+  if (!reg.reachable) {
+    throw Object.assign(
+      new Error(
+        `${reg.detail}. Register softphone as extension ${supExt} (same as Agent Dashboard SIP), then try Listen again.`
+      ),
+      { statusCode: 409 }
     );
   }
 
@@ -145,14 +175,14 @@ async function supervisorSpyOnLinkedCall({
     });
   }
 
-  const spyChannel = resolveSpyChannel(call);
+  const spyChannel = await resolveSpyChannelDeep(call);
   if (!spyChannel) {
     throw Object.assign(new Error("Could not resolve agent channel to spy on"), {
       statusCode: 409,
     });
   }
 
-  await originateChanSpy(supExt, spyChannel, normalizedMode);
+  const amiResult = await originateChanSpy(supExt, spyChannel, normalizedMode);
 
   return {
     success: true,
@@ -162,6 +192,17 @@ async function supervisorSpyOnLinkedCall({
     agent_extension: call.agent_extension,
     agent_name: call.agent_name,
     linkedid,
+    ami_message: amiResult?.message || "Originate accepted",
+    instructions: [
+      `Your desk phone / softphone (extension ${supExt}) should ring now.`,
+      "Answer it — you will hear the agent call (listen-only).",
+      "If nothing rings: confirm Zoiper/WebRTC is registered as extension " +
+        supExt +
+        " on " +
+        (process.env.SIP_DOMAIN || process.env.AMI_HOST || "the PBX") +
+        ".",
+      "Do not use the agent extension; supervisor must use their own extension.",
+    ],
   };
 }
 
