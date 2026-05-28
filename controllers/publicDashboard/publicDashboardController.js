@@ -16,6 +16,11 @@ const {
   dedupeIncomingLostCdrs,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
+const {
+  extractExtensionFromChannel,
+  buildAgentsNameMap,
+  resolveAgentForCall,
+} = require("../../utils/agentExtensionHelper");
 
 /* ================= SOCKET.IO ================= */
 let ioInstance = null;
@@ -261,13 +266,11 @@ const getPublicDashboardData = async (req, res) => {
           c.call_answered ??= row.eventtime;
           c.status = "active";
 
-          // ✅ Extract agent extension ONLY here
           if (!c.agent_extension) {
-            const src = row.channel || row.peer || "";
-            const match = src.match(/\/(\d+)-/);
-            if (match) {
-              c.agent_extension = match[1];
-            }
+            c.agent_extension =
+              extractExtensionFromChannel(row.channame || row.channel) ||
+              extractExtensionFromChannel(row.peer) ||
+              c.agent_extension;
           }
           break;
         }
@@ -291,36 +294,21 @@ const getPublicDashboardData = async (req, res) => {
 
 
     const droppedCalls = allCalls.filter((c) => c.status === "dropped");
-// Collect unique agent extensions from active calls
-const agentExtensions = [
-  ...new Set(
-    activeCalls
-      .map(c => c.agent_extension)
-      .filter(ext => ext && ext.length >= 3)
-  )
-];
+const extensionCandidates = [];
+      activeCalls.forEach((c) => {
+        if (c.agent_extension) extensionCandidates.push(c.agent_extension);
+        if (c.caller) extensionCandidates.push(c.caller);
+      });
+      const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-let agentsMap = {};
-
-if (agentExtensions.length > 0) {
-  const agents = await User.findAll({
-    where: {
-      extension: agentExtensions,
-    },
-    attributes: ["extension", "full_name", "username"],
-    raw: true,
-  });
-
-        agents.forEach(a => {
-          agentsMap[a.extension] = a.full_name || a.username || `Agent ${a.extension}`;
-        });
-      }
-      const enrichedActiveCalls = activeCalls.map(call => ({
-        ...call,
-        agent_name: call.agent_extension
-          ? agentsMap[call.agent_extension] || "Unknown Agent"
-          : "Unknown Agent",
-      }));
+      const enrichedActiveCalls = activeCalls.map((call) => {
+        const resolved = resolveAgentForCall(call, agentsMap);
+        return {
+          ...call,
+          agent_extension: resolved.agent_extension,
+          agent_name: resolved.agent_name,
+        };
+      });
 
   
     /* =====================================================

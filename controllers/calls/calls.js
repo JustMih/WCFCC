@@ -566,6 +566,51 @@ const markLostCallAsAnswered = async (req, res) => {
   }
 };
 
+/** Call-center SLA snapshot for supervisor dashboard (today's CDR) */
+const getSlaMetrics = async (req, res) => {
+  try {
+    const [row] = await sequelize.query(
+      `
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
+        SUM(
+          CASE
+            WHEN disposition = 'ANSWERED' AND COALESCE(duration, 0) <= 20 THEN 1
+            ELSE 0
+          END
+        ) AS answered_within_20s,
+        SUM(CASE WHEN disposition != 'ANSWERED' THEN 1 ELSE 0 END) AS not_answered,
+        AVG(CASE WHEN disposition = 'ANSWERED' THEN duration END) AS avg_response_sec,
+        AVG(CASE WHEN disposition = 'ANSWERED' THEN billsec END) AS avg_handle_sec
+      FROM cdr
+      WHERE DATE(cdrstarttime) = CURDATE()
+      `,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+
+    const total = Number(row?.total) || 0;
+    const answered = Number(row?.answered) || 0;
+    const within20 = Number(row?.answered_within_20s) || 0;
+    const notAnswered = Number(row?.not_answered) || 0;
+
+    const serviceLevel =
+      answered > 0 ? Math.round((within20 / answered) * 100) : 0;
+    const abandonmentRate =
+      total > 0 ? Math.round((notAnswered / total) * 100) : 0;
+
+    res.json({
+      averageResponseTime: Math.round(Number(row?.avg_response_sec) || 0),
+      averageHandleTime: Math.round(Number(row?.avg_handle_sec) || 0),
+      serviceLevel,
+      abandonmentRate,
+    });
+  } catch (err) {
+    console.error("Error fetching SLA metrics:", err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
 // ✅ Correct combined export
 module.exports = {
   getCdrCounts,
@@ -578,4 +623,5 @@ module.exports = {
   markLostCallAsAnswered,
   markMissedCallCallback,
   syncMissedCallsFromCdrToday,
+  getSlaMetrics,
 };
