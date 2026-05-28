@@ -66,4 +66,16 @@ router.get(
   reportsController.getEscalationReport
 );
 
+// Call Center SLA Report
+router.get(
+  "/sla-report/:startDate/:endDate",
+  reportsController.getSlaReport
+);
+
+// Ticket SLA Report
+router.get(
+  "/ticket-sla-report/:startDate/:endDate",
+  reportsController.getTicketSlaReport
+);
+
 module.exports = router;
