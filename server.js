@@ -62,6 +62,8 @@ const recordedAudioRoutes = require("./routes/recordedAudioRoutes");
 const reportsRoutes = require("./routes/reports.routes");
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
 const spyRoutes = require("./routes/spy");
+const alertsRoutes = require("./routes/alertsRoutes");
+const { getQueueCallStats } = require("./controllers/queueStatsController");
 
 
 // const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
@@ -200,6 +202,8 @@ app.use("/api/emergency", emergencyRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use("/api/livestream", livestreamRoutes);
+app.get("/api/queue-call-stats", getQueueCallStats);
+app.use("/api/alerts", alertsRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
 app.use("/api/instagram-management", instagramManagementRoutes);
 app.use("/api", require("./routes/dtmfRoutes"));
