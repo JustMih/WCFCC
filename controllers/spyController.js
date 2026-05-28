@@ -31,6 +31,8 @@ const spyOnCall = async (req, res) => {
     }
     return res.status(status).json({
       error: err.message || "Spy failed",
+      asterisk_state: err.asterisk_state,
+      endpoint_line: err.endpoint_line,
     });
   }
 };
