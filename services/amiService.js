@@ -30,7 +30,20 @@ function getAmi() {
 }
 
 function isAmiConfigured() {
-  return Boolean(process.env.AMI_PASS);
+  return Boolean(process.env.AMI_PASS && String(process.env.AMI_PASS).trim());
 }
 
-module.exports = { getAmi, isAmiConfigured };
+function getAmiStatus() {
+  return {
+    configured: isAmiConfigured(),
+    host:
+      process.env.AMI_HOST ||
+      process.env.ASTERISK_HOST ||
+      process.env.DB_HOST ||
+      "127.0.0.1",
+    port: Number(process.env.AMI_PORT || 5038),
+    user: process.env.AMI_USER || "admin",
+  };
+}
+
+module.exports = { getAmi, isAmiConfigured, getAmiStatus };

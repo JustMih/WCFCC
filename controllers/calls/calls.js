@@ -8,6 +8,10 @@ const {
   dedupeLostCalls,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
+const {
+  buildSlaMetricsFromRow,
+  SLA_AGGREGATE_SELECT,
+} = require("../../utils/slaMetricsHelper");
 
 // Controller to get data for different time frames (Total, Monthly, Weekly, Daily)
 const getCdrCounts = async (req, res) => {
@@ -566,6 +570,31 @@ const markLostCallAsAnswered = async (req, res) => {
   }
 };
 
+/** Call-center SLA snapshot for supervisor dashboard (today's CDR) */
+const getSlaMetrics = async (req, res) => {
+  try {
+    const [row] = await sequelize.query(
+      `
+      SELECT ${SLA_AGGREGATE_SELECT}
+      FROM cdr
+      WHERE DATE(cdrstarttime) = CURDATE()
+      `,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+
+    const metrics = buildSlaMetricsFromRow(row);
+    res.json({
+      averageResponseTime: metrics.averageResponseTime,
+      averageHandleTime: metrics.averageHandleTime,
+      serviceLevel: metrics.serviceLevel,
+      abandonmentRate: metrics.abandonmentRate,
+    });
+  } catch (err) {
+    console.error("Error fetching SLA metrics:", err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
 // ✅ Correct combined export
 module.exports = {
   getCdrCounts,
@@ -578,4 +607,5 @@ module.exports = {
   markLostCallAsAnswered,
   markMissedCallCallback,
   syncMissedCallsFromCdrToday,
+  getSlaMetrics,
 };

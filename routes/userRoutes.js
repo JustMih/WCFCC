@@ -23,8 +23,10 @@ const {
   getMessage,
   getConversations,
   createMessage,
-  updateAgentStatus,
   updateUserStatus,
+  getAgentPauseState,
+  markPauseExceeded,
+  getPauseReport,
   getUsersByRole,
   unReadMessage,
   getSenderReceiverUnreadCount,
@@ -151,6 +153,27 @@ router.get(
 );
 
 router.get(
+  "/agent-status/:userId",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  getAgentPauseState
+);
+
+router.patch(
+  "/pause-session/:userId/mark-exceeded",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  markPauseExceeded
+);
+
+router.get(
+  "/pause-report",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  getPauseReport
+);
+
+router.get(
   "/in-active-user",
   authMiddleware,
   roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
@@ -229,19 +252,12 @@ router.put(
   activateUser
 );
 
-// Update User Status route
+// Update User Status route (agents, supervisors, admins)
 router.put(
   "/status/:userId",
   authMiddleware,
-  roleMiddleware(["agent"]),
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   updateUserStatus
-);
-
-router.put(
-  "/status/:userId",
-  authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent"]),
-  updateAgentStatus
 );
 
 // Deactivate User route

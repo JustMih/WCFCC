@@ -2,6 +2,12 @@
 
 const User = require("../models/User");
 const { getAmi, isAmiConfigured } = require("./amiService");
+const {
+  findAgentChannelFromCel,
+  findLiveSpyChannelViaAmi,
+  isValidSpyChannel,
+  isExtensionReachable,
+} = require("./amiChannelHelper");
 
 const MODE_MAP = {
   listen: "q",
@@ -42,10 +48,6 @@ function resolveSpyChannel(call) {
 }
 
 async function getSupervisorExtension(userId, overrideExtension) {
-  if (overrideExtension) {
-    return String(overrideExtension).trim();
-  }
-
   if (userId) {
     const user = await User.findByPk(userId, {
       attributes: ["extension", "role", "full_name"],
@@ -55,8 +57,40 @@ async function getSupervisorExtension(userId, overrideExtension) {
     }
   }
 
+  if (overrideExtension) {
+    return String(overrideExtension).trim();
+  }
+
   const fallback = process.env.SUPERVISOR_SPY_EXTENSION;
   return fallback ? String(fallback).trim() : null;
+}
+
+async function resolveSpyChannelDeep(call) {
+  const ami = getAmi();
+
+  const fromAmi = await findLiveSpyChannelViaAmi(
+    ami,
+    call.linkedid,
+    call.agent_extension
+  );
+  if (fromAmi) return fromAmi;
+
+  const fromCall = resolveSpyChannel(call);
+  if (isValidSpyChannel(fromCall)) {
+    return fromCall;
+  }
+
+  const fromCel = await findAgentChannelFromCel(
+    call.linkedid,
+    call.agent_extension
+  );
+  if (fromCel) return fromCel;
+
+  if (call.agent_extension) {
+    return `PJSIP/${call.agent_extension}`;
+  }
+
+  return null;
 }
 
 function findActiveCallByLinkedId(calls, linkedid) {
@@ -93,7 +127,12 @@ function originateChanSpy(supervisorExtension, spyChannel, mode) {
           return reject(err);
         }
         if (res && String(res.response).toLowerCase() === "error") {
-          return reject(new Error(res.message || "AMI Originate failed"));
+          const msg = res.message || "AMI Originate failed";
+          return reject(
+            new Error(
+              `${msg} (supervisor PJSIP/${supervisorExtension} → spy ${spyChannel})`
+            )
+          );
         }
         resolve(res);
       }
@@ -129,9 +168,22 @@ async function supervisorSpyOnLinkedCall({
   if (!supExt) {
     throw Object.assign(
       new Error(
-        "Supervisor extension not found. Add extension on your user profile or set SUPERVISOR_SPY_EXTENSION."
+        "Supervisor extension not found. Add your extension in User profile (WCF admin), then log in again."
       ),
       { statusCode: 400 }
+    );
+  }
+
+  const ami = getAmi();
+  const reg = await isExtensionReachable(ami, supExt);
+  if (!reg.reachable) {
+    throw Object.assign(
+      new Error(reg.detail),
+      {
+        statusCode: 409,
+        asterisk_state: reg.asterisk_state,
+        endpoint_line: reg.endpoint_line,
+      }
     );
   }
 
@@ -145,14 +197,23 @@ async function supervisorSpyOnLinkedCall({
     });
   }
 
-  const spyChannel = resolveSpyChannel(call);
+  if (!call.agent_extension) {
+    throw Object.assign(
+      new Error(
+        "Call is not connected to an agent yet. Wait until status is active with an agent, then try Listen."
+      ),
+      { statusCode: 409 }
+    );
+  }
+
+  const spyChannel = await resolveSpyChannelDeep(call);
   if (!spyChannel) {
     throw Object.assign(new Error("Could not resolve agent channel to spy on"), {
       statusCode: 409,
     });
   }
 
-  await originateChanSpy(supExt, spyChannel, normalizedMode);
+  const amiResult = await originateChanSpy(supExt, spyChannel, normalizedMode);
 
   return {
     success: true,
@@ -162,6 +223,12 @@ async function supervisorSpyOnLinkedCall({
     agent_extension: call.agent_extension,
     agent_name: call.agent_name,
     linkedid,
+    ami_message: amiResult?.message || "Originate accepted",
+    instructions: [
+      `Extension ${supExt} on this dashboard should ring now — click Answer on the yellow bar above.`,
+      "You hear the agent call in the browser (no Agent Dashboard needed).",
+      "If nothing rings: wait until SIP status is Idle/Ready, then try Listen again.",
+    ],
   };
 }
 
