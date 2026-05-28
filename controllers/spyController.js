@@ -30,18 +30,20 @@ const spyOnCall = async (req, res) => {
       `🎧 Spy ${result.mode}: sup ${result.supervisor_extension} → ${result.spy_channel} (${linkedid})`
     );
 
-    const supervisorName =
-      req.user?.full_name || req.user?.username || req.user?.name;
-    await notifyAgentSupervisorIntervention({
-      agentExtension: result.agent_extension,
-      mode: result.mode,
-      supervisorUserId: req.user?.userId,
-      supervisorExtension: result.supervisor_extension,
-      supervisorName,
-      linkedid,
-    }).catch((err) =>
-      console.warn("Agent intervention notify failed:", err.message)
-    );
+    if (result.mode === "whisper" || result.mode === "barge") {
+      const supervisorName =
+        req.user?.full_name || req.user?.username || req.user?.name;
+      await notifyAgentSupervisorIntervention({
+        agentExtension: result.agent_extension,
+        mode: result.mode,
+        supervisorUserId: req.user?.userId,
+        supervisorExtension: result.supervisor_extension,
+        supervisorName,
+        linkedid,
+      }).catch((err) =>
+        console.warn("Agent intervention notify failed:", err.message)
+      );
+    }
 
     return res.json(result);
   } catch (err) {
