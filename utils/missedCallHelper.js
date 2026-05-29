@@ -194,6 +194,94 @@ async function fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime) {
   return { waitByCallId, uniqueidToSession };
 }
 
+/**
+ * Lost callers from queue_log ENTERQUEUE→ABANDON time span (works when data3 is empty).
+ */
+async function fetchQueueLogSpanLostSessions(
+  sequelize,
+  startDateTime,
+  endDateTime
+) {
+  const rows = await sequelize.query(
+    `
+    SELECT
+      span.callid,
+      span.wait_seconds,
+      span.abandon_time AS call_time,
+      (
+        SELECT ql2.data1
+        FROM queue_log ql2
+        WHERE ql2.callid = span.callid
+          AND UPPER(ql2.event) IN (
+            'ENTERQUEUE', 'QUEUEENTRY', 'QUEUECALLERJOIN'
+          )
+        ORDER BY ql2.time ASC
+        LIMIT 1
+      ) AS caller_hint
+    FROM (
+      SELECT
+        callid,
+        GREATEST(
+          0,
+          TIMESTAMPDIFF(
+            SECOND,
+            MIN(CASE
+              WHEN UPPER(event) IN (
+                'ENTERQUEUE', 'QUEUEENTRY', 'QUEUECALLERJOIN'
+              ) THEN time
+              ELSE NULL
+            END),
+            MAX(CASE
+              WHEN UPPER(event) IN (
+                'ABANDON', 'EXITWITHTIMEOUT', 'COMPLETECALLER', 'LEAVEEMPTY'
+              ) THEN time
+              ELSE NULL
+            END)
+          )
+        ) AS wait_seconds,
+        MAX(CASE
+          WHEN UPPER(event) IN (
+            'ABANDON', 'EXITWITHTIMEOUT', 'COMPLETECALLER', 'LEAVEEMPTY'
+          ) THEN time
+          ELSE NULL
+        END) AS abandon_time
+      FROM queue_log
+      WHERE time BETWEEN :startDateTime AND :endDateTime
+        AND callid IS NOT NULL AND TRIM(callid) != ''
+      GROUP BY callid
+      HAVING wait_seconds >= :lostMin
+    ) span
+    ORDER BY span.abandon_time DESC
+    LIMIT 500
+    `,
+    {
+      replacements: {
+        startDateTime,
+        endDateTime,
+        lostMin: LOST_MIN_DURATION_SECONDS,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return rows
+    .map((row) => {
+      const caller =
+        normalizeCaller(row.caller_hint) !== "UNKNOWN"
+          ? normalizeCaller(row.caller_hint)
+          : "UNKNOWN";
+      return {
+        session_id: String(row.callid),
+        caller,
+        call_time: row.call_time,
+        wait_seconds: Number(row.wait_seconds),
+        max_duration: 0,
+        max_billsec: 0,
+      };
+    })
+    .filter((r) => r.caller !== "UNKNOWN" && isCustomerCaller(r.caller));
+}
+
 /** Queue hold from CEL (APP_START Queue → HANGUP without agent answer). */
 async function fetchCelQueueWaitMap(sequelize, startDateTime, endDateTime) {
   const rows = await sequelize.query(
@@ -206,7 +294,7 @@ async function fetchCelQueueWaitMap(sequelize, startDateTime, endDateTime) {
           SECOND,
           MIN(CASE
             WHEN eventtype = 'APP_START'
-              AND appname IN ('Queue', 'AppQueue')
+              AND LOWER(TRIM(appname)) IN ('queue', 'appqueue')
             THEN eventtime
             ELSE NULL
           END),
@@ -327,13 +415,17 @@ function dedupeLostCalls(rows, timeField = "call_time") {
   );
 }
 
-/** Dedupe CDR-derived lost-call rows before inserting into MissedCalls */
+/**
+ * One row per call session (linkedid/uniqueid).
+ * Same caller may appear many times — each >= 5 min abandon is a separate lost call.
+ */
 function dedupeIncomingLostCdrs(cdrs) {
   if (!Array.isArray(cdrs) || cdrs.length === 0) return [];
 
   const sorted = [...cdrs].sort(
     (a, b) => new Date(a.call_time) - new Date(b.call_time)
   );
+  const seenSessions = new Set();
   const lastKeptByCaller = new Map();
   const kept = [];
 
@@ -343,15 +435,20 @@ function dedupeIncomingLostCdrs(cdrs) {
     const t = new Date(row.call_time).getTime();
     if (Number.isNaN(t)) continue;
 
+    const sid = String(row.session_id || "").trim();
+    if (sid) {
+      if (seenSessions.has(sid)) continue;
+      seenSessions.add(sid);
+      kept.push({ ...row, caller });
+      continue;
+    }
+
     const prev = lastKeptByCaller.get(caller);
     if (prev != null && t - prev <= DEDUP_WINDOW_SECONDS * 1000) {
       continue;
     }
     lastKeptByCaller.set(caller, t);
-    kept.push({
-      ...row,
-      caller,
-    });
+    kept.push({ ...row, caller });
   }
 
   return kept.sort((a, b) => new Date(b.call_time) - new Date(a.call_time));
@@ -455,7 +552,10 @@ async function fetchQueueAbandonSessionsRaw(
     const orphanCallIds = [];
     const orphanMeta = [];
     for (const logRow of logOnlyRows) {
-      const wait = parseQueueLogWaitSeconds(logRow);
+      const callid = String(logRow.callid || "");
+      const wait =
+        parseQueueLogWaitSeconds(logRow) ??
+        (callid ? queueWaitByCallId.get(callid) : null);
       if (wait == null || !isLostWaitSeconds(wait)) continue;
       const sessionId =
         uniqueidToSession.get(String(logRow.callid)) || String(logRow.callid);
@@ -505,6 +605,18 @@ async function fetchQueueAbandonSessionsRaw(
           wait_seconds: wait,
         });
       }
+    }
+
+    const spanLost = await fetchQueueLogSpanLostSessions(
+      sequelize,
+      startDateTime,
+      endDateTime
+    );
+    for (const row of spanLost) {
+      const sid = String(row.session_id || "");
+      if (!sid || seenSessions.has(sid)) continue;
+      seenSessions.add(sid);
+      classified.push(row);
     }
   }
 
@@ -619,17 +731,10 @@ async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
   const lostSessionIds = new Set(
     lostRows.map((r) => String(r.session_id || "")).filter(Boolean)
   );
-  const lostCallerKeys = new Set();
-  for (const r of lostRows) {
-    const key = callerMatchKey(r.caller);
-    if (key) lostCallerKeys.add(key);
-  }
 
   const droppedOnly = droppedRows.filter((row) => {
     const sid = String(row.session_id || "");
     if (sid && lostSessionIds.has(sid)) return false;
-    const key = callerMatchKey(row.caller);
-    if (key && lostCallerKeys.has(key)) return false;
     if (isLostWaitSeconds(row.wait_seconds)) return false;
     return isDroppedWaitSeconds(row.wait_seconds);
   });
@@ -638,11 +743,17 @@ async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
 }
 
 /**
- * Sync >= 5 min queue abandons into MissedCalls (max one row per customer per day).
+ * Sync >= 5 min queue abandons into MissedCalls (one row per call session / linkedid).
  */
-async function ensureLostAbandonsInMissedCalls(sequelize) {
+async function ensureLostAbandonsInMissedCalls(sequelize, options = {}) {
+  const force = options.force === true;
   const now = Date.now();
-  if (now - lastEnsureLostAbandonsAt < ENSURE_LOST_THROTTLE_MS) return;
+  if (
+    !force &&
+    now - lastEnsureLostAbandonsAt < ENSURE_LOST_THROTTLE_MS
+  ) {
+    return;
+  }
   lastEnsureLostAbandonsAt = now;
 
   const lostSessions = await fetchTodayQueueLostSessionsRaw(sequelize);
@@ -660,48 +771,16 @@ async function ensureLostAbandonsInMissedCalls(sequelize) {
     const caller = normalizeCaller(cdr.caller);
     if (!isCustomerCaller(caller)) continue;
 
-    const matchKey = callerMatchKey(caller);
     const callTime = cdr.call_time;
+    const sessionId = cdr.session_id != null ? String(cdr.session_id) : "";
 
     const linkedExists =
-      cdr.session_id != null &&
+      sessionId &&
       existingToday.some(
         (row) =>
-          row.linkedid != null &&
-          String(row.linkedid) === String(cdr.session_id)
+          row.linkedid != null && String(row.linkedid) === sessionId
       );
     if (linkedExists) continue;
-
-    const sameCallerRows = existingToday.filter(
-      (row) => callerMatchKey(row.caller) === matchKey
-    );
-
-    if (sameCallerRows.length > 0) {
-      const latest = sameCallerRows.reduce((a, b) =>
-        new Date(a.time) >= new Date(b.time) ? a : b
-      );
-      if (new Date(callTime) > new Date(latest.time)) {
-        await sequelize.query(
-          `
-          UPDATE MissedCalls
-          SET time = :time,
-              linkedid = COALESCE(:linkedid, linkedid),
-              updatedAt = NOW()
-          WHERE id = :id
-          `,
-          {
-            replacements: {
-              id: latest.id,
-              time: callTime,
-              linkedid: cdr.session_id || null,
-            },
-            type: QueryTypes.UPDATE,
-          }
-        );
-        latest.time = callTime;
-      }
-      continue;
-    }
 
     await sequelize.query(
       `
@@ -736,6 +815,7 @@ function mapMissedCallRowToLostDto(row) {
     caller: normalizeCaller(row.caller),
     call_time: callTime,
     lost_time: callTime,
+    wait_seconds: row.wait_seconds ?? null,
     status: row.status || "pending",
     called_back_at: row.called_back_at || null,
     called_back_by: row.called_back_by || null,
@@ -750,22 +830,23 @@ function mapMissedCallRowToLostDto(row) {
 }
 
 async function fetchMissedCallsInRange(sequelize, startDateTime, endDateTime) {
-  const rows = await sequelize.query(
-    `
-    SELECT id, caller, time, status
-    FROM MissedCalls
-    WHERE time BETWEEN :startDateTime AND :endDateTime
-      AND (archived = 0 OR archived IS NULL)
-    ORDER BY time DESC
-    LIMIT 1000
-    `,
-    {
-      replacements: { startDateTime, endDateTime },
-      type: QueryTypes.SELECT,
-    }
+  const sessions = await fetchQueueAbandonSessionsRaw(
+    sequelize,
+    startDateTime,
+    endDateTime,
+    true,
+    { queueOnly: false }
   );
-
-  return dedupeMissedCallsLatestPerCaller(rows).map(mapMissedCallRowToLostDto);
+  return dedupeIncomingLostCdrs(sessions)
+    .filter((s) => isCustomerCaller(s.caller))
+    .map((s) =>
+      mapMissedCallRowToLostDto({
+        caller: s.caller,
+        time: s.call_time,
+        linkedid: s.session_id,
+        status: "pending",
+      })
+    );
 }
 
 /** Today's lost queue sessions (>= 5 min) from CDR + queue_log. */
@@ -809,38 +890,61 @@ async function fetchMissedCallsTodayForList(sequelize) {
 
 async function getTodayLostCallsList(sequelize) {
   await ensureLostAbandonsInMissedCalls(sequelize);
-  const rows = await fetchMissedCallsTodayForList(sequelize);
-  return dedupeMissedCallsLatestPerCaller(rows).map(mapMissedCallRowToLostDto);
-}
-
-/** Distinct customer callers lost today (MissedCalls + CDR/queue_log >= 5 min). */
-async function countTodayMissedCalls(sequelize) {
-  await ensureLostAbandonsInMissedCalls(sequelize);
-  const [missedRows, queueLost] = await Promise.all([
-    fetchMissedCallsTodayRaw(sequelize),
+  const [sessions, missedRows] = await Promise.all([
     fetchTodayQueueLostSessionsRaw(sequelize),
+    fetchMissedCallsTodayForList(sequelize),
   ]);
 
-  const keys = new Set();
-  for (const row of dedupeMissedCallsLatestPerCaller(missedRows)) {
-    const key = callerMatchKey(row.caller);
-    if (key) keys.add(key);
+  const missedByLinked = new Map();
+  for (const row of missedRows) {
+    if (row.linkedid != null) {
+      missedByLinked.set(String(row.linkedid), row);
+    }
   }
-  for (const session of queueLost) {
-    if (!isCustomerCaller(session.caller)) continue;
-    const key = callerMatchKey(session.caller);
-    if (key) keys.add(key);
-  }
-  return keys.size;
+
+  return dedupeIncomingLostCdrs(sessions)
+    .filter((s) => isCustomerCaller(s.caller))
+    .map((s) => {
+      const mc = missedByLinked.get(String(s.session_id || ""));
+      return mapMissedCallRowToLostDto(
+        mc
+          ? {
+              ...mc,
+              caller: normalizeCaller(s.caller),
+              time: s.call_time,
+              wait_seconds: s.wait_seconds,
+            }
+          : {
+              caller: s.caller,
+              time: s.call_time,
+              linkedid: s.session_id,
+              status: "pending",
+              wait_seconds: s.wait_seconds,
+            }
+      );
+    });
+}
+
+/** Every queue abandon >= 5 min today (same caller counted each time). */
+async function countTodayMissedCalls(sequelize) {
+  await ensureLostAbandonsInMissedCalls(sequelize);
+  const sessions = await fetchTodayQueueLostSessionsRaw(sequelize);
+  return dedupeIncomingLostCdrs(sessions).filter((s) =>
+    isCustomerCaller(s.caller)
+  ).length;
 }
 
 async function countMissedCallsInRange(sequelize, startDateTime, endDateTime) {
-  const list = await fetchMissedCallsInRange(
+  const sessions = await fetchQueueAbandonSessionsRaw(
     sequelize,
     startDateTime,
-    endDateTime
+    endDateTime,
+    true,
+    { queueOnly: false }
   );
-  return list.length;
+  return dedupeIncomingLostCdrs(sessions).filter((s) =>
+    isCustomerCaller(s.caller)
+  ).length;
 }
 
 /**
@@ -916,6 +1020,60 @@ async function countIvrAnsweredExcludingQueueLost(
   return count;
 }
 
+/** For testing: why lost count is N and what to do to increase it. */
+async function getLostCallsDiagnostics(sequelize) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const dayStart = `${y}-${m}-${d} 00:00:00`;
+  const dayEnd = `${y}-${m}-${d} 23:59:59`;
+
+  await ensureLostAbandonsInMissedCalls(sequelize, { force: true });
+
+  const [missedRows, queueLost, spanLost, lostCount] = await Promise.all([
+    fetchMissedCallsTodayRaw(sequelize),
+    fetchTodayQueueLostSessionsRaw(sequelize),
+    fetchQueueLogSpanLostSessions(sequelize, dayStart, dayEnd),
+    countTodayMissedCalls(sequelize),
+  ]);
+
+  const missedCallers = dedupeMissedCallsLatestPerCaller(missedRows).map((r) =>
+    normalizeCaller(r.caller)
+  );
+
+  const queueLostCallers = queueLost
+    .filter((s) => isCustomerCaller(s.caller))
+    .map((s) => ({
+      caller: normalizeCaller(s.caller),
+      wait_seconds: s.wait_seconds,
+      session_id: s.session_id,
+    }));
+
+  return {
+    lostCount,
+    lostMinSeconds: LOST_MIN_DURATION_SECONDS,
+    countRule:
+      "Each queue abandon >= 5 minutes counts as one lost call (same mobile can appear many times per day).",
+    missedCallTableRows: missedRows.length,
+    missedCallTableCallers: missedCallers,
+    queueLostFromCdr: queueLostCallers,
+    queueLogSpanLost: spanLost.map((s) => ({
+      caller: s.caller,
+      wait_seconds: s.wait_seconds,
+      callid: s.session_id,
+    })),
+    howToTest: [
+      "Wait at least 5 minutes in the call queue (music/hold), then hang up.",
+      "Repeat from the same number — each 5+ min abandon adds +1 to lost count.",
+      "Use format 07XXXXXXXX (10 digits starting with 0).",
+      "Wait 1–2 minutes, refresh dashboard or open GET /api/calls/lost-calls-diagnostics",
+      "Deploy latest missedCallHelper.js and pm2 restart all",
+    ],
+    timestamp: new Date().toISOString(),
+  };
+}
+
 module.exports = {
   DEDUP_WINDOW_SECONDS,
   LOST_MIN_DURATION_SECONDS,
@@ -925,7 +1083,9 @@ module.exports = {
   parseQueueLogWaitSeconds,
   effectiveQueueWaitSeconds,
   fetchQueueLogWaitMap,
+  fetchQueueLogSpanLostSessions,
   fetchCelQueueWaitMap,
+  getLostCallsDiagnostics,
   fetchMissedCallsTodayRaw,
   dedupeMissedCallsLatestPerCaller,
   MISSED_CALLS_TODAY_SQL,

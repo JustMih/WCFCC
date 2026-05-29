@@ -8,6 +8,7 @@ const {
   callerMatchKey,
   dedupeLostCalls,
   getTodayLostCallsList,
+  getLostCallsDiagnostics,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 const {
@@ -168,6 +169,17 @@ const getLostCallsToday = async (req, res) => {
   } catch (err) {
     console.error("Error retrieving lost calls:", err.message);
     res.status(500).send("Internal Server Error");
+  }
+};
+
+/** Why lost count is N — use while testing (GET /api/calls/lost-calls-diagnostics). */
+const getLostCallsDiagnosticsHandler = async (req, res) => {
+  try {
+    const data = await getLostCallsDiagnostics(sequelize);
+    res.json(data);
+  } catch (err) {
+    console.error("lost-calls-diagnostics:", err.message);
+    res.status(500).json({ error: err.message });
   }
 };
 /**
@@ -537,6 +549,7 @@ module.exports = {
   getAgentCdrStats,
   dailyAgentCallStatus: getAgentCdrStatsToday,
   getLostCallsToday,
+  getLostCallsDiagnosticsHandler,
   getReceivedCalls,
   getLostCalls,
   getDroppedCalls,
