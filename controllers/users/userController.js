@@ -20,6 +20,7 @@ const UserHandover = require("../../models/UserHandover");
 const {
   startHandover,
   closeHandover,
+  listActiveHandoverParticipants,
   listActiveHandoversByActor,
 } = require("../../services/handoverService");
 
@@ -1938,6 +1939,25 @@ const getActiveHandovers = async (req, res) => {
   }
 };
 
+const getHandoverBlockedUsers = async (req, res) => {
+  try {
+    const actorId = req.user?.id || req.user?.userId;
+    if (!actorId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { blockedUserIds, participants } = await listActiveHandoverParticipants();
+
+    return res.status(200).json({
+      success: true,
+      blockedUserIds: [...blockedUserIds],
+      participants,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   createUser,
   getAllUsers,
@@ -1976,4 +1996,5 @@ module.exports = {
   startUserHandover,
   revokeUserHandover,
   getActiveHandovers,
+  getHandoverBlockedUsers,
 };
