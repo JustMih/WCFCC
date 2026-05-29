@@ -275,7 +275,9 @@ app.get('/api/queue-call-stats', (req, res) => {
     } else if (call.answered) {
       answered.push({ ...call, waitSeconds });
     } else if (!call.answered && left) {
-      if (waitSeconds < 30) {
+      const LOST_MIN_DURATION_SECONDS =
+        require("./utils/missedCallHelper").LOST_MIN_DURATION_SECONDS;
+      if (waitSeconds <= LOST_MIN_DURATION_SECONDS) {
         dropped.push({ ...call, waitSeconds });
       } else {
         lost.push({ ...call, waitSeconds });

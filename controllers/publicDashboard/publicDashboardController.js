@@ -13,9 +13,10 @@ const {
   normalizeCaller,
   callerMatchKey,
   dedupeLostCalls,
-  dedupeIncomingLostCdrs,
+  fetchTodayQueueLostSessionsRaw,
+  getTodayLostCallsList,
+  LOST_MIN_DURATION_SECONDS,
 } = require("../../utils/missedCallHelper");
-const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 const {
   extractExtensionFromChannel,
   buildAgentsNameMap,
@@ -58,32 +59,7 @@ const getPublicDashboardData = async (req, res) => {
     /* =====================================================
        LOST CALL INSERTION (KEEP AS-IS)
     ====================================================== */
-    const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
-    const lostCdrsRaw = await sequelize.query(
-      `
-      SELECT
-        ${sessionIdExpr} AS session_id,
-        MIN(
-          COALESCE(
-            NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(c.clid, '<', -1), '>', 1)), ''),
-            NULLIF(TRIM(c.src), ''),
-            NULLIF(TRIM(c.clid), '')
-          )
-        ) AS caller,
-        MIN(c.cdrstarttime) AS call_time
-      FROM cdr c
-      WHERE DATE(c.cdrstarttime) = CURDATE()
-        AND c.disposition = 'NO ANSWER'
-        AND c.lastapp = 'Queue'
-        AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
-      GROUP BY ${sessionIdExpr}
-      ORDER BY call_time DESC
-      LIMIT 200
-      `,
-      { type: QueryTypes.SELECT }
-    );
-
-    const lostCdrs = dedupeIncomingLostCdrs(lostCdrsRaw);
+    const lostCdrs = await fetchTodayQueueLostSessionsRaw(sequelize);
 
     for (const cdr of lostCdrs) {
       const caller = normalizeCaller(cdr.caller);
@@ -277,9 +253,18 @@ const getPublicDashboardData = async (req, res) => {
 
         case "HANGUP":
           c.call_end = row.eventtime;
-          if (!c.call_answered && c.queue_entry_time) c.status = "lost";
-          else if (!c.call_answered) c.status = "dropped";
-          else c.status = "ended";
+          if (!c.call_answered) {
+            if (c.queue_entry_time) {
+              const waitSec =
+                (new Date(c.call_end) - new Date(c.queue_entry_time)) / 1000;
+              c.status =
+                waitSec > LOST_MIN_DURATION_SECONDS ? "lost" : "dropped";
+            } else {
+              c.status = "dropped";
+            }
+          } else {
+            c.status = "ended";
+          }
           break;
       }
     }
@@ -347,16 +332,8 @@ const monthlyCounts = await sequelize.query(
 );
 
 
-    const [{ count: lostCount }] = await sequelize.query(
-      `
-      SELECT COUNT(*) AS count
-      FROM cdr
-      WHERE DATE(cdrstarttime)=CURDATE()
-        AND disposition='NO ANSWER'
-        AND lastapp='Queue'
-      `,
-      { type: QueryTypes.SELECT }
-    );
+    const lostCallsToday = await getTodayLostCallsList(sequelize);
+    const lostCount = lostCallsToday.length;
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -396,26 +373,8 @@ const monthlyCounts = await sequelize.query(
 /* ================= LOST CALLS LIST ================= */
 const getLostCallsToday = async (req, res) => {
   try {
-    const rows = await sequelize.query(
-      `
-      SELECT
-        mc.id,
-        mc.caller,
-        mc.time AS lost_time,
-        mc.status,
-        mc.called_back_at,
-        mc.called_back_by,
-        mc.billsec,
-        COALESCE(u.full_name, u.username, mc.called_back_by, '—') AS agent_name
-      FROM MissedCalls mc
-      LEFT JOIN Users u ON u.extension = mc.called_back_by
-      WHERE DATE(mc.time)=CURDATE()
-        AND mc.archived=0
-      ORDER BY mc.time DESC
-      `,
-      { type: QueryTypes.SELECT }
-    );
-    res.json(dedupeLostCalls(rows, "lost_time"));
+    const rows = await getTodayLostCallsList(sequelize);
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch lost calls" });
   }

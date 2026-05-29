@@ -3,9 +3,11 @@ const { Op } = require("sequelize");
 const CDR = require("../../models/CDR");
 const {
   DEDUP_WINDOW_SECONDS,
+  LOST_MIN_DURATION_SECONDS,
   normalizeCaller,
   callerMatchKey,
   dedupeLostCalls,
+  getTodayLostCallsList,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 const {
@@ -62,14 +64,14 @@ const getAgentCdrStats = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -80,14 +82,14 @@ const getAgentCdrStats = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -114,14 +116,14 @@ const getAgentCdrStatsToday = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -132,14 +134,14 @@ const getAgentCdrStatsToday = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -228,17 +230,11 @@ const syncMissedCallsFromCdrToday = async () => {
   }
 };
 
-// Get lost calls for today with phone numbers
+// Get lost calls for today (queue NO ANSWER, wait > 5 min — excludes dropped)
 const getLostCallsToday = async (req, res) => {
   try {
-    const lostCalls = await sequelize.query(
-      `SELECT mc.caller, mc.time AS call_time, mc.status, mc.called_back_by AS callback_agent_extension, u.full_name AS callback_agent_name, mc.called_back_at AS callback_time, mc.billsec AS callback_duration FROM MissedCalls mc LEFT JOIN Users u ON u.extension = mc.called_back_by WHERE DATE(mc.time) = CURDATE() AND mc.archived = 0 ORDER BY mc.time DESC`,
-      {
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
-
-    res.json(dedupeLostCalls(lostCalls, "call_time"));
+    const lostCalls = await getTodayLostCallsList(sequelize);
+    res.json(lostCalls);
   } catch (err) {
     console.error("Error retrieving lost calls:", err.message);
     res.status(500).send("Internal Server Error");
@@ -440,13 +436,17 @@ const getLostCalls = async (req, res) => {
         lastapp
       FROM cdr 
       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND duration > 60
+        AND duration > :lostMinDuration
         AND clid IS NOT NULL
         AND clid != ''
       ORDER BY cdrstarttime DESC
       LIMIT :limit OFFSET :offset`,
       {
-        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        replacements: {
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          lostMinDuration: LOST_MIN_DURATION_SECONDS,
+        },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -456,10 +456,11 @@ const getLostCalls = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM cdr 
        WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-         AND duration > 60
+         AND duration > :lostMinDuration
          AND clid IS NOT NULL
          AND clid != ''`,
       {
+        replacements: { lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -489,13 +490,17 @@ const getDroppedCalls = async (req, res) => {
         lastapp
       FROM cdr 
       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND duration <= 60
+        AND duration <= :lostMinDuration
         AND clid IS NOT NULL
         AND clid != ''
       ORDER BY cdrstarttime DESC
       LIMIT :limit OFFSET :offset`,
       {
-        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        replacements: {
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          lostMinDuration: LOST_MIN_DURATION_SECONDS,
+        },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -504,10 +509,11 @@ const getDroppedCalls = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM cdr 
        WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-         AND duration <= 60
+         AND duration <= :lostMinDuration
          AND clid IS NOT NULL
          AND clid != ''`,
       {
+        replacements: { lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );

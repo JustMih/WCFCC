@@ -19,6 +19,7 @@ const {
   buildAgentsNameMap,
   resolveAgentForCall,
 } = require("../../utils/agentExtensionHelper");
+const { LOST_MIN_DURATION_SECONDS } = require("../../utils/missedCallHelper");
 
 /* ============================== SOCKET STATE ============================== */
 let ioInstance = null;
@@ -161,9 +162,18 @@ const getAllLiveCalls = async (req, res) => {
 
         case "HANGUP":
           c.call_end = row.eventtime;
-          if (!c.call_answered && c.queue_entry_time) c.status = "lost";
-          else if (!c.call_answered) c.status = "dropped";
-          else c.status = "ended";
+          if (!c.call_answered) {
+            if (c.queue_entry_time) {
+              const waitSec =
+                (new Date(c.call_end) - new Date(c.queue_entry_time)) / 1000;
+              c.status =
+                waitSec > LOST_MIN_DURATION_SECONDS ? "lost" : "dropped";
+            } else {
+              c.status = "dropped";
+            }
+          } else {
+            c.status = "ended";
+          }
           break;
 
         case "APP_START":

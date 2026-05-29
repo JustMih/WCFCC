@@ -2,6 +2,7 @@
 
 const sequelize = require("../config/mysql_connection");
 const moment = require("moment");
+const { LOST_MIN_DURATION_SECONDS } = require("../utils/missedCallHelper");
 
 /**
  * Queue stats for supervisor dashboard (replaces amiServer :5075 route).
@@ -69,7 +70,7 @@ async function getQueueCallStats(req, res) {
       } else if (call.answered) {
         answered.push({ ...call, waitSeconds });
       } else if (left) {
-        if (waitSeconds != null && waitSeconds < 30) {
+        if (waitSeconds != null && waitSeconds <= LOST_MIN_DURATION_SECONDS) {
           dropped.push({ ...call, waitSeconds });
         } else {
           lost.push({ ...call, waitSeconds });

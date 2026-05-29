@@ -1,5 +1,9 @@
 const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
+const {
+  countQueueLostInRange,
+  countQueueDroppedInRange,
+} = require("../../utils/missedCallHelper");
 
 /**
  * Fetch total, answered (with agent), IVR (answered without agent),
@@ -118,13 +122,18 @@ const getCallSummary = async (req, res) => {
       getCountsForRange(yearStart, yearEnd),
     ]);
 
+    const [cdrLostToday, cdrDroppedToday] = await Promise.all([
+      countQueueLostInRange(sequelize, dayStart, dayEnd),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+    ]);
+
     const response = {
       currentDay: {
         totalCalls: currentDay.totalCalls,
         answered: currentDay.answered,
         ivr: currentDay.ivr,
-        dropped: currentDay.dropped,
-        lost: currentDay.lost,
+        dropped: cdrDroppedToday,
+        lost: cdrLostToday,
       },
       currentMonth: {
         totalCalls: currentMonth.totalCalls,
