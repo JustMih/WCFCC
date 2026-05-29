@@ -236,11 +236,16 @@ async function fetchQueueAbandonSessionsRaw(
   sequelize,
   startDateTime,
   endDateTime,
-  lostOnly
+  lostOnly,
+  options = {}
 ) {
+  const { queueOnly = true } = options;
   const { QueryTypes } = require("sequelize");
   const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
   const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+  const lastappFilter = queueOnly
+    ? "AND c.lastapp IN ('Queue', 'AppQueue')"
+    : "";
 
   const [rows, queueLogMeta] = await Promise.all([
     sequelize.query(
@@ -260,11 +265,11 @@ async function fetchQueueAbandonSessionsRaw(
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :startDateTime AND :endDateTime
         AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
-        AND c.lastapp IN ('Queue', 'AppQueue')
+        ${lastappFilter}
         AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
       GROUP BY ${sessionIdExpr}
       ORDER BY call_time DESC
-      LIMIT 500
+      LIMIT 2000
       `,
       {
         replacements: { startDateTime, endDateTime },
@@ -455,15 +460,38 @@ async function fetchMissedCallsTodayRaw(sequelize) {
   }
 }
 
+/**
+ * Dropped = CDR unanswered sessions under 5 min (not lost).
+ * Uses all CDR dispositions (not only lastapp Queue). Excludes sessions already >= 5 min lost.
+ */
 async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
-  const [rows, missedKeys] = await Promise.all([
-    fetchQueueAbandonSessionsRaw(sequelize, startDateTime, endDateTime, false),
-    getTodayMissedCallerKeys(sequelize),
+  const [droppedRows, lostSessions] = await Promise.all([
+    fetchQueueAbandonSessionsRaw(
+      sequelize,
+      startDateTime,
+      endDateTime,
+      false,
+      { queueOnly: false }
+    ),
+    fetchQueueAbandonSessionsRaw(
+      sequelize,
+      startDateTime,
+      endDateTime,
+      true,
+      { queueOnly: true }
+    ),
   ]);
-  return rows.filter((row) => {
-    const key = callerMatchKey(row.caller);
-    return !key || !missedKeys.has(key);
-  }).length;
+
+  const lostSessionIds = new Set(
+    lostSessions.map((r) => String(r.session_id || ""))
+  );
+
+  const droppedOnly = droppedRows.filter((row) => {
+    const sid = String(row.session_id || "");
+    return sid && !lostSessionIds.has(sid);
+  });
+
+  return dedupeIncomingLostCdrs(droppedOnly).length;
 }
 
 /**
