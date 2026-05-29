@@ -10,6 +10,7 @@ const {
   dedupeCdrLegs,
   enrichVoiceNoteRecord,
   enrichMissedCallRecord,
+  buildMissedCallCdrIndex,
   syncMissedCallCallbacksInRange,
   buildEmergencyLookup,
   applySessionRouting,
@@ -127,8 +128,16 @@ exports.getOffHoursReport = async (req, res) => {
         offHoursRecords.map((r) => enrichCdrRecord(r, emergencyByPhone))
       );
     } else if (source === "missed-calls") {
+      const cdrHints = await fetchCdrRoutingHints(
+        sequelize,
+        startDate,
+        endDate
+      );
+      const missedCdrIndex = buildMissedCallCdrIndex(cdrHints);
       offHoursRecords = dedupeLostCalls(
-        offHoursRecords.map((r) => enrichMissedCallRecord(r)),
+        offHoursRecords.map((r) =>
+          enrichMissedCallRecord(r, emergencyByPhone, missedCdrIndex)
+        ),
         "time"
       );
     } else {
