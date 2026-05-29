@@ -16,10 +16,14 @@ const {
   isLostWaitSeconds,
 } = require("../../utils/missedCallHelper");
 const {
-  extractExtensionFromChannel,
   buildAgentsNameMap,
   resolveAgentForCall,
 } = require("../../utils/agentExtensionHelper");
+const {
+  loadSupervisorExtensionSet,
+  applyCelRowToCall,
+  filterCallsForDisplay,
+} = require("../../utils/liveCallCelHelper");
 
 /* ================= SOCKET.IO ================= */
 let ioInstance = null;
@@ -145,15 +149,17 @@ const getPublicDashboardData = async (req, res) => {
     });
 
     const calls = {};
+    const supervisorExts = await loadSupervisorExtensionSet(User);
+
     for (const row of events) {
       const key = row.linkedid || row.uniqueid;
       if (!key) continue;
- 
+
       calls[key] ??= {
         linkedid: key,
         caller: row.cid_num || "-",
         callee: row.exten || row.cid_dnid || "-",
-        agent_extension: null, // 👈 starts empty
+        agent_extension: null,
         call_start: null,
         call_answered: null,
         call_end: null,
@@ -161,47 +167,10 @@ const getPublicDashboardData = async (req, res) => {
         status: "calling",
       };
 
-      const c = calls[key];
-      switch (row.eventtype) {
-        case "CHAN_START":
-          c.call_start ??= row.eventtime;
-          break;
-        case "APP_START":
-          if (row.appname === "Queue" || row.appname === "AppQueue")
-            c.queue_entry_time ??= row.eventtime;
-          break;
-       case "ANSWER":
-        case "BRIDGE_ENTER": {
-          c.call_answered ??= row.eventtime;
-          c.status = "active";
-
-          if (!c.agent_extension) {
-            c.agent_extension =
-              extractExtensionFromChannel(row.channame || row.channel) ||
-              extractExtensionFromChannel(row.peer) ||
-              c.agent_extension;
-          }
-          break;
-        }
-
-        case "HANGUP":
-          c.call_end = row.eventtime;
-          if (!c.call_answered) {
-            if (c.queue_entry_time) {
-              const waitSec =
-                (new Date(c.call_end) - new Date(c.queue_entry_time)) / 1000;
-              c.status = isLostWaitSeconds(waitSec) ? "lost" : "dropped";
-            } else {
-              c.status = "dropped";
-            }
-          } else {
-            c.status = "ended";
-          }
-          break;
-      }
+      applyCelRowToCall(calls[key], row, supervisorExts, { isLostWaitSeconds });
     }
 
-    const allCalls = Object.values(calls);
+    const allCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
     const liveCalls = allCalls.filter((c) => !c.call_end);
     const activeCalls = liveCalls.filter((c) => c.status === "active");
    
