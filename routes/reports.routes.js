@@ -1,81 +1,89 @@
 const express = require("express");
 const router = express.Router();
 const reportsController = require("../controllers/reports/reports.controller");
+const offHoursReportController = require("../controllers/reports/offHoursReport.controller");
+const slaReportController = require("../controllers/reports/slaReport.controller");
 
-router.get("/voice-notes", reportsController.getVoiceNotes);
-router.get("/cdr-reports", reportsController.getCDRReports);
-// IVR Interactions - put parameterized route first
-router.get(
+function bindGet(path, handler, label) {
+  if (typeof handler !== "function") {
+    throw new Error(
+      `Reports route "${path}" is missing handler "${label}". ` +
+        "Deploy the latest WCFCC controllers/reports/*.controller.js files."
+    );
+  }
+  router.get(path, handler);
+}
+
+bindGet("/voice-notes", reportsController.getVoiceNotes, "getVoiceNotes");
+bindGet("/cdr-reports", reportsController.getCDRReports, "getCDRReports");
+bindGet(
   "/ivr-interactions/:startDate/:endDate",
-  reportsController.getIVRInteractions
+  reportsController.getIVRInteractions,
+  "getIVRInteractions"
 );
-router.get("/ivr-interactions", reportsController.getIVRInteractions);
-// Test endpoint to check table access
-router.get("/ivr-interactions-test", reportsController.testIVRTable);
-// get voice note report by date range
-router.get(
+bindGet("/ivr-interactions", reportsController.getIVRInteractions, "getIVRInteractions");
+bindGet(
+  "/ivr-interactions-test",
+  reportsController.testIVRTable,
+  "testIVRTable"
+);
+bindGet(
   "/voice-note-report/:startDate/:endDate",
-  reportsController.getVoiceReport
+  reportsController.getVoiceReport,
+  "getVoiceReport"
 );
 
-// Off-hours calls (weekend, holiday, after-work) matching Asterisk routing
-router.get(
+bindGet(
   "/off-hours-report/:startDate/:endDate",
-  reportsController.getOffHoursReport
+  offHoursReportController.getOffHoursReport,
+  "getOffHoursReport"
 );
 
-// get CDR report by date range and disposition
-router.get(
+bindGet(
   "/cdr-report/:startDate/:endDate/:disposition",
-  reportsController.getCDRReport
+  reportsController.getCDRReport,
+  "getCDRReport"
 );
-
-// Ticket CRM Report
-router.get(
+bindGet(
   "/ticket-report/:startDate/:endDate/:status",
-  reportsController.getTicketReport
+  reportsController.getTicketReport,
+  "getTicketReport"
 );
-
-// Agent Performance Report
-router.get(
+bindGet(
   "/agent-performance/:startDate/:endDate/:agentId",
-  reportsController.getAgentPerformanceReport
+  reportsController.getAgentPerformanceReport,
+  "getAgentPerformanceReport"
 );
-
-// Call Summary Report
-router.get(
+bindGet(
   "/call-summary/:startDate/:endDate",
-  reportsController.getCallSummaryReport
+  reportsController.getCallSummaryReport,
+  "getCallSummaryReport"
 );
-
-// Ticket Assignments Report
-router.get(
+bindGet(
   "/ticket-assignments/:startDate/:endDate",
-  reportsController.getTicketAssignmentsReport
+  reportsController.getTicketAssignmentsReport,
+  "getTicketAssignmentsReport"
 );
-
-// Notifications Report
-router.get(
+bindGet(
   "/notification-report/:startDate/:endDate",
-  reportsController.getNotificationsReport
+  reportsController.getNotificationsReport,
+  "getNotificationsReport"
 );
-
-// Escalation Report
-router.get(
+bindGet(
   "/escalation-report/:startDate/:endDate",
-  reportsController.getEscalationReport
+  reportsController.getEscalationReport,
+  "getEscalationReport"
 );
 
-// Call Center SLA Report
-router.get(
+bindGet(
   "/sla-report/:startDate/:endDate",
-  reportsController.getSlaReport
+  slaReportController.getSlaReport,
+  "getSlaReport"
 );
-
-// Ticket SLA Report
-router.get(
+bindGet(
   "/ticket-sla-report/:startDate/:endDate",
-  reportsController.getTicketSlaReport
+  slaReportController.getTicketSlaReport,
+  "getTicketSlaReport"
 );
 
 module.exports = router;
