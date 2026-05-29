@@ -72,6 +72,7 @@ const baseAudioPath =
 
 require("./cron/escalationJob");
 require("./cron/dailyLogoutJob");
+require("./cron/handoverExpiryJob");
 
 require("./amiServer"); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */

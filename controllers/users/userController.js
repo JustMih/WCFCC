@@ -16,6 +16,12 @@ const {
   renderEmailCard,
 } = require("../../services/emailService");
 const sequelize = require("../../config/mysql_connection");
+const UserHandover = require("../../models/UserHandover");
+const {
+  startHandover,
+  closeHandover,
+  listActiveHandoversByActor,
+} = require("../../services/handoverService");
 
 const createUser = async (req, res) => {
   try {
@@ -1827,6 +1833,111 @@ const resetUserPassword = async (req, res) => {
   }
 };
 
+const startUserHandover = async (req, res) => {
+  try {
+    const actorId = req.user?.id || req.user?.userId;
+    const actorRole = req.user?.role;
+    const isAdmin = actorRole === "admin" || actorRole === "super-admin";
+
+    const {
+      from_user_id: requestedFromUserId,
+      to_user_id: toUserId,
+      return_at: returnAt,
+      reason,
+    } = req.body || {};
+
+    const fromUserId = isAdmin ? requestedFromUserId || actorId : actorId;
+
+    if (!actorId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!fromUserId || !toUserId || !returnAt) {
+      return res.status(400).json({
+        message: "from_user_id, to_user_id and return_at are required",
+      });
+    }
+
+    if (!isAdmin && requestedFromUserId && String(requestedFromUserId) !== String(actorId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const result = await startHandover({
+      fromUserId,
+      toUserId,
+      returnAt,
+      reason,
+      actorId,
+      actorRole,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Handover started successfully",
+      handover: result.handover,
+      movedTicketCount: result.movedTicketCount,
+    });
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+};
+
+const revokeUserHandover = async (req, res) => {
+  try {
+    const actorId = req.user?.id || req.user?.userId;
+    const actorRole = req.user?.role;
+    const handoverId = req.params.id;
+
+    const handover = await UserHandover.findByPk(handoverId);
+    if (!handover) {
+      return res.status(404).json({ message: "Handover not found" });
+    }
+
+    if (String(handover.from_user_id) !== String(actorId)) {
+      return res.status(403).json({
+        message: "Only the handover initiator can revoke this handover",
+      });
+    }
+
+    const result = await closeHandover({
+      handoverId,
+      actorId,
+      actorRole,
+      mode: "revoked",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Handover revoked successfully",
+      handover: result.handover,
+      returnedTicketCount: result.returnedTicketCount,
+    });
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+};
+
+const getActiveHandovers = async (req, res) => {
+  try {
+    const actorId = req.user?.id || req.user?.userId;
+    const actorRole = req.user?.role;
+    if (!actorId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const actor = await User.findByPk(actorId, {
+      attributes: ["id", "role", "unit_section"],
+    });
+    const handovers = await listActiveHandoversByActor({
+      actorId,
+      actorRole: actor?.role || actorRole,
+      actorUnitSection: actor?.unit_section || null,
+    });
+    return res.status(200).json({ success: true, handovers });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   createUser,
   getAllUsers,
@@ -1862,4 +1973,7 @@ module.exports = {
   updateIsRead,
   getOnlineUser,
   getInActiveUser,
+  startUserHandover,
+  revokeUserHandover,
+  getActiveHandovers,
 };

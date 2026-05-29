@@ -280,6 +280,50 @@ exports.getVoiceReport = (req, res) => {
     });
 };
 
+exports.getOffHoursReport = async (req, res) => {
+  const { startDate, endDate } = req.params;
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  try {
+    if (!CDR) {
+      throw new Error("CDR model is not available");
+    }
+
+    const rows = await CDR.findAll({
+      where: {
+        cdrstarttime: {
+          [Op.between]: [
+            `${startDate} 00:00:00`,
+            `${endDate} 23:59:59`,
+          ],
+        },
+      },
+      raw: true,
+      order: [["cdrstarttime", "DESC"]],
+    });
+
+    const holidaySet = await buildHolidaySet(Holiday, startDate, endDate);
+    const offHoursRecords = filterOffHoursRecords(rows, holidaySet);
+    const summary = buildSummary(offHoursRecords);
+
+    return res.status(200).json({
+      startDate,
+      endDate,
+      totalRecords: offHoursRecords.length,
+      summary,
+      records: offHoursRecords,
+    });
+  } catch (error) {
+    console.error("Error fetching off-hours report:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 exports.getCDRReport = (req, res) => {
   const { startDate, endDate, disposition } = req.params;
 
@@ -649,6 +693,7 @@ exports.getNotificationsReport = async (req, res) => {
   }
 
   try {
+    // Use raw SQL query to get ALL notifications with related data
     let query = `
       SELECT 
         n.id,
