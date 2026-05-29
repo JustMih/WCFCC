@@ -3306,6 +3306,13 @@ const getOverdueTickets = async (req, res) => {
 };
 const getAllCustomersTickets = async (req, res) => {
   try {
+    const userId = req.user?.userId || req.user?.id;
+    const role = req.user?.role;
+
+    if (!userId) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
     const tickets = await Ticket.findAll({
       order: [["created_at", "DESC"]],
       include: [
@@ -3364,7 +3371,7 @@ const getAllCustomersTickets = async (req, res) => {
 
     const response = tickets.map((ticket) => {
       const t = ticket.toJSON ? ticket.toJSON() : ticket;
-      const actorPolicy = getTicketActorPolicy(t, userId, user.role);
+      const actorPolicy = getTicketActorPolicy(t, userId, role);
       return {
         ...addEffectiveRole(t),
         can_act_as_delegate: actorPolicy.isDelegate,
@@ -3374,7 +3381,7 @@ const getAllCustomersTickets = async (req, res) => {
           ["agent", "attendee", "reviewer", "head-of-unit", "manager", "director", "director-general", "focal-person"],
           t,
           userId,
-          user.role
+          role
         ),
       };
     });
