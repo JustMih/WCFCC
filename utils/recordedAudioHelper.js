@@ -33,6 +33,7 @@ function buildAgentRecordedCallsQuery({ startDate, endDate, limit = 500 } = {}) 
       c.cdrstarttime,
       c.src AS caller,
       c.dst,
+      c.channel,
       c.dstchannel,
       c.billsec,
       c.disposition,
@@ -43,7 +44,10 @@ function buildAgentRecordedCallsQuery({ startDate, endDate, limit = 500 } = {}) 
       AND c.recordingfile != ''
       AND c.disposition = 'ANSWERED'
       AND COALESCE(c.billsec, 0) >= :minBillsec
-      AND c.dstchannel LIKE 'PJSIP/%'
+      AND (
+        c.channel LIKE 'PJSIP/%'
+        OR c.dstchannel LIKE 'PJSIP/%'
+      )
   `;
 
   const replacements = { minBillsec: MIN_AGENT_BILLSEC };
@@ -83,11 +87,24 @@ async function buildAllAgentsNameMap(User) {
   return map;
 }
 
-function resolveAgentExtensionFromCdr(row) {
-  return (
-    extractExtensionFromChannel(row.dstchannel) ||
-    normalizeExtensionCandidate(row.dst)
-  );
+/**
+ * Inbound: agent on dstchannel (PJSIP/1007-…).
+ * Outbound: agent on channel (PJSIP/1007-…), dstchannel is trunk (PJSIP/eGA-…).
+ */
+function resolveAgentExtensionFromCdr(row, agentsMap) {
+  const candidates = [
+    extractExtensionFromChannel(row.dstchannel),
+    extractExtensionFromChannel(row.channel),
+  ].filter(Boolean);
+
+  for (const ext of candidates) {
+    if (agentsMap[ext]) return ext;
+  }
+
+  const dstExt = normalizeExtensionCandidate(row.dst);
+  if (dstExt && agentsMap[dstExt]) return dstExt;
+
+  return candidates[0] || null;
 }
 
 function filterAndEnrichAgentRecordings(rows, agentsMap) {
@@ -98,13 +115,13 @@ function filterAndEnrichAgentRecordings(rows, agentsMap) {
       if (!row.filename) return false;
       if (row.lastapp && IVR_LAST_APPS.has(row.lastapp)) return false;
 
-      const ext = resolveAgentExtensionFromCdr(row);
+      const ext = resolveAgentExtensionFromCdr(row, agentsMap);
       if (!ext || !agentsMap[ext]) return false;
 
       return true;
     })
     .map((row) => {
-      const ext = resolveAgentExtensionFromCdr(row);
+      const ext = resolveAgentExtensionFromCdr(row, agentsMap);
       return {
         id: row.id,
         cdrstarttime: row.cdrstarttime,
