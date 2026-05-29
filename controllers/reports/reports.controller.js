@@ -3,32 +3,33 @@ const fs = require("fs");
 const sequelize = require("../../config/mysql_connection");
 const { Op } = require("sequelize");
 const {
-  buildHolidaySet,
-  filterOffHoursRecords,
-  buildSummary,
-} = require("../../utils/offHoursHelper");
-const {
   buildPlayablePath,
   resolveVoiceNoteFilePath,
 } = require("../../utils/voiceNoteAudio");
-const {
-  enrichCdrRecord,
-  dedupeCdrLegs,
-  enrichVoiceNoteRecord,
-  enrichMissedCallRecord,
-  syncMissedCallCallbacksInRange,
-  buildEmergencyLookup,
-  applySessionRouting,
-  fetchCdrRoutingHints,
-  buildCdrRoutingIndex,
-} = require("../../utils/offHoursReportHelper");
-const { dedupeLostCalls } = require("../../utils/missedCallHelper");
-const { getCdrLinkedidSelect } = require("../../utils/cdrSchemaHelper");
 const {
   buildSlaMetricsFromRow,
   SLA_AGGREGATE_SELECT,
 } = require("../../utils/slaMetricsHelper");
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
+
+let offHoursReportController = {};
+let slaReportController = {};
+try {
+  offHoursReportController = require("./offHoursReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] offHoursReport.controller not loaded:",
+    err.message
+  );
+}
+try {
+  slaReportController = require("./slaReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] slaReport.controller not loaded:",
+    err.message
+  );
+}
 
 let VoiceNote;
 let CDR;
@@ -299,50 +300,6 @@ exports.getVoiceReport = (req, res) => {
       console.error("Error fetching voice notes:", error);
       res.status(500).json({ error: error.message });
     });
-};
-
-exports.getOffHoursReport = async (req, res) => {
-  const { startDate, endDate } = req.params;
-
-  if (!startDate || !endDate) {
-    return res
-      .status(400)
-      .json({ error: "Start date and end date are required" });
-  }
-
-  try {
-    if (!CDR) {
-      throw new Error("CDR model is not available");
-    }
-
-    const rows = await CDR.findAll({
-      where: {
-        cdrstarttime: {
-          [Op.between]: [
-            `${startDate} 00:00:00`,
-            `${endDate} 23:59:59`,
-          ],
-        },
-      },
-      raw: true,
-      order: [["cdrstarttime", "DESC"]],
-    });
-
-    const holidaySet = await buildHolidaySet(Holiday, startDate, endDate);
-    const offHoursRecords = filterOffHoursRecords(rows, holidaySet);
-    const summary = buildSummary(offHoursRecords);
-
-    return res.status(200).json({
-      startDate,
-      endDate,
-      totalRecords: offHoursRecords.length,
-      summary,
-      records: offHoursRecords,
-    });
-  } catch (error) {
-    console.error("Error fetching off-hours report:", error);
-    return res.status(500).json({ error: error.message });
-  }
 };
 
 exports.getCDRReport = (req, res) => {
@@ -702,153 +659,16 @@ exports.getTicketAssignmentsReport = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
-// Notifications Report
-exports.getNotificationsReport = async (req, res) => {
-  const { startDate, endDate } = req.params;
-=======
-exports.getOffHoursReport = async (req, res) => {
-  const { startDate, endDate } = req.params;
-  const source = req.query.source || "voice-notes";
->>>>>>> 84bab8bd42ddc9cb18441685214946dfbddb2521
-
-  if (!startDate || !endDate) {
-    return res
-      .status(400)
-      .json({ error: "Start date and end date are required" });
-  }
-
-  try {
-<<<<<<< HEAD
-    // Use raw SQL query to get ALL notifications with related data
-=======
-    let holidayRows = [];
-    if (Holiday) {
-      holidayRows = await Holiday.findAll({
-        attributes: ["holiday_date", "name"],
-      });
-    } else {
-      holidayRows = await sequelize.query(
-        `SELECT holiday_date, name FROM holidays`,
-        { type: sequelize.QueryTypes.SELECT }
-      );
-    }
-    const holidayDates = buildHolidaySet(holidayRows);
-
-    let emergencyRows = [];
-    try {
-      emergencyRows = await sequelize.query(
-        `SELECT id, phone_number, priority FROM emergency_numbers ORDER BY priority ASC`,
-        { type: sequelize.QueryTypes.SELECT }
-      );
-    } catch (e) {
-      console.warn("emergency_numbers lookup skipped:", e.message);
-    }
-    const { byPhone: emergencyByPhone } = buildEmergencyLookup(emergencyRows);
-
-    let records = [];
-    let timestampField = "created_at";
-
-    if (source === "cdr") {
-      timestampField = "cdrstarttime";
-      const linkedidCol = await getCdrLinkedidSelect(sequelize);
-      records = await sequelize.query(
-        `SELECT id, clid, src, dst, did, dcontext, channel, dstchannel, disposition,
-                duration, billsec, ${linkedidCol}uniqueid, lastapp, lastdata, userfield,
-                cdrstarttime
-         FROM cdr
-         WHERE cdrstarttime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
-         ORDER BY cdrstarttime DESC`,
-        {
-          replacements: { startDate, endDate },
-          type: sequelize.QueryTypes.SELECT,
-        }
-      );
-    } else if (source === "missed-calls") {
-      timestampField = "time";
-      await syncMissedCallCallbacksInRange(sequelize, startDate, endDate);
-      records = await sequelize.query(
-        `SELECT mc.id, mc.caller, mc.time, mc.status, mc.agentId, mc.linkedid,
-                mc.called_back_by, mc.called_back_at, mc.billsec,
-                u.full_name AS callback_agent_name
-         FROM MissedCalls mc
-         LEFT JOIN Users u ON u.extension = mc.called_back_by
-         WHERE mc.time BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
-           AND (mc.archived = 0 OR mc.archived IS NULL)
-         ORDER BY mc.time DESC`,
-        {
-          replacements: { startDate, endDate },
-          type: sequelize.QueryTypes.SELECT,
-        }
-      );
-    } else {
-      records = await sequelize.query(
-        `SELECT id, recording_path, clid, assigned_extension, assigned_agent_id, is_played,
-                duration_seconds, transcription, created_at
-         FROM Voice_Notes
-         WHERE created_at BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
-         ORDER BY created_at DESC`,
-        {
-          replacements: { startDate, endDate },
-          type: sequelize.QueryTypes.SELECT,
-        }
-      );
-      records = records.map((record) => ({
-        ...record,
-        playable_path: buildPlayablePath(record.recording_path),
-      }));
-    }
-
-    let offHoursRecords = filterOffHoursRecords(
-      records,
-      timestampField,
-      holidayDates
-    );
-
-    if (source === "cdr") {
-      offHoursRecords = applySessionRouting(offHoursRecords, emergencyByPhone);
-      offHoursRecords = dedupeCdrLegs(
-        offHoursRecords.map((r) => enrichCdrRecord(r, emergencyByPhone))
-      );
-    } else if (source === "missed-calls") {
-      offHoursRecords = dedupeLostCalls(
-        offHoursRecords.map((r) => enrichMissedCallRecord(r)),
-        "time"
-      );
-    } else {
-      const cdrHints = await fetchCdrRoutingHints(sequelize, startDate, endDate);
-      const filteredHints = filterOffHoursRecords(
-        cdrHints,
-        "cdrstarttime",
-        holidayDates
-      );
-      const hintsWithRouting = applySessionRouting(
-        filteredHints,
-        emergencyByPhone
-      );
-      const enrichedHints = dedupeCdrLegs(
-        hintsWithRouting.map((r) => enrichCdrRecord(r, emergencyByPhone))
-      );
-      const cdrIndex = buildCdrRoutingIndex(enrichedHints);
-      offHoursRecords = offHoursRecords.map((r) =>
-        enrichVoiceNoteRecord(r, emergencyByPhone, cdrIndex)
-      );
-    }
-
-    const summary = buildSummary(offHoursRecords);
-
-    res.json({
-      summary,
-      records: offHoursRecords,
-      source,
-      dateRange: { startDate, endDate },
-      emergency_numbers: emergencyRows,
+if (typeof offHoursReportController.getOffHoursReport === "function") {
+  exports.getOffHoursReport = offHoursReportController.getOffHoursReport;
+} else {
+  exports.getOffHoursReport = async (req, res) => {
+    res.status(503).json({
+      error:
+        "Off-hours report is not available. Deploy offHoursReport.controller.js and utils/offHoursReportHelper.js.",
     });
-  } catch (error) {
-    console.error("Error fetching off-hours report:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
+  };
+}
 
 exports.getNotificationsReport = async (req, res) => {
   const { startDate, endDate } = req.params;
@@ -860,7 +680,7 @@ exports.getNotificationsReport = async (req, res) => {
   }
 
   try {
->>>>>>> 84bab8bd42ddc9cb18441685214946dfbddb2521
+    // Use raw SQL query to get ALL notifications with related data
     let query = `
       SELECT 
         n.id,
@@ -1053,14 +873,12 @@ exports.getEscalationReport = async (req, res) => {
     res.json(formattedEscalations); 
   } catch (error) {
     console.error("Error fetching escalation report:", error);
-<<<<<<< HEAD
-=======
     res.status(500).json({ error: error.message });
   }
 };
 
-/** Call-center SLA report for a date range (summary + daily breakdown) */
-exports.getSlaReport = async (req, res) => {
+/** Call-center SLA report (inline fallback if slaReport.controller.js missing on server) */
+async function getSlaReportHandler(req, res) {
   const { startDate, endDate } = req.params;
 
   if (!startDate || !endDate) {
@@ -1114,10 +932,10 @@ exports.getSlaReport = async (req, res) => {
     console.error("Error fetching SLA report:", error);
     res.status(500).json({ error: error.message });
   }
-};
+}
 
-/** Ticket SLA report for tickets created in a date range */
-exports.getTicketSlaReport = async (req, res) => {
+/** Ticket SLA report (inline fallback) */
+async function getTicketSlaReportHandler(req, res) {
   const { startDate, endDate } = req.params;
   const statusFilter = (req.query.status || "all").toLowerCase();
 
@@ -1213,7 +1031,11 @@ exports.getTicketSlaReport = async (req, res) => {
     res.json({ summary, tickets: filtered });
   } catch (error) {
     console.error("Error fetching ticket SLA report:", error);
->>>>>>> 84bab8bd42ddc9cb18441685214946dfbddb2521
     res.status(500).json({ error: error.message });
   }
-};
+}
+
+exports.getSlaReport =
+  slaReportController.getSlaReport || getSlaReportHandler;
+exports.getTicketSlaReport =
+  slaReportController.getTicketSlaReport || getTicketSlaReportHandler;
