@@ -123,34 +123,45 @@ const getCallSummary = async (req, res) => {
       getCountsForRange(yearStart, yearEnd),
     ]);
 
-    const [lostToday, droppedToday, lostMonth, lostYear] = await Promise.all([
-      countTodayMissedCalls(sequelize),
-      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
-      countMissedCallsInRange(sequelize, monthStart, monthEnd),
-      countMissedCallsInRange(sequelize, yearStart, yearEnd),
-    ]);
+    const [lostToday, droppedToday, lostMonth, droppedMonth, lostYear, droppedYear] =
+      await Promise.all([
+        countTodayMissedCalls(sequelize),
+        countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+        countMissedCallsInRange(sequelize, monthStart, monthEnd),
+        countQueueDroppedInRange(sequelize, monthStart, monthEnd),
+        countMissedCallsInRange(sequelize, yearStart, yearEnd),
+        countQueueDroppedInRange(sequelize, yearStart, yearEnd),
+      ]);
+
+    /** Total must equal answered + ivr + lost + dropped (same sources as breakdown). */
+    const dayAnswered = currentDay.answered;
+    const dayIvr = currentDay.ivr;
+    const monthAnswered = currentMonth.answered;
+    const monthIvr = currentMonth.ivr;
+    const yearAnswered = currentYear.answered;
+    const yearIvr = currentYear.ivr;
 
     const response = {
       currentDay: {
-        totalCalls: currentDay.totalCalls,
-        answered: currentDay.answered,
-        ivr: currentDay.ivr,
+        answered: dayAnswered,
+        ivr: dayIvr,
         dropped: droppedToday,
         lost: lostToday,
+        totalCalls: dayAnswered + dayIvr + lostToday + droppedToday,
       },
       currentMonth: {
-        totalCalls: currentMonth.totalCalls,
-        answered: currentMonth.answered,
-        ivr: currentMonth.ivr,
-        dropped: currentMonth.dropped,
+        answered: monthAnswered,
+        ivr: monthIvr,
+        dropped: droppedMonth,
         lost: lostMonth,
+        totalCalls: monthAnswered + monthIvr + lostMonth + droppedMonth,
       },
       currentYear: {
-        totalCalls: currentYear.totalCalls,
-        answered: currentYear.answered,
-        ivr: currentYear.ivr,
-        dropped: currentYear.dropped,
+        answered: yearAnswered,
+        ivr: yearIvr,
+        dropped: droppedYear,
         lost: lostYear,
+        totalCalls: yearAnswered + yearIvr + lostYear + droppedYear,
       },
       timestamp: new Date().toISOString(),
     };
