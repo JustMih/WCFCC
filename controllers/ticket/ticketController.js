@@ -3306,6 +3306,20 @@ const getOverdueTickets = async (req, res) => {
 };
 const getAllCustomersTickets = async (req, res) => {
   try {
+    const actorId = req.user?.id || req.user?.userId;
+    if (!actorId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findByPk(actorId, {
+      attributes: ["id", "full_name", "role"],
+    });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const userId = user.id;
+
     const tickets = await Ticket.findAll({
       order: [["created_at", "DESC"]],
       include: [
