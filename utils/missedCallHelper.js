@@ -631,16 +631,12 @@ async function getTodayLostSessionsDeduped(sequelize) {
 }
 
 /**
- * Lost list for dashboard: queue lost sessions merged with MissedCalls callback data.
+ * Lost list + count: MissedCalls table for today (same as phpMyAdmin filter).
+ * ensureLostAbandons still adds new >=5 min queue abandons into MissedCalls first.
  */
-async function getTodayLostCallsList(sequelize) {
-  await ensureLostAbandonsInMissedCalls(sequelize);
-  const sessions = await getTodayLostSessionsDeduped(sequelize);
-  if (sessions.length === 0) return [];
-
-  let missedRows = [];
+async function fetchMissedCallsTodayForList(sequelize) {
   try {
-    missedRows = await sequelize.query(
+    return await sequelize.query(
       `
       SELECT
         mc.id,
@@ -656,73 +652,36 @@ async function getTodayLostCallsList(sequelize) {
       LEFT JOIN Users u ON u.extension = mc.called_back_by
       WHERE ${MISSED_CALLS_TODAY_SQL}
       ORDER BY mc.time DESC
+      LIMIT 1000
       `,
       { type: QueryTypes.SELECT }
     );
   } catch (err) {
     const msg = String(err?.message || err);
     if (!/linkedid|called_back|billsec/i.test(msg)) throw err;
-    missedRows = await fetchMissedCallsTodayRaw(sequelize);
+    return fetchMissedCallsTodayRaw(sequelize);
   }
-
-  const byLinkedId = new Map();
-  const byCallerKey = new Map();
-  for (const row of missedRows) {
-    if (row.linkedid) byLinkedId.set(String(row.linkedid), row);
-    const key = callerMatchKey(row.caller);
-    if (key && !byCallerKey.has(key)) byCallerKey.set(key, row);
-  }
-
-  const merged = sessions.map((session) => {
-    const linked =
-      session.session_id != null
-        ? byLinkedId.get(String(session.session_id))
-        : null;
-    const mc =
-      linked ||
-      byCallerKey.get(callerMatchKey(session.caller)) ||
-      null;
-    const callTime = session.call_time;
-
-    return {
-      id: mc?.id ?? null,
-      caller: session.caller,
-      call_time: callTime,
-      lost_time: callTime,
-      wait_seconds: session.wait_seconds ?? null,
-      status: mc?.status || "pending",
-      called_back_at: mc?.called_back_at || null,
-      called_back_by: mc?.called_back_by || null,
-      callback_agent_extension: mc?.called_back_by || null,
-      callback_agent_name: mc?.callback_agent_name || null,
-      callback_time: mc?.called_back_at || null,
-      callback_duration: mc?.billsec ?? null,
-      billsec: mc?.billsec ?? null,
-      session_id: session.session_id,
-    };
-  });
-
-  return dedupeLostCalls(merged, "call_time");
 }
 
-/**
- * Lost count = queue abandons today with wait >= 5 min (same rule as dropped exclusion).
- */
+async function getTodayLostCallsList(sequelize) {
+  await ensureLostAbandonsInMissedCalls(sequelize);
+  const rows = await fetchMissedCallsTodayForList(sequelize);
+  return dedupeMissedCallsLatestPerCaller(rows).map(mapMissedCallRowToLostDto);
+}
+
 async function countTodayMissedCalls(sequelize) {
   await ensureLostAbandonsInMissedCalls(sequelize);
-  const sessions = await getTodayLostSessionsDeduped(sequelize);
-  return sessions.length;
+  const rows = await fetchMissedCallsTodayRaw(sequelize);
+  return dedupeMissedCallsLatestPerCaller(rows).length;
 }
 
 async function countMissedCallsInRange(sequelize, startDateTime, endDateTime) {
-  const sessions = await fetchQueueAbandonSessionsRaw(
+  const list = await fetchMissedCallsInRange(
     sequelize,
     startDateTime,
-    endDateTime,
-    true,
-    { queueOnly: false }
+    endDateTime
   );
-  return dedupeIncomingLostCdrs(sessions).length;
+  return list.length;
 }
 
 module.exports = {
