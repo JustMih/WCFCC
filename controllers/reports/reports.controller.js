@@ -670,6 +670,7 @@ if (typeof offHoursReportController.getOffHoursReport === "function") {
   };
 }
 
+// Notifications Report
 exports.getNotificationsReport = async (req, res) => {
   const { startDate, endDate } = req.params;
 

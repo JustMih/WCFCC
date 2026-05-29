@@ -128,6 +128,39 @@ async function logHandoverAudit(action, metadata) {
   }
 }
 
+async function listActiveHandoverParticipants() {
+  const rows = await UserHandover.findAll({
+    where: { status: "active" },
+    attributes: ["id", "from_user_id", "to_user_id"],
+  });
+
+  const blockedUserIds = new Set();
+  const participants = [];
+
+  for (const row of rows) {
+    if (row.from_user_id) {
+      const userId = String(row.from_user_id);
+      blockedUserIds.add(userId);
+      participants.push({
+        userId: row.from_user_id,
+        role: "initiator",
+        handoverId: row.id,
+      });
+    }
+    if (row.to_user_id) {
+      const userId = String(row.to_user_id);
+      blockedUserIds.add(userId);
+      participants.push({
+        userId: row.to_user_id,
+        role: "delegate",
+        handoverId: row.id,
+      });
+    }
+  }
+
+  return { blockedUserIds, participants };
+}
+
 async function validateHandoverStart({ fromUserId, toUserId, returnAt }) {
   if (!fromUserId || !toUserId || !returnAt) {
     throw new Error("from_user_id, to_user_id and return_at are required");
@@ -148,18 +181,42 @@ async function validateHandoverStart({ fromUserId, toUserId, returnAt }) {
     throw new Error("from_user_id or to_user_id does not exist");
   }
 
-  const [existingFromActive, circular] = await Promise.all([
+  const [
+    existingFromActive,
+    circular,
+    fromUserAsDelegate,
+    toUserAsInitiator,
+    toUserAsDelegate,
+  ] = await Promise.all([
     UserHandover.findOne({ where: { from_user_id: fromUserId, status: "active" } }),
     UserHandover.findOne({
       where: { from_user_id: toUserId, to_user_id: fromUserId, status: "active" },
     }),
+    UserHandover.findOne({ where: { to_user_id: fromUserId, status: "active" } }),
+    UserHandover.findOne({ where: { from_user_id: toUserId, status: "active" } }),
+    UserHandover.findOne({ where: { to_user_id: toUserId, status: "active" } }),
   ]);
 
   if (existingFromActive) {
     throw new Error("Source user already has an active handover");
   }
+  if (fromUserAsDelegate) {
+    throw new Error(
+      "You are currently a handover delegate and cannot start a new handover"
+    );
+  }
   if (circular) {
     throw new Error("Circular handover detected. Revoke existing reverse handover first.");
+  }
+  if (toUserAsInitiator) {
+    throw new Error(
+      `${toUser.full_name || "Selected user"} already has an active handover`
+    );
+  }
+  if (toUserAsDelegate) {
+    throw new Error(
+      `${toUser.full_name || "Selected user"} is already acting as a handover delegate`
+    );
   }
 
   return { fromUser, toUser, parsedReturnDate };
@@ -566,6 +623,7 @@ module.exports = {
   startHandover,
   closeHandover,
   expireDueHandovers,
+  listActiveHandoverParticipants,
   listActiveHandoversForUser,
   listActiveHandoversByActor,
   addEffectiveRole,
