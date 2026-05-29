@@ -179,6 +179,12 @@ exports.testIVRTable = async (req, res) => {
  
 exports.getIVRInteractions = async (req, res) => {
   try {
+    const { startDate, endDate } = req.params;
+    const dateFilter =
+      startDate && endDate
+        ? `WHERE m.createdAt BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`
+        : "";
+
     const query = `
       SELECT
         m.id,
@@ -200,11 +206,13 @@ exports.getIVRInteractions = async (req, res) => {
         ON a.id = m.action_id
       LEFT JOIN IVRVoices v
         ON v.id = m.ivr_voice_id
+      ${dateFilter}
       ORDER BY m.createdAt DESC
-      LIMIT 1000
+      LIMIT 5000
     `;
 
     const rows = await sequelize.query(query, {
+      replacements: startDate && endDate ? { startDate, endDate } : {},
       type: sequelize.QueryTypes.SELECT,
     });
 

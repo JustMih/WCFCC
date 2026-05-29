@@ -4,10 +4,21 @@ const { IVRDTMFLog } = require("../../models");
  
 exports.getDTMFStats = async (req, res) => {
   try {
-    console.log("👉 Fetching full DTMF logs");
+    const { startDate, endDate } = req.query;
+    const where = {};
+    if (startDate && endDate) {
+      const { Op } = require("sequelize");
+      where.timestamp = {
+        [Op.between]: [
+          `${startDate} 00:00:00`,
+          `${endDate} 23:59:59`,
+        ],
+      };
+    }
 
     const logs = await IVRDTMFLog.findAll({
       attributes: ['digit_pressed', 'caller_id', 'language', 'timestamp'],
+      where,
       order: [['timestamp', 'DESC']],
       raw: true
     });
