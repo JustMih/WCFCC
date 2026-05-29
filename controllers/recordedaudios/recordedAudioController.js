@@ -1,7 +1,11 @@
 const path = require("path");
 const fs = require("fs");
-const { sequelize } = require("../../models");
-const { buildAgentRecordedCallsQuery } = require("../../utils/recordedAudioHelper");
+const { sequelize, User } = require("../../models");
+const {
+  buildAgentRecordedCallsQuery,
+  buildAllAgentsNameMap,
+  filterAndEnrichAgentRecordings,
+} = require("../../utils/recordedAudioHelper");
 
 const getAllRecordedAudio = async (req, res) => {
   try {
@@ -19,15 +23,21 @@ const getAllRecordedAudio = async (req, res) => {
       type: sequelize.QueryTypes.SELECT,
     });
 
-    const data = rows.map((r) => ({
+    const agentsMap = await buildAllAgentsNameMap(User);
+    const enriched = filterAndEnrichAgentRecordings(rows, agentsMap);
+
+    const data = enriched.map((r) => ({
       ...r,
       url: `/recorded-audio/${encodeURIComponent(r.filename)}`,
     }));
 
     res.json(data);
   } catch (err) {
-    console.error("getAllRecordedAudio:", err);
-    res.status(500).json({ error: "Failed to fetch agent call recordings" });
+    console.error("getAllRecordedAudio:", err.message, err.stack);
+    res.status(500).json({
+      error: "Failed to fetch agent call recordings",
+      detail: process.env.NODE_ENV === "production" ? undefined : err.message,
+    });
   }
 };
 
