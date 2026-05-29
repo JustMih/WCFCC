@@ -1,89 +1,95 @@
 const express = require("express");
 const router = express.Router();
-const reportsController = require("../controllers/reports/reports.controller");
-const offHoursReportController = require("../controllers/reports/offHoursReport.controller");
-const slaReportController = require("../controllers/reports/slaReport.controller");
 
-function bindGet(path, handler, label) {
-  if (typeof handler !== "function") {
-    throw new Error(
-      `Reports route "${path}" is missing handler "${label}". ` +
-        "Deploy the latest WCFCC controllers/reports/*.controller.js files."
+const reportsController = require("../controllers/reports/reports.controller");
+
+let offHoursReportController = {};
+let slaReportController = {};
+try {
+  offHoursReportController = require("../controllers/reports/offHoursReport.controller");
+} catch (err) {
+  console.warn("[reports.routes] offHoursReport.controller:", err.message);
+}
+try {
+  slaReportController = require("../controllers/reports/slaReport.controller");
+} catch (err) {
+  console.warn("[reports.routes] slaReport.controller:", err.message);
+}
+
+/** Never pass undefined to router.get — works with legacy routes that use reportsController.getSlaReport */
+function bindGet(path, ...handlers) {
+  const handler = handlers.find((h) => typeof h === "function");
+  if (!handler) {
+    console.warn(
+      `[reports.routes] No handler for ${path}; registering 503 stub`
     );
+    router.get(path, (req, res) => {
+      res.status(503).json({
+        error: `Report route ${path} is not configured on this server.`,
+      });
+    });
+    return;
   }
   router.get(path, handler);
 }
 
-bindGet("/voice-notes", reportsController.getVoiceNotes, "getVoiceNotes");
-bindGet("/cdr-reports", reportsController.getCDRReports, "getCDRReports");
+bindGet("/voice-notes", reportsController.getVoiceNotes);
+bindGet("/cdr-reports", reportsController.getCDRReports);
 bindGet(
   "/ivr-interactions/:startDate/:endDate",
-  reportsController.getIVRInteractions,
-  "getIVRInteractions"
+  reportsController.getIVRInteractions
 );
-bindGet("/ivr-interactions", reportsController.getIVRInteractions, "getIVRInteractions");
-bindGet(
-  "/ivr-interactions-test",
-  reportsController.testIVRTable,
-  "testIVRTable"
-);
+bindGet("/ivr-interactions", reportsController.getIVRInteractions);
+bindGet("/ivr-interactions-test", reportsController.testIVRTable);
 bindGet(
   "/voice-note-report/:startDate/:endDate",
-  reportsController.getVoiceReport,
-  "getVoiceReport"
+  reportsController.getVoiceReport
 );
 
 bindGet(
   "/off-hours-report/:startDate/:endDate",
   offHoursReportController.getOffHoursReport,
-  "getOffHoursReport"
+  reportsController.getOffHoursReport
 );
 
 bindGet(
   "/cdr-report/:startDate/:endDate/:disposition",
-  reportsController.getCDRReport,
-  "getCDRReport"
+  reportsController.getCDRReport
 );
 bindGet(
   "/ticket-report/:startDate/:endDate/:status",
-  reportsController.getTicketReport,
-  "getTicketReport"
+  reportsController.getTicketReport
 );
 bindGet(
   "/agent-performance/:startDate/:endDate/:agentId",
-  reportsController.getAgentPerformanceReport,
-  "getAgentPerformanceReport"
+  reportsController.getAgentPerformanceReport
 );
 bindGet(
   "/call-summary/:startDate/:endDate",
-  reportsController.getCallSummaryReport,
-  "getCallSummaryReport"
+  reportsController.getCallSummaryReport
 );
 bindGet(
   "/ticket-assignments/:startDate/:endDate",
-  reportsController.getTicketAssignmentsReport,
-  "getTicketAssignmentsReport"
+  reportsController.getTicketAssignmentsReport
 );
 bindGet(
   "/notification-report/:startDate/:endDate",
-  reportsController.getNotificationsReport,
-  "getNotificationsReport"
+  reportsController.getNotificationsReport
 );
 bindGet(
   "/escalation-report/:startDate/:endDate",
-  reportsController.getEscalationReport,
-  "getEscalationReport"
+  reportsController.getEscalationReport
 );
 
 bindGet(
   "/sla-report/:startDate/:endDate",
   slaReportController.getSlaReport,
-  "getSlaReport"
+  reportsController.getSlaReport
 );
 bindGet(
   "/ticket-sla-report/:startDate/:endDate",
   slaReportController.getTicketSlaReport,
-  "getTicketSlaReport"
+  reportsController.getTicketSlaReport
 );
 
 module.exports = router;
