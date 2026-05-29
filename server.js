@@ -66,9 +66,14 @@ const alertsRoutes = require("./routes/alertsRoutes");
 const { getQueueCallStats } = require("./controllers/queueStatsController");
 
 
-// const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+const {
+  getRecordedStaticDirectory,
+} = require("./utils/recordedCallAudio");
+
 const baseAudioPath =
-  process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+  process.env.audio_recorded_path || "/home/wcf/WCFCC";
+const recordedCallsDir = getRecordedStaticDirectory();
+console.log("[recordings] serving wav files from:", recordedCallsDir);
 
 require("./cron/escalationJob");
 require("./cron/dailyLogoutJob");
@@ -149,7 +154,7 @@ app.use(
 );
 app.use(
   "/recordings",
-  express.static(path.join(baseAudioPath, "recorded"), {
+  express.static(recordedCallsDir, {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".wav")) {
         res.set("Content-Type", "audio/wav");

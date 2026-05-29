@@ -6,7 +6,10 @@ const {
   buildAllAgentsNameMap,
   filterAndEnrichAgentRecordings,
 } = require("../../utils/recordedAudioHelper");
-const { resolveRecordedCallFilePath } = require("../../utils/recordedCallAudio");
+const {
+  resolveRecordedCallFilePath,
+  DEFAULT_RECORDED_DIR,
+} = require("../../utils/recordedCallAudio");
 
 function buildRecordingUrls(filename) {
   const encoded = encodeURIComponent(filename);
@@ -61,7 +64,7 @@ const getRecordedAudio = async (req, res) => {
     return res.status(404).json({
       error: "File not found",
       filename,
-      hint: "Check audio_recorded_path/recorded or Asterisk monitor folder on the server.",
+      hint: `Expected under ${DEFAULT_RECORDED_DIR}`,
     });
   }
 
