@@ -296,7 +296,13 @@ async function fetchQueueAbandonSessionsRaw(
         MAX(COALESCE(c.billsec, 0)) AS max_billsec
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :startDateTime AND :endDateTime
-        AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
+        AND (
+          c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
+          OR (
+            c.disposition = 'ANSWERED'
+            AND c.lastapp IN ('Queue', 'AppQueue')
+          )
+        )
         ${lastappFilter}
         AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
       GROUP BY ${sessionIdExpr}
@@ -684,6 +690,79 @@ async function countMissedCallsInRange(sequelize, startDateTime, endDateTime) {
   return list.length;
 }
 
+/**
+ * IVR = call_summary ANSWERED with no agent, minus queue abandons >= 5 min (those are lost, not IVR).
+ */
+async function countIvrAnsweredExcludingQueueLost(
+  sequelize,
+  startDateTime,
+  endDateTime
+) {
+  const lostSessions = await fetchQueueAbandonSessionsRaw(
+    sequelize,
+    startDateTime,
+    endDateTime,
+    true,
+    { queueOnly: false }
+  );
+  const lostCallerKeys = new Set();
+  for (const s of lostSessions) {
+    const key = callerMatchKey(normalizeCaller(s.caller));
+    if (key) lostCallerKeys.add(key);
+  }
+
+  let rows = [];
+  try {
+    rows = await sequelize.query(
+      `
+      SELECT
+        COALESCE(
+          NULLIF(TRIM(caller), ''),
+          NULLIF(TRIM(clid), ''),
+          NULLIF(TRIM(src), ''),
+          NULLIF(TRIM(phone), '')
+        ) AS caller_raw
+      FROM call_summary
+      WHERE call_start BETWEEN :startDateTime AND :endDateTime
+        AND status = 'ANSWERED'
+        AND (agent IS NULL OR TRIM(agent) = '')
+      `,
+      {
+        replacements: { startDateTime, endDateTime },
+        type: QueryTypes.SELECT,
+      }
+    );
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (!/caller|clid|phone|Unknown column/i.test(msg)) throw err;
+    const [countRes] = await sequelize.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM call_summary
+      WHERE call_start BETWEEN :startDateTime AND :endDateTime
+        AND status = 'ANSWERED'
+        AND (agent IS NULL OR TRIM(agent) = '')
+      `,
+      {
+        replacements: { startDateTime, endDateTime },
+        type: QueryTypes.SELECT,
+      }
+    );
+    return Math.max(
+      0,
+      parseInt(countRes?.total || 0, 10) - lostCallerKeys.size
+    );
+  }
+
+  let count = 0;
+  for (const row of rows) {
+    const key = callerMatchKey(normalizeCaller(row.caller_raw));
+    if (!key || lostCallerKeys.has(key)) continue;
+    count++;
+  }
+  return count;
+}
+
 module.exports = {
   DEDUP_WINDOW_SECONDS,
   LOST_MIN_DURATION_SECONDS,
@@ -707,5 +786,6 @@ module.exports = {
   getTodayLostSessionsDeduped,
   countTodayMissedCalls,
   countMissedCallsInRange,
+  countIvrAnsweredExcludingQueueLost,
   getTodayLostCallsList,
 };
