@@ -4,6 +4,7 @@ const {
   countTodayMissedCalls,
   countMissedCallsInRange,
   countQueueDroppedInRange,
+  ensureLostAbandonsInMissedCalls,
 } = require("../../utils/missedCallHelper");
 
 /**
@@ -122,6 +123,8 @@ const getCallSummary = async (req, res) => {
       getCountsForRange(monthStart, monthEnd),
       getCountsForRange(yearStart, yearEnd),
     ]);
+
+    await ensureLostAbandonsInMissedCalls(sequelize);
 
     const [lostToday, droppedToday, lostMonth, droppedMonth, lostYear, droppedYear] =
       await Promise.all([

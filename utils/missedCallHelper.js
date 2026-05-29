@@ -50,11 +50,10 @@ function effectiveQueueWaitSeconds(sessionRow, queueWaitByCallId) {
  * Max abandon wait per callid/linkedid from queue_log (authoritative for 5-min queue waits).
  */
 async function fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime) {
-  const { QueryTypes } = require("sequelize");
   const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
   const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
 
-  const [logRows, linkRows] = await Promise.all([
+  const [abandonRows, spanRows, linkRows] = await Promise.all([
     sequelize.query(
       `
       SELECT callid, event, data1, data2, data3
@@ -62,6 +61,35 @@ async function fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime) {
       WHERE time BETWEEN :startDateTime AND :endDateTime
         AND callid IS NOT NULL AND callid != ''
         AND UPPER(event) IN ('ABANDON', 'EXITWITHTIMEOUT')
+      `,
+      {
+        replacements: { startDateTime, endDateTime },
+        type: QueryTypes.SELECT,
+      }
+    ),
+    sequelize.query(
+      `
+      SELECT
+        callid,
+        GREATEST(
+          0,
+          TIMESTAMPDIFF(
+            SECOND,
+            MIN(CASE
+              WHEN UPPER(event) IN ('ENTERQUEUE', 'QUEUEENTRY') THEN time
+              ELSE NULL
+            END),
+            MAX(CASE
+              WHEN UPPER(event) IN ('ABANDON', 'EXITWITHTIMEOUT', 'COMPLETECALLER') THEN time
+              ELSE NULL
+            END)
+          )
+        ) AS wait_from_events
+      FROM queue_log
+      WHERE time BETWEEN :startDateTime AND :endDateTime
+        AND callid IS NOT NULL AND callid != ''
+      GROUP BY callid
+      HAVING wait_from_events > 0
       `,
       {
         replacements: { startDateTime, endDateTime },
@@ -92,9 +120,13 @@ async function fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime) {
     if (seconds > prev) waitByCallId.set(key, seconds);
   };
 
-  for (const row of logRows) {
+  for (const row of abandonRows) {
     const wait = parseQueueLogWaitSeconds(row);
     if (wait != null) setWait(row.callid, wait);
+  }
+
+  for (const row of spanRows) {
+    setWait(row.callid, Number(row.wait_from_events));
   }
 
   const uniqueidToSession = new Map();
@@ -282,16 +314,18 @@ async function fetchQueueAbandonSessionsRaw(
   const queueWaitByCallId = queueLogMeta.waitByCallId;
   const uniqueidToSession = queueLogMeta.uniqueidToSession;
 
-  const classified = rows
-    .map((row) => {
-      const wait_seconds = effectiveQueueWaitSeconds(row, queueWaitByCallId);
-      return { ...row, wait_seconds };
-    })
-    .filter((row) =>
-      lostOnly
-        ? isLostWaitSeconds(row.wait_seconds)
-        : isDroppedWaitSeconds(row.wait_seconds)
-    );
+  const withWait = rows.map((row) => {
+    const wait_seconds = effectiveQueueWaitSeconds(row, queueWaitByCallId);
+    return { ...row, wait_seconds };
+  });
+
+  const classified = withWait.filter((row) =>
+    lostOnly === true
+      ? isLostWaitSeconds(row.wait_seconds)
+      : lostOnly === false
+        ? isDroppedWaitSeconds(row.wait_seconds)
+        : true
+  );
 
   if (lostOnly) {
     const seenSessions = new Set(
@@ -372,7 +406,7 @@ async function fetchQueueAbandonSessionsRaw(
   return dedupeIncomingLostCdrs(classified);
 }
 
-/** Raw CDR rows: today's queue lost (wait >= 5 min). */
+/** Raw CDR + queue_log rows: today's lost (wait >= 5 min). */
 async function fetchTodayQueueLostSessionsRaw(sequelize) {
   const now = new Date();
   const y = now.getFullYear();
@@ -380,7 +414,9 @@ async function fetchTodayQueueLostSessionsRaw(sequelize) {
   const d = String(now.getDate()).padStart(2, "0");
   const start = `${y}-${m}-${d} 00:00:00`;
   const end = `${y}-${m}-${d} 23:59:59`;
-  return fetchQueueAbandonSessionsRaw(sequelize, start, end, true);
+  return fetchQueueAbandonSessionsRaw(sequelize, start, end, true, {
+    queueOnly: false,
+  });
 }
 
 async function countQueueLostInRange(sequelize, startDateTime, endDateTime) {
@@ -461,35 +497,23 @@ async function fetchMissedCallsTodayRaw(sequelize) {
 }
 
 /**
- * Dropped = CDR unanswered sessions under 5 min (not lost).
- * Uses all CDR dispositions (not only lastapp Queue). Excludes sessions already >= 5 min lost.
+ * Dropped = unanswered sessions with queue wait strictly under 5 minutes.
+ * Never count a session as dropped when queue_log/CDR wait is >= 5 min (those are lost).
  */
 async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
-  const [droppedRows, lostSessions] = await Promise.all([
-    fetchQueueAbandonSessionsRaw(
-      sequelize,
-      startDateTime,
-      endDateTime,
-      false,
-      { queueOnly: false }
-    ),
-    fetchQueueAbandonSessionsRaw(
-      sequelize,
-      startDateTime,
-      endDateTime,
-      true,
-      { queueOnly: true }
-    ),
-  ]);
-
-  const lostSessionIds = new Set(
-    lostSessions.map((r) => String(r.session_id || ""))
+  const droppedRows = await fetchQueueAbandonSessionsRaw(
+    sequelize,
+    startDateTime,
+    endDateTime,
+    false,
+    { queueOnly: false }
   );
 
-  const droppedOnly = droppedRows.filter((row) => {
-    const sid = String(row.session_id || "");
-    return sid && !lostSessionIds.has(sid);
-  });
+  const droppedOnly = droppedRows.filter(
+    (row) =>
+      isDroppedWaitSeconds(row.wait_seconds) &&
+      !isLostWaitSeconds(row.wait_seconds)
+  );
 
   return dedupeIncomingLostCdrs(droppedOnly).length;
 }
@@ -594,11 +618,13 @@ async function fetchMissedCallsInRange(sequelize, startDateTime, endDateTime) {
 
 /** Lost calls today — MissedCalls table (deduped by caller for display). */
 async function getTodayLostCallsList(sequelize) {
+  await ensureLostAbandonsInMissedCalls(sequelize);
   const rows = await fetchMissedCallsTodayRaw(sequelize);
   return dedupeMissedCallsLatestPerCaller(rows).map(mapMissedCallRowToLostDto);
 }
 
 async function countTodayMissedCalls(sequelize) {
+  await ensureLostAbandonsInMissedCalls(sequelize);
   const rows = await fetchMissedCallsTodayRaw(sequelize);
   return dedupeMissedCallsLatestPerCaller(rows).length;
 }

@@ -11,6 +11,7 @@ const QueueStatus = db.QueueStatus;
 const {
   countTodayMissedCalls,
   countQueueDroppedInRange,
+  ensureLostAbandonsInMissedCalls,
   getTodayLostCallsList,
   isLostWaitSeconds,
 } = require("../../utils/missedCallHelper");
@@ -269,6 +270,8 @@ const monthlyCounts = await sequelize.query(
     const d = String(now.getDate()).padStart(2, "0");
     const dayStart = `${y}-${m}-${d} 00:00:00`;
     const dayEnd = `${y}-${m}-${d} 23:59:59`;
+
+    await ensureLostAbandonsInMissedCalls(sequelize);
 
     const [lostCount, droppedCount] = await Promise.all([
       countTodayMissedCalls(sequelize),
