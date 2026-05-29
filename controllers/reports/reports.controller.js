@@ -702,15 +702,9 @@ exports.getTicketAssignmentsReport = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
-// Notifications Report
-exports.getNotificationsReport = async (req, res) => {
-  const { startDate, endDate } = req.params;
-=======
 exports.getOffHoursReport = async (req, res) => {
   const { startDate, endDate } = req.params;
   const source = req.query.source || "voice-notes";
->>>>>>> 84bab8bd42ddc9cb18441685214946dfbddb2521
 
   if (!startDate || !endDate) {
     return res
@@ -719,9 +713,6 @@ exports.getOffHoursReport = async (req, res) => {
   }
 
   try {
-<<<<<<< HEAD
-    // Use raw SQL query to get ALL notifications with related data
-=======
     let holidayRows = [];
     if (Holiday) {
       holidayRows = await Holiday.findAll({
@@ -850,6 +841,8 @@ exports.getOffHoursReport = async (req, res) => {
   }
 };
 
+
+// Notifications Report
 exports.getNotificationsReport = async (req, res) => {
   const { startDate, endDate } = req.params;
 
@@ -860,7 +853,6 @@ exports.getNotificationsReport = async (req, res) => {
   }
 
   try {
->>>>>>> 84bab8bd42ddc9cb18441685214946dfbddb2521
     let query = `
       SELECT 
         n.id,
@@ -1053,11 +1045,10 @@ exports.getEscalationReport = async (req, res) => {
     res.json(formattedEscalations); 
   } catch (error) {
     console.error("Error fetching escalation report:", error);
-<<<<<<< HEAD
-=======
     res.status(500).json({ error: error.message });
   }
 };
+
 
 /** Call-center SLA report for a date range (summary + daily breakdown) */
 exports.getSlaReport = async (req, res) => {
@@ -1213,7 +1204,6 @@ exports.getTicketSlaReport = async (req, res) => {
     res.json({ summary, tickets: filtered });
   } catch (error) {
     console.error("Error fetching ticket SLA report:", error);
->>>>>>> 84bab8bd42ddc9cb18441685214946dfbddb2521
     res.status(500).json({ error: error.message });
   }
 };
