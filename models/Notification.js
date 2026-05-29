@@ -35,6 +35,10 @@ const Notification = sequelize.define('Notification', {
   comment: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  category: {
+    type: DataTypes.STRING(100),
+    allowNull: true
   }
 }, {
   tableName: 'Notifications',

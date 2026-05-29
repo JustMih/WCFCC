@@ -1,80 +1,94 @@
 const express = require("express");
 const router = express.Router();
+
 const reportsController = require("../controllers/reports/reports.controller");
 
-router.get("/voice-notes", reportsController.getVoiceNotes);
-router.get("/cdr-reports", reportsController.getCDRReports);
-// IVR Interactions - put parameterized route first
-router.get(
+let offHoursReportController = {};
+let slaReportController = {};
+try {
+  offHoursReportController = require("../controllers/reports/offHoursReport.controller");
+} catch (err) {
+  console.warn("[reports.routes] offHoursReport.controller:", err.message);
+}
+try {
+  slaReportController = require("../controllers/reports/slaReport.controller");
+} catch (err) {
+  console.warn("[reports.routes] slaReport.controller:", err.message);
+}
+
+/** Never pass undefined to router.get — works with legacy routes that use reportsController.getSlaReport */
+function bindGet(path, ...handlers) {
+  const handler = handlers.find((h) => typeof h === "function");
+  if (!handler) {
+    console.warn(
+      `[reports.routes] No handler for ${path}; registering 503 stub`
+    );
+    router.get(path, (req, res) => {
+      res.status(503).json({
+        error: `Report route ${path} is not configured on this server.`,
+      });
+    });
+    return;
+  }
+  router.get(path, handler);
+}
+
+bindGet("/voice-notes", reportsController.getVoiceNotes);
+bindGet("/cdr-reports", reportsController.getCDRReports);
+bindGet(
   "/ivr-interactions/:startDate/:endDate",
   reportsController.getIVRInteractions
 );
-router.get("/ivr-interactions", reportsController.getIVRInteractions);
-// Test endpoint to check table access
-router.get("/ivr-interactions-test", reportsController.testIVRTable);
-// get voice note report by date range
-router.get(
+bindGet("/ivr-interactions", reportsController.getIVRInteractions);
+bindGet("/ivr-interactions-test", reportsController.testIVRTable);
+bindGet(
   "/voice-note-report/:startDate/:endDate",
   reportsController.getVoiceReport
 );
 
-// Off-hours calls (weekend, holiday, after-work) matching Asterisk routing
-router.get(
+bindGet(
   "/off-hours-report/:startDate/:endDate",
+  offHoursReportController.getOffHoursReport,
   reportsController.getOffHoursReport
 );
 
-// get CDR report by date range and disposition
-router.get(
+bindGet(
   "/cdr-report/:startDate/:endDate/:disposition",
   reportsController.getCDRReport
 );
-
-// Ticket CRM Report
-router.get(
+bindGet(
   "/ticket-report/:startDate/:endDate/:status",
   reportsController.getTicketReport
 );
-
-// Agent Performance Report
-router.get(
+bindGet(
   "/agent-performance/:startDate/:endDate/:agentId",
   reportsController.getAgentPerformanceReport
 );
-
-// Call Summary Report
-router.get(
+bindGet(
   "/call-summary/:startDate/:endDate",
   reportsController.getCallSummaryReport
 );
-
-// Ticket Assignments Report
-router.get(
+bindGet(
   "/ticket-assignments/:startDate/:endDate",
   reportsController.getTicketAssignmentsReport
 );
-
-// Notifications Report
-router.get(
+bindGet(
   "/notification-report/:startDate/:endDate",
   reportsController.getNotificationsReport
 );
-
-// Escalation Report
-router.get(
+bindGet(
   "/escalation-report/:startDate/:endDate",
   reportsController.getEscalationReport
 );
 
-// Call Center SLA Report
-router.get(
+bindGet(
   "/sla-report/:startDate/:endDate",
+  slaReportController.getSlaReport,
   reportsController.getSlaReport
 );
-
-// Ticket SLA Report
-router.get(
+bindGet(
   "/ticket-sla-report/:startDate/:endDate",
+  slaReportController.getTicketSlaReport,
   reportsController.getTicketSlaReport
 );
 
