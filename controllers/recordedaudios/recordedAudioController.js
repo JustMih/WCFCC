@@ -39,11 +39,17 @@ const getAllRecordedAudio = async (req, res) => {
     const agentsMap = await buildAllAgentsNameMap(User);
     const enriched = filterAndEnrichAgentRecordings(rows, agentsMap);
 
-    const data = enriched.map((r) => ({
-      ...r,
-      ...buildRecordingUrls(r.filename),
-      file_found: Boolean(resolveRecordedCallFilePath(r.filename)),
-    }));
+    const data = enriched.map((r) => {
+      const diskPath =
+        r.resolved_path ||
+        resolveRecordedCallFilePath(r.filename, r.uniqueid);
+      const { resolved_path: _rp, ...safe } = r;
+      return {
+        ...safe,
+        ...buildRecordingUrls(r.filename),
+        file_found: Boolean(diskPath),
+      };
+    });
 
     res.json(data);
   } catch (err) {
@@ -57,7 +63,10 @@ const getAllRecordedAudio = async (req, res) => {
 
 const getRecordedAudio = async (req, res) => {
   const filename = path.basename(decodeURIComponent(req.params.filename));
-  const filePath = resolveRecordedCallFilePath(filename);
+  const uniqueid = req.query.uniqueid
+    ? decodeURIComponent(req.query.uniqueid)
+    : null;
+  const filePath = resolveRecordedCallFilePath(filename, uniqueid);
 
   if (!filePath) {
     console.warn("Recorded file not found:", filename);

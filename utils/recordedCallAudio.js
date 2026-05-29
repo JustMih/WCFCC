@@ -39,7 +39,73 @@ function getRecordedStaticDirectory() {
   return DEFAULT_RECORDED_DIR;
 }
 
-function tryMonitorDatedPaths(filename) {
+function normalizeRecordingRef(recordingfile, uniqueid) {
+  const raw = String(recordingfile || uniqueid || "").replace(/\\/g, "/").trim();
+  if (!raw) return { basename: null, stem: null };
+
+  if (raw.includes("/")) {
+    const basename = path.basename(raw);
+    return {
+      basename,
+      stem: basename.replace(/\.wav$/i, ""),
+      absolute: path.isAbsolute(raw) ? path.normalize(raw) : null,
+    };
+  }
+
+  const basename = raw.endsWith(".wav") || raw.endsWith(".WAV") ? raw : `${raw}.wav`;
+  return { basename, stem: basename.replace(/\.wav$/i, ""), absolute: null };
+}
+
+function findInDirectory(dir, basename, stem, uniqueid) {
+  if (!dir || !fs.existsSync(dir)) return null;
+
+  const tryNames = new Set();
+  if (basename) {
+    tryNames.add(basename);
+    tryNames.add(basename.replace(/\.wav$/i, ".WAV"));
+    tryNames.add(basename.replace(/\.wav$/i, ".gsm"));
+  }
+  if (stem) {
+    tryNames.add(`${stem}.wav`);
+    tryNames.add(`${stem}.WAV`);
+  }
+  if (uniqueid) {
+    const uid = String(uniqueid).trim();
+    tryNames.add(uid.endsWith(".wav") ? uid : `${uid}.wav`);
+    tryNames.add(uid);
+  }
+
+  for (const name of tryNames) {
+    const full = path.join(dir, name);
+    if (fs.existsSync(full)) return full;
+  }
+
+  try {
+    const files = fs.readdirSync(dir);
+    const lower = basename ? basename.toLowerCase() : "";
+    const exact = files.find((f) => f.toLowerCase() === lower);
+    if (exact) return path.join(dir, exact);
+
+    const prefixes = [stem, uniqueid, stem && stem.split(".")[0]]
+      .filter(Boolean)
+      .map(String);
+
+    for (const prefix of prefixes) {
+      const hit = files.find(
+        (f) =>
+          f.startsWith(prefix) &&
+          /\.(wav|WAV|gsm)$/i.test(f)
+      );
+      if (hit) return path.join(dir, hit);
+    }
+  } catch {
+    /* ignore readdir errors */
+  }
+
+  return null;
+}
+
+function tryMonitorDatedPaths(basename, stem, uniqueid) {
   const roots = [
     "/var/spool/asterisk/monitor",
     "/var/spool/asterisk/monitor/complete",
@@ -47,20 +113,19 @@ function tryMonitorDatedPaths(filename) {
 
   for (const root of roots) {
     if (!fs.existsSync(root)) continue;
-
-    const flat = path.join(root, filename);
-    if (fs.existsSync(flat)) return flat;
+    const hit = findInDirectory(root, basename, stem, uniqueid);
+    if (hit) return hit;
 
     for (let d = 0; d < 31; d++) {
       const day = moment().subtract(d, "days");
-      const dated = path.join(
+      const datedDir = path.join(
         root,
         day.format("YYYY"),
         day.format("MM"),
-        day.format("DD"),
-        filename
+        day.format("DD")
       );
-      if (fs.existsSync(dated)) return dated;
+      const datedHit = findInDirectory(datedDir, basename, stem, uniqueid);
+      if (datedHit) return datedHit;
     }
   }
 
@@ -68,38 +133,47 @@ function tryMonitorDatedPaths(filename) {
 }
 
 /**
- * Resolve Asterisk MixMonitor wav on disk (CDR recordingfile is usually basename only).
+ * Resolve MixMonitor wav on disk.
+ * @param {string} recordingfile - CDR recordingfile column
+ * @param {string} [uniqueid] - CDR uniqueid fallback (e.g. 1765957984.0.wav)
  */
-function resolveRecordedCallFilePath(filename) {
-  if (!filename) return null;
+function resolveRecordedCallFilePath(recordingfile, uniqueid) {
+  const { basename, stem, absolute } = normalizeRecordingRef(
+    recordingfile,
+    uniqueid
+  );
+  if (!basename && !stem) return null;
 
-  const base = path.basename(String(filename).replace(/\\/g, "/"));
-  const candidates = [path.join(getRecordedStaticDirectory(), base)];
+  const candidates = [];
+
+  if (absolute && fs.existsSync(absolute)) {
+    candidates.push(absolute);
+  }
+
+  const recordedDir = getRecordedStaticDirectory();
+  const dirHit = findInDirectory(recordedDir, basename, stem, uniqueid);
+  if (dirHit) candidates.push(dirHit);
 
   for (const root of getRecordedBasePaths()) {
-    candidates.push(path.join(root, "recorded", base));
-    candidates.push(path.join(root, "monitor", base));
-    candidates.push(path.join(root, "recorded", base.replace(/\.wav$/i, ".WAV")));
+    const hit = findInDirectory(
+      path.join(root, "recorded"),
+      basename,
+      stem,
+      uniqueid
+    );
+    if (hit) candidates.push(hit);
   }
 
-  const monitorHit = tryMonitorDatedPaths(base);
+  const monitorHit = tryMonitorDatedPaths(basename, stem, uniqueid);
   if (monitorHit) candidates.push(monitorHit);
 
-  const seen = new Set();
-  for (const candidate of candidates) {
-    if (!candidate || seen.has(candidate)) continue;
-    seen.add(candidate);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
+  return candidates[0] || null;
 }
 
 module.exports = {
   DEFAULT_RECORDED_DIR,
   getRecordedBasePaths,
   getRecordedStaticDirectory,
+  normalizeRecordingRef,
   resolveRecordedCallFilePath,
 };
