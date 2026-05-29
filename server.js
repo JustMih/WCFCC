@@ -139,7 +139,7 @@ app.get("/api/voice-notes/:id/audio", streamVoiceNote);
 // Static folders for voice and recorded audio
 app.use(
   "/voice",
-  express.static(`${baseAudioPath}voice`, {
+  express.static(path.join(baseAudioPath, "voice"), {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".wav")) {
         res.set("Content-Type", "audio/wav");
@@ -147,7 +147,16 @@ app.use(
     },
   })
 );
-app.use("/recordings", express.static(`${baseAudioPath}recorded`));
+app.use(
+  "/recordings",
+  express.static(path.join(baseAudioPath, "recorded"), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".wav")) {
+        res.set("Content-Type", "audio/wav");
+      }
+    },
+  })
+);
 
 /* ------------------------------ API ROUTES ------------------------------ */
 // Static ticket attachment files

@@ -6,6 +6,16 @@ const {
   buildAllAgentsNameMap,
   filterAndEnrichAgentRecordings,
 } = require("../../utils/recordedAudioHelper");
+const { resolveRecordedCallFilePath } = require("../../utils/recordedCallAudio");
+
+function buildRecordingUrls(filename) {
+  const encoded = encodeURIComponent(filename);
+  return {
+    url: `/recorded-audio/${encoded}`,
+    play_url: `/recordings/${encoded}`,
+    stream_url: `/api/recorded-audio/${encoded}`,
+  };
+}
 
 const getAllRecordedAudio = async (req, res) => {
   try {
@@ -28,7 +38,8 @@ const getAllRecordedAudio = async (req, res) => {
 
     const data = enriched.map((r) => ({
       ...r,
-      url: `/recorded-audio/${encodeURIComponent(r.filename)}`,
+      ...buildRecordingUrls(r.filename),
+      file_found: Boolean(resolveRecordedCallFilePath(r.filename)),
     }));
 
     res.json(data);
@@ -43,7 +54,16 @@ const getAllRecordedAudio = async (req, res) => {
 
 const getRecordedAudio = async (req, res) => {
   const filename = path.basename(decodeURIComponent(req.params.filename));
-  const filePath = path.resolve(__dirname, "../../recorded", filename);
+  const filePath = resolveRecordedCallFilePath(filename);
+
+  if (!filePath) {
+    console.warn("Recorded file not found:", filename);
+    return res.status(404).json({
+      error: "File not found",
+      filename,
+      hint: "Check audio_recorded_path/recorded or Asterisk monitor folder on the server.",
+    });
+  }
 
   try {
     await fs.promises.access(filePath, fs.constants.R_OK);
@@ -58,6 +78,7 @@ const getRecordedAudio = async (req, res) => {
 
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
+    console.error("getRecordedAudio stream error:", err.message, filePath);
     res.status(404).json({ error: "File not found" });
   }
 };
