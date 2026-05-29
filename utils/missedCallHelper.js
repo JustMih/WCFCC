@@ -9,6 +9,16 @@ const MISSED_CALLS_TODAY_SQL = `
   AND (archived = 0 OR archived IS NULL)
 `;
 
+/** Do not run ensureLostAbandons on every dashboard poll */
+let lastEnsureLostAbandonsAt = 0;
+const ENSURE_LOST_THROTTLE_MS = 60 * 1000;
+
+/** Real customer mobile (excludes agent extensions like 1001, 1007) */
+function isCustomerCaller(raw) {
+  const phone = normalizeCaller(raw);
+  return /^0\d{9}$/.test(phone);
+}
+
 /**
  * Lost = caller waited in queue for this long or longer (5+ minutes).
  * Dropped = hung up before this threshold (under 5 minutes).
@@ -458,6 +468,7 @@ function dedupeMissedCallsLatestPerCaller(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   const byCaller = new Map();
   for (const row of rows) {
+    if (!isCustomerCaller(row.caller)) continue;
     const caller = normalizeCaller(row.caller);
     if (caller === "UNKNOWN") continue;
     const key = callerMatchKey(caller);
@@ -525,52 +536,70 @@ async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
 }
 
 /**
- * Insert queue abandons (>= 5 min) into MissedCalls when not already present.
+ * Sync >= 5 min queue abandons into MissedCalls (max one row per customer per day).
  */
 async function ensureLostAbandonsInMissedCalls(sequelize) {
-  const { QueryTypes } = require("sequelize");
+  const now = Date.now();
+  if (now - lastEnsureLostAbandonsAt < ENSURE_LOST_THROTTLE_MS) return;
+  lastEnsureLostAbandonsAt = now;
+
   const lostSessions = await fetchTodayQueueLostSessionsRaw(sequelize);
+  if (lostSessions.length === 0) return;
+
+  const existingToday = await sequelize.query(
+    `
+    SELECT id, caller, time, linkedid FROM MissedCalls
+    WHERE ${MISSED_CALLS_TODAY_SQL}
+    `,
+    { type: QueryTypes.SELECT }
+  );
 
   for (const cdr of lostSessions) {
     const caller = normalizeCaller(cdr.caller);
-    if (caller === "UNKNOWN") continue;
+    if (!isCustomerCaller(caller)) continue;
 
     const matchKey = callerMatchKey(caller);
     const callTime = cdr.call_time;
-    const existingToday = await sequelize.query(
-      `
-      SELECT id, caller, time, linkedid FROM MissedCalls
-      WHERE ${MISSED_CALLS_TODAY_SQL}
-      `,
-      { type: QueryTypes.SELECT }
-    );
 
-    const duplicate = existingToday.some((row) => {
-      if (callerMatchKey(row.caller) !== matchKey) return false;
-      const t = new Date(row.time).getTime();
-      const ct = new Date(callTime).getTime();
-      return (
-        !Number.isNaN(t) &&
-        !Number.isNaN(ct) &&
-        Math.abs(t - ct) <= DEDUP_WINDOW_SECONDS * 1000
+    const linkedExists =
+      cdr.session_id != null &&
+      existingToday.some(
+        (row) =>
+          row.linkedid != null &&
+          String(row.linkedid) === String(cdr.session_id)
       );
-    });
-    if (duplicate) continue;
+    if (linkedExists) continue;
 
-    const linkedExists = await sequelize.query(
-      `
-      SELECT id FROM MissedCalls
-      WHERE DATE(time) = CURDATE()
-        AND linkedid = :linkedid
-        AND linkedid IS NOT NULL
-      LIMIT 1
-      `,
-      {
-        replacements: { linkedid: cdr.session_id },
-        type: QueryTypes.SELECT,
-      }
+    const sameCallerRows = existingToday.filter(
+      (row) => callerMatchKey(row.caller) === matchKey
     );
-    if (linkedExists.length > 0) continue;
+
+    if (sameCallerRows.length > 0) {
+      const latest = sameCallerRows.reduce((a, b) =>
+        new Date(a.time) >= new Date(b.time) ? a : b
+      );
+      if (new Date(callTime) > new Date(latest.time)) {
+        await sequelize.query(
+          `
+          UPDATE MissedCalls
+          SET time = :time,
+              linkedid = COALESCE(:linkedid, linkedid),
+              updatedAt = NOW()
+          WHERE id = :id
+          `,
+          {
+            replacements: {
+              id: latest.id,
+              time: callTime,
+              linkedid: cdr.session_id || null,
+            },
+            type: QueryTypes.UPDATE,
+          }
+        );
+        latest.time = callTime;
+      }
+      continue;
+    }
 
     await sequelize.query(
       `
@@ -582,12 +611,19 @@ async function ensureLostAbandonsInMissedCalls(sequelize) {
       {
         replacements: {
           caller,
-          time: cdr.call_time,
+          time: callTime,
           linkedid: cdr.session_id || null,
         },
         type: QueryTypes.INSERT,
       }
     );
+
+    existingToday.push({
+      id: null,
+      caller,
+      time: callTime,
+      linkedid: cdr.session_id,
+    });
   }
 }
 
@@ -774,6 +810,7 @@ module.exports = {
   fetchMissedCallsTodayRaw,
   dedupeMissedCallsLatestPerCaller,
   MISSED_CALLS_TODAY_SQL,
+  isCustomerCaller,
   normalizeCaller,
   callerMatchKey,
   dedupeLostCalls,

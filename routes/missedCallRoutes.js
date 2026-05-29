@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 const { MissedCall, User } = require("../models");
 const { Op } = require("sequelize");
+const { Sequelize } = require("sequelize");
+
+const AGENT_MISSED_DEDUP_SECONDS = 120;
 
 // ✅ POST a new missed call
 router.post("/", async (req, res) => {
@@ -17,10 +20,37 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields: caller, time, agentId" });
     }
 
-    // Save to DB
+    const callTime = new Date(time);
+    const recentDuplicate = await MissedCall.findOne({
+      where: {
+        caller,
+        agentId,
+        [Op.and]: [
+          Sequelize.where(
+            Sequelize.fn("DATE", Sequelize.col("time")),
+            Sequelize.fn("CURDATE")
+          ),
+          {
+            time: {
+              [Op.gte]: new Date(
+                callTime.getTime() - AGENT_MISSED_DEDUP_SECONDS * 1000
+              ),
+            },
+          },
+        ],
+      },
+      order: [["time", "DESC"]],
+    });
+
+    if (recentDuplicate) {
+      await recentDuplicate.update({ time: callTime, updatedAt: new Date() });
+      console.log("✅ Missed call deduped (updated time):", recentDuplicate.toJSON());
+      return res.status(200).json(recentDuplicate);
+    }
+
     const missedCall = await MissedCall.create({
       caller,
-      time: new Date(time),
+      time: callTime,
       agentId,
     });
 
