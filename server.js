@@ -25,10 +25,6 @@ let DB_READY = false;
 
 /* ------------------------------ EXPRESS INIT ------------------------------ */
 const app = express();
-// Behind nginx/reverse proxy on production (X-Forwarded-For); required for express-rate-limit
-if (String(process.env.TRUST_PROXY || "1").toLowerCase() !== "false") {
-  app.set("trust proxy", 1);
-}
 const server = http.createServer(app);
 
 /* ------------------------------ MODELS ------------------------------ */
