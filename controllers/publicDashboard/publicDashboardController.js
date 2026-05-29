@@ -14,6 +14,10 @@ const {
   ensureLostAbandonsInMissedCalls,
   getTodayLostCallsList,
   isLostWaitSeconds,
+  dedupeIncomingLostCdrs,
+  normalizeCaller,
+  callerMatchKey,
+  DEDUP_WINDOW_SECONDS,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
@@ -356,12 +360,12 @@ const monthlyCounts = await sequelize.query(
     active: activeCalls.length,
     inQueue: inQueueCalls,
     answered: activeCalls.length,
-    dropped: Number(droppedCount || 0),
+    dropped: droppedCalls.length,
     lost: Number(lostCount || 0),
   },
   callStatistics: {
     lost: Number(lostCount || 0),
-    dropped: Number(droppedCount || 0),
+    dropped: droppedCalls.length,
   },
   callStats: {
     totalCounts,
