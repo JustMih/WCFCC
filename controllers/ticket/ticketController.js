@@ -3319,6 +3319,7 @@ const getAllCustomersTickets = async (req, res) => {
     }
 
     const userId = user.id;
+    const actorRole = user.role || req.user?.role;
 
     const tickets = await Ticket.findAll({
       order: [["created_at", "DESC"]],
@@ -3378,7 +3379,7 @@ const getAllCustomersTickets = async (req, res) => {
 
     const response = tickets.map((ticket) => {
       const t = ticket.toJSON ? ticket.toJSON() : ticket;
-      const actorPolicy = getTicketActorPolicy(t, userId, user.role);
+      const actorPolicy = getTicketActorPolicy(t, userId, actorRole);
       return {
         ...addEffectiveRole(t),
         can_act_as_delegate: actorPolicy.isDelegate,
@@ -3388,7 +3389,7 @@ const getAllCustomersTickets = async (req, res) => {
           ["agent", "attendee", "reviewer", "head-of-unit", "manager", "director", "director-general", "focal-person"],
           t,
           userId,
-          user.role
+          actorRole
         ),
       };
     });
