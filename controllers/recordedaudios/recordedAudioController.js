@@ -1,46 +1,49 @@
- const path = require("path");
+const path = require("path");
 const fs = require("fs");
 const { sequelize } = require("../../models");
+const { buildAgentRecordedCallsQuery } = require("../../utils/recordedAudioHelper");
 
 const getAllRecordedAudio = async (req, res) => {
   try {
-    const [rows] = await sequelize.query(`
-      SELECT
-        id,
-        cdrstarttime,
-        src AS caller,
-        recordingfile AS filename
-      FROM cdr
-      WHERE recordingfile IS NOT NULL
-      ORDER BY cdrstarttime DESC
-      LIMIT 100
-    `);
+    const { startDate, endDate, limit } = req.query;
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
 
-    const data = rows.map(r => ({
+    const { sql, replacements } = buildAgentRecordedCallsQuery({
+      startDate: startDate || null,
+      endDate: endDate || null,
+      limit: parsedLimit,
+    });
+
+    const rows = await sequelize.query(sql, {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    const data = rows.map((r) => ({
       ...r,
-      url: `/recorded-audio/${encodeURIComponent(r.filename)}`
+      url: `/recorded-audio/${encodeURIComponent(r.filename)}`,
     }));
 
     res.json(data);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch recordings" });
+    console.error("getAllRecordedAudio:", err);
+    res.status(500).json({ error: "Failed to fetch agent call recordings" });
   }
 };
 
 const getRecordedAudio = async (req, res) => {
   const filename = path.basename(decodeURIComponent(req.params.filename));
-  const filePath = path.resolve(__dirname, '../../recorded', filename);
+  const filePath = path.resolve(__dirname, "../../recorded", filename);
 
   try {
     await fs.promises.access(filePath, fs.constants.R_OK);
 
-    const isDownload = req.query.download === 'true';
+    const isDownload = req.query.download === "true";
 
-    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader("Content-Type", "audio/wav");
     res.setHeader(
-      'Content-Disposition',
-      `${isDownload ? 'attachment' : 'inline'}; filename="${filename}"`
+      "Content-Disposition",
+      `${isDownload ? "attachment" : "inline"}; filename="${filename}"`
     );
 
     fs.createReadStream(filePath).pipe(res);
