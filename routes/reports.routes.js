@@ -3,6 +3,16 @@ const router = express.Router();
 
 const reportsController = require("../controllers/reports/reports.controller");
 
+let ticketWorkflowTatReportController = {};
+try {
+  ticketWorkflowTatReportController = require("../controllers/reports/ticketWorkflowTatReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.routes] ticketWorkflowTatReport.controller:",
+    err.message
+  );
+}
+
 let offHoursReportController = {};
 let slaReportController = {};
 try {
@@ -90,6 +100,11 @@ bindGet(
   "/ticket-sla-report/:startDate/:endDate",
   slaReportController.getTicketSlaReport,
   reportsController.getTicketSlaReport
+);
+bindGet(
+  "/ticket-workflow-tat/:startDate/:endDate/:status",
+  ticketWorkflowTatReportController.getTicketWorkflowTatReport,
+  reportsController.getTicketWorkflowTatReport
 );
 
 module.exports = router;

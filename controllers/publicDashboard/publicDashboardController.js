@@ -16,6 +16,7 @@ const {
   dedupeIncomingLostCdrs,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
+const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
 const {
   extractExtensionFromChannel,
   buildAgentsNameMap,
@@ -59,6 +60,7 @@ const getPublicDashboardData = async (req, res) => {
        LOST CALL INSERTION (KEEP AS-IS)
     ====================================================== */
     const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+    const cdrDestFilter = buildCdrDestinationWhere("c", "dst");
     const lostCdrsRaw = await sequelize.query(
       `
       SELECT
@@ -76,6 +78,7 @@ const getPublicDashboardData = async (req, res) => {
         AND c.disposition = 'NO ANSWER'
         AND c.lastapp = 'Queue'
         AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
+        AND ${cdrDestFilter.sql}
       GROUP BY ${sessionIdExpr}
       ORDER BY call_time DESC
       LIMIT 200
@@ -314,10 +317,12 @@ const extensionCandidates = [];
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
     ====================================================== */
+    const cdrStatsDestFilter = buildCdrDestinationWhere("", "dst");
 const totalCounts = await sequelize.query(
   `
   SELECT disposition, COUNT(*) AS count
   FROM cdr
+  WHERE ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -330,6 +335,7 @@ const monthlyCounts = await sequelize.query(
   FROM cdr
   WHERE YEAR(cdrstarttime)=YEAR(CURDATE())
     AND MONTH(cdrstarttime)=MONTH(CURDATE())
+    AND ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -341,6 +347,7 @@ const monthlyCounts = await sequelize.query(
   SELECT disposition, COUNT(*) AS count
   FROM cdr
   WHERE DATE(cdrstarttime)=CURDATE()
+    AND ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -354,6 +361,7 @@ const monthlyCounts = await sequelize.query(
       WHERE DATE(cdrstarttime)=CURDATE()
         AND disposition='NO ANSWER'
         AND lastapp='Queue'
+        AND ${cdrStatsDestFilter.sql}
       `,
       { type: QueryTypes.SELECT }
     );
