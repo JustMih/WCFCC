@@ -9,13 +9,10 @@ const CEL = require("../../models/CEL")(
 );
 const QueueStatus = db.QueueStatus;
 const {
-  DEDUP_WINDOW_SECONDS,
-  normalizeCaller,
-  callerMatchKey,
-  dedupeLostCalls,
-  fetchTodayQueueLostSessionsRaw,
+  countTodayMissedCalls,
+  countQueueDroppedInRange,
   getTodayLostCallsList,
-  LOST_MIN_DURATION_SECONDS,
+  isLostWaitSeconds,
 } = require("../../utils/missedCallHelper");
 const {
   extractExtensionFromChannel,
@@ -55,71 +52,6 @@ const getPublicDashboardData = async (req, res) => {
           q.toJSON()
         )
       : [];
-
-    /* =====================================================
-       LOST CALL INSERTION (KEEP AS-IS)
-    ====================================================== */
-    const lostCdrs = await fetchTodayQueueLostSessionsRaw(sequelize);
-
-    for (const cdr of lostCdrs) {
-      const caller = normalizeCaller(cdr.caller);
-      if (caller === "UNKNOWN") continue;
-
-      const matchKey = callerMatchKey(caller);
-      const existingRows = await sequelize.query(
-        `
-        SELECT id, caller, time
-        FROM MissedCalls
-        WHERE DATE(time) = CURDATE()
-          AND (archived = 0 OR archived IS NULL)
-          AND ABS(TIMESTAMPDIFF(SECOND, time, :time)) <= :windowSec
-        `,
-        {
-          replacements: {
-            time: cdr.call_time,
-            windowSec: DEDUP_WINDOW_SECONDS,
-          },
-          type: QueryTypes.SELECT,
-        }
-      );
-
-      const duplicate = existingRows.some(
-        (row) => callerMatchKey(row.caller) === matchKey
-      );
-      if (duplicate) continue;
-
-      const linkedExists = await sequelize.query(
-        `
-        SELECT id FROM MissedCalls
-        WHERE DATE(time) = CURDATE()
-          AND linkedid = :linkedid
-          AND linkedid IS NOT NULL
-        LIMIT 1
-        `,
-        {
-          replacements: { linkedid: cdr.session_id },
-          type: QueryTypes.SELECT,
-        }
-      );
-      if (linkedExists.length > 0) continue;
-
-      await sequelize.query(
-        `
-        INSERT INTO MissedCalls
-          (caller, time, agentId, linkedid, status, createdAt, updatedAt)
-        VALUES
-          (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
-        `,
-        {
-          replacements: {
-            caller,
-            time: cdr.call_time,
-            linkedid: cdr.session_id,
-          },
-          type: QueryTypes.INSERT,
-        }
-      );
-    }
 
     /* =====================================================
        CALLBACK DETECTION (KEEP AS-IS)
@@ -257,8 +189,7 @@ const getPublicDashboardData = async (req, res) => {
             if (c.queue_entry_time) {
               const waitSec =
                 (new Date(c.call_end) - new Date(c.queue_entry_time)) / 1000;
-              c.status =
-                waitSec > LOST_MIN_DURATION_SECONDS ? "lost" : "dropped";
+              c.status = isLostWaitSeconds(waitSec) ? "lost" : "dropped";
             } else {
               c.status = "dropped";
             }
@@ -332,8 +263,18 @@ const monthlyCounts = await sequelize.query(
 );
 
 
-    const lostCallsToday = await getTodayLostCallsList(sequelize);
-    const lostCount = lostCallsToday.length;
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const dayStart = `${y}-${m}-${d} 00:00:00`;
+    const dayEnd = `${y}-${m}-${d} 23:59:59`;
+
+    const [lostCount, droppedCount] = await Promise.all([
+      countTodayMissedCalls(sequelize),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+    ]);
+
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -348,8 +289,12 @@ const monthlyCounts = await sequelize.query(
     active: activeCalls.length,
     inQueue: inQueueCalls,
     answered: activeCalls.length,
-    dropped: droppedCalls.length,
+    dropped: Number(droppedCount || 0),
     lost: Number(lostCount || 0),
+  },
+  callStatistics: {
+    lost: Number(lostCount || 0),
+    dropped: Number(droppedCount || 0),
   },
   callStats: {
     totalCounts,
