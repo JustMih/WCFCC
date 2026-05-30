@@ -188,10 +188,18 @@ app.use(
 
 // Health check (always available)
 app.get("/api/health", (req, res) => {
+  let missedCallInsertSafe = false;
+  try {
+    const MissedCall = require("./models/missedcall");
+    missedCallInsertSafe = MissedCall.create.__usesInsertIgnore === true;
+  } catch (_) {
+    missedCallInsertSafe = false;
+  }
   res.json({
     ok: true,
     dbReady: DB_READY,
     allowNoDb: ALLOW_NO_DB,
+    missedCallInsertSafe,
     time: new Date().toISOString(),
   });
 });
