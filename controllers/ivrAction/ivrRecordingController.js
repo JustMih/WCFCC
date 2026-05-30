@@ -4,6 +4,30 @@ const User = require("../../models/User");
 
 const getAllVoiceNotes = async (req, res) => {
   try {
+    const { agentId, unplayedOnly } = req.query;
+    const conditions = [];
+    const replacements = {};
+
+    if (unplayedOnly === "true" || unplayedOnly === "1") {
+      conditions.push("(vn.is_played = 0 OR vn.is_played IS NULL)");
+    }
+
+    if (agentId) {
+      const user = await User.findByPk(agentId, {
+        attributes: ["extension", "id"],
+      });
+      if (user?.extension) {
+        conditions.push("vn.assigned_extension = :agentExtension");
+        replacements.agentExtension = String(user.extension);
+      } else {
+        conditions.push("vn.assigned_agent_id = :agentUserId");
+        replacements.agentUserId = String(agentId);
+      }
+    }
+
+    const whereSql =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
     const voiceNotes = await sequelize.query(
       `
 SELECT 
@@ -20,7 +44,7 @@ SELECT
   ) AS playable_path,
   vn.clid,
   vn.assigned_extension,
-  u.full_name AS assigned_agent_name,   -- ✅ FIXED HERE
+  u.full_name AS assigned_agent_name,
   vn.is_played,
   vn.duration_seconds,
   vn.transcription,
@@ -28,9 +52,10 @@ SELECT
 FROM Voice_Notes vn
 LEFT JOIN Users u
   ON u.extension = vn.assigned_extension
+${whereSql}
 ORDER BY vn.created_at DESC
       `,
-      { type: sequelize.QueryTypes.SELECT }
+      { replacements, type: sequelize.QueryTypes.SELECT }
     );
 
     res.status(200).json({ voiceNotes });
