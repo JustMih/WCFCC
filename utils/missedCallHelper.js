@@ -1196,6 +1196,14 @@ async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) 
  * Sync >= 5 min queue abandons into MissedCalls (one row per call session / linkedid).
  */
 async function ensureLostAbandonsInMissedCalls(sequelize, options = {}) {
+  try {
+    return await ensureLostAbandonsInMissedCallsInner(sequelize, options);
+  } catch (err) {
+    console.warn("[ensureLostAbandons] failed (non-fatal):", err.message);
+  }
+}
+
+async function ensureLostAbandonsInMissedCallsInner(sequelize, options = {}) {
   const force = options.force === true;
   const now = Date.now();
   if (
@@ -1237,22 +1245,29 @@ async function ensureLostAbandonsInMissedCalls(sequelize, options = {}) {
       );
     if (linkedExists) continue;
 
-    await sequelize.query(
-      `
-      INSERT INTO MissedCalls
-        (caller, time, agentId, linkedid, status, createdAt, updatedAt)
-      VALUES
-        (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
-      `,
-      {
-        replacements: {
-          caller,
-          time: callTime,
-          linkedid: entry.session_id || null,
-        },
-        type: QueryTypes.INSERT,
+    try {
+      await sequelize.query(
+        `
+        INSERT IGNORE INTO MissedCalls
+          (caller, time, agentId, linkedid, status, createdAt, updatedAt)
+        VALUES
+          (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
+        `,
+        {
+          replacements: {
+            caller,
+            time: callTime,
+            linkedid: entry.session_id || null,
+          },
+          type: QueryTypes.INSERT,
+        }
+      );
+    } catch (insertErr) {
+      const msg = String(insertErr?.message || insertErr);
+      if (!/duplicate|ER_DUP_ENTRY|1062/i.test(msg)) {
+        console.warn("[ensureLostAbandons] insert skipped:", msg);
       }
-    );
+    }
 
     existingToday.push({
       id: null,
