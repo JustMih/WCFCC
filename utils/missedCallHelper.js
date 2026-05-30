@@ -887,6 +887,174 @@ async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
   return dedupeIncomingLostCdrs(droppedOnly).length;
 }
 
+function queueWaitToMinutes(waitSeconds) {
+  const w = Number(waitSeconds);
+  if (!Number.isFinite(w) || w <= 0) return 0;
+  return Math.round((w / 60) * 100) / 100;
+}
+
+/**
+ * Dropped call rows for reports: queue abandon with known wait under 5 minutes.
+ */
+async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) {
+  const User = require("../models/User");
+  const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
+  const {
+    extractExtensionFromChannel,
+    buildAgentsNameMap,
+  } = require("./agentExtensionHelper");
+
+  const [allAbandons, lostEntries, queueLogMeta] = await Promise.all([
+    fetchQueueAbandonSessionsRaw(sequelize, startDateTime, endDateTime, null, {
+      queueOnly: false,
+    }),
+    buildLostEntriesForRange(sequelize, startDateTime, endDateTime),
+    fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
+  ]);
+
+  const waitMap = queueLogMeta.waitByCallId;
+  const lostSessionIds = new Set();
+  for (const e of lostEntries) {
+    if (e.session_id) lostSessionIds.add(String(e.session_id));
+  }
+
+  const droppedOnly = allAbandons.filter((row) => {
+    if (!isCustomerCaller(row.caller)) return false;
+    const sid = String(row.session_id || "");
+    if (sid && lostSessionIds.has(sid)) return false;
+    if (isLostSessionRow(row, waitMap)) return false;
+    if (isLostWaitSeconds(row.wait_seconds)) return false;
+    return isDroppedWaitSeconds(row.wait_seconds);
+  });
+
+  const deduped = dedupeIncomingLostCdrs(droppedOnly);
+  if (deduped.length === 0) return [];
+
+  const sessionIds = [
+    ...new Set(deduped.map((r) => String(r.session_id || "")).filter(Boolean)),
+  ];
+  const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+
+  const queueRows = await sequelize.query(
+    `
+    SELECT ql.callid, MAX(NULLIF(TRIM(ql.data2), '')) AS queue_name
+    FROM queue_log ql
+    WHERE ql.time BETWEEN :start AND :end
+      AND ql.callid IS NOT NULL AND ql.callid != ''
+      AND UPPER(ql.event) IN ('ENTERQUEUE', 'QUEUEENTRY', 'QUEUECALLERJOIN')
+    GROUP BY ql.callid
+    `,
+    {
+      replacements: { start: startDateTime, end: endDateTime },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  const queueByCallId = new Map();
+  for (const q of queueRows) {
+    if (q.callid && q.queue_name) {
+      queueByCallId.set(String(q.callid), String(q.queue_name).trim());
+    }
+  }
+
+  const sessionToUniqueids = new Map();
+  if (queueLogMeta.uniqueidToSession) {
+    for (const [uid, sid] of queueLogMeta.uniqueidToSession.entries()) {
+      const s = String(sid);
+      if (!sessionToUniqueids.has(s)) sessionToUniqueids.set(s, []);
+      sessionToUniqueids.get(s).push(String(uid));
+    }
+  }
+
+  const resolveQueueName = (sid) => {
+    if (!sid) return null;
+    if (queueByCallId.has(sid)) return queueByCallId.get(sid);
+    const uids = sessionToUniqueids.get(sid) || [];
+    for (const uid of uids) {
+      if (queueByCallId.has(uid)) return queueByCallId.get(uid);
+    }
+    return null;
+  };
+
+  const cdrBySession = new Map();
+  const chunkSize = 200;
+  for (let i = 0; i < sessionIds.length; i += chunkSize) {
+    const chunk = sessionIds.slice(i, i + chunkSize);
+    const rows = await sequelize.query(
+      `
+      SELECT
+        ${sessionIdExpr} AS session_id,
+        MAX(c.disposition) AS disposition,
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(
+            NULLIF(TRIM(c.dst), '') ORDER BY c.cdrstarttime DESC SEPARATOR '||'
+          ),
+          '||', 1
+        ) AS destination,
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(
+            NULLIF(TRIM(c.dstchannel), '') ORDER BY c.cdrstarttime DESC SEPARATOR '||'
+          ),
+          '||', 1
+        ) AS dstchannel
+      FROM cdr c
+      WHERE c.cdrstarttime BETWEEN :start AND :end
+        AND ${sessionIdExpr} IN (:sessionIds)
+      GROUP BY ${sessionIdExpr}
+      `,
+      {
+        replacements: {
+          start: startDateTime,
+          end: endDateTime,
+          sessionIds: chunk,
+        },
+        type: QueryTypes.SELECT,
+      }
+    );
+    for (const r of rows) {
+      cdrBySession.set(String(r.session_id), r);
+    }
+  }
+
+  const extCandidates = [];
+  for (const cdr of cdrBySession.values()) {
+    const ext = extractExtensionFromChannel(cdr.dstchannel);
+    if (ext) extCandidates.push(ext);
+  }
+  const agentsMap = await buildAgentsNameMap(User, extCandidates);
+
+  return deduped
+    .map((row) => {
+      const sid = String(row.session_id || "");
+      const cdr = cdrBySession.get(sid) || {};
+      const queueName = resolveQueueName(sid);
+      const destination =
+        queueName || (cdr.destination && String(cdr.destination).trim()) || "—";
+      const agent_extension =
+        extractExtensionFromChannel(cdr.dstchannel) || null;
+      const agent_name =
+        agent_extension && agentsMap[agent_extension]
+          ? agentsMap[agent_extension]
+          : null;
+      const waitSec = row.wait_seconds;
+
+      return {
+        id: sid || `${normalizeCaller(row.caller)}-${row.call_time}`,
+        session_id: sid,
+        status: "DROPPED",
+        disposition: cdr.disposition || "NO ANSWER",
+        caller: normalizeCaller(row.caller),
+        destination,
+        agent_extension,
+        agent_name,
+        call_time: row.call_time,
+        wait_seconds: waitSec,
+        duration_minutes: queueWaitToMinutes(waitSec),
+      };
+    })
+    .sort((a, b) => new Date(b.call_time) - new Date(a.call_time));
+}
+
 /**
  * Sync >= 5 min queue abandons into MissedCalls (one row per call session / linkedid).
  */
@@ -1232,6 +1400,7 @@ module.exports = {
   fetchQueueAbandonSessionsRaw,
   countQueueLostInRange,
   countQueueDroppedInRange,
+  fetchDroppedCallsForRange,
   ensureLostAbandonsInMissedCalls,
   getTodayLostSessionsDeduped,
   countTodayMissedCalls,

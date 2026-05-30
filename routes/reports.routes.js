@@ -14,11 +14,17 @@ try {
 }
 
 let offHoursReportController = {};
+let droppedCallsReportController = {};
 let slaReportController = {};
 try {
   offHoursReportController = require("../controllers/reports/offHoursReport.controller");
 } catch (err) {
   console.warn("[reports.routes] offHoursReport.controller:", err.message);
+}
+try {
+  droppedCallsReportController = require("../controllers/reports/droppedCallsReport.controller");
+} catch (err) {
+  console.warn("[reports.routes] droppedCallsReport.controller:", err.message);
 }
 try {
   slaReportController = require("../controllers/reports/slaReport.controller");
@@ -60,6 +66,11 @@ bindGet(
   "/off-hours-report/:startDate/:endDate",
   offHoursReportController.getOffHoursReport,
   reportsController.getOffHoursReport
+);
+
+bindGet(
+  "/dropped-calls-report/:startDate/:endDate",
+  droppedCallsReportController.getDroppedCallsReport
 );
 
 bindGet(
