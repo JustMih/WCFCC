@@ -14,7 +14,13 @@ const {
   ensureLostAbandonsInMissedCalls,
   getTodayLostCallsList,
   isLostWaitSeconds,
+  dedupeIncomingLostCdrs,
+  normalizeCaller,
+  callerMatchKey,
+  DEDUP_WINDOW_SECONDS,
 } = require("../../utils/missedCallHelper");
+const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
+const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
 const {
   buildAgentsNameMap,
   resolveAgentForCall,
@@ -57,6 +63,98 @@ const getPublicDashboardData = async (req, res) => {
           q.toJSON()
         )
       : [];
+
+    /* =====================================================
+       LOST CALL INSERTION (KEEP AS-IS)
+    ====================================================== */
+    const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+    const cdrDestFilter = buildCdrDestinationWhere("c", "dst");
+    const lostCdrsRaw = await sequelize.query(
+      `
+      SELECT
+        ${sessionIdExpr} AS session_id,
+        MIN(
+          COALESCE(
+            NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(c.clid, '<', -1), '>', 1)), ''),
+            NULLIF(TRIM(c.src), ''),
+            NULLIF(TRIM(c.clid), '')
+          )
+        ) AS caller,
+        MIN(c.cdrstarttime) AS call_time
+      FROM cdr c
+      WHERE DATE(c.cdrstarttime) = CURDATE()
+        AND c.disposition = 'NO ANSWER'
+        AND c.lastapp = 'Queue'
+        AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
+        AND ${cdrDestFilter.sql}
+      GROUP BY ${sessionIdExpr}
+      ORDER BY call_time DESC
+      LIMIT 200
+      `,
+      { type: QueryTypes.SELECT }
+    );
+
+    const lostCdrs = dedupeIncomingLostCdrs(lostCdrsRaw);
+
+    for (const cdr of lostCdrs) {
+      const caller = normalizeCaller(cdr.caller);
+      if (caller === "UNKNOWN") continue;
+
+      const matchKey = callerMatchKey(caller);
+      const existingRows = await sequelize.query(
+        `
+        SELECT id, caller, time
+        FROM MissedCalls
+        WHERE DATE(time) = CURDATE()
+          AND (archived = 0 OR archived IS NULL)
+          AND ABS(TIMESTAMPDIFF(SECOND, time, :time)) <= :windowSec
+        `,
+        {
+          replacements: {
+            time: cdr.call_time,
+            windowSec: DEDUP_WINDOW_SECONDS,
+          },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      const duplicate = existingRows.some(
+        (row) => callerMatchKey(row.caller) === matchKey
+      );
+      if (duplicate) continue;
+
+      const linkedExists = await sequelize.query(
+        `
+        SELECT id FROM MissedCalls
+        WHERE DATE(time) = CURDATE()
+          AND linkedid = :linkedid
+          AND linkedid IS NOT NULL
+        LIMIT 1
+        `,
+        {
+          replacements: { linkedid: cdr.session_id },
+          type: QueryTypes.SELECT,
+        }
+      );
+      if (linkedExists.length > 0) continue;
+
+      await sequelize.query(
+        `
+        INSERT INTO MissedCalls
+          (caller, time, agentId, linkedid, status, createdAt, updatedAt)
+        VALUES
+          (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
+        `,
+        {
+          replacements: {
+            caller,
+            time: cdr.call_time,
+            linkedid: cdr.session_id,
+          },
+          type: QueryTypes.INSERT,
+        }
+      );
+    }
 
     /* =====================================================
        CALLBACK DETECTION (KEEP AS-IS)
@@ -200,10 +298,12 @@ const extensionCandidates = [];
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
     ====================================================== */
+    const cdrStatsDestFilter = buildCdrDestinationWhere("", "dst");
 const totalCounts = await sequelize.query(
   `
   SELECT disposition, COUNT(*) AS count
   FROM cdr
+  WHERE ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -216,6 +316,7 @@ const monthlyCounts = await sequelize.query(
   FROM cdr
   WHERE YEAR(cdrstarttime)=YEAR(CURDATE())
     AND MONTH(cdrstarttime)=MONTH(CURDATE())
+    AND ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -227,26 +328,24 @@ const monthlyCounts = await sequelize.query(
   SELECT disposition, COUNT(*) AS count
   FROM cdr
   WHERE DATE(cdrstarttime)=CURDATE()
+    AND ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
 );
 
 
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    const dayStart = `${y}-${m}-${d} 00:00:00`;
-    const dayEnd = `${y}-${m}-${d} 23:59:59`;
-
-    await ensureLostAbandonsInMissedCalls(sequelize);
-
-    const [lostCount, droppedCount] = await Promise.all([
-      countTodayMissedCalls(sequelize),
-      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
-    ]);
-
+    const [{ count: lostCount }] = await sequelize.query(
+      `
+      SELECT COUNT(*) AS count
+      FROM cdr
+      WHERE DATE(cdrstarttime)=CURDATE()
+        AND disposition='NO ANSWER'
+        AND lastapp='Queue'
+        AND ${cdrStatsDestFilter.sql}
+      `,
+      { type: QueryTypes.SELECT }
+    );
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -261,12 +360,12 @@ const monthlyCounts = await sequelize.query(
     active: activeCalls.length,
     inQueue: inQueueCalls,
     answered: activeCalls.length,
-    dropped: Number(droppedCount || 0),
+    dropped: droppedCalls.length,
     lost: Number(lostCount || 0),
   },
   callStatistics: {
     lost: Number(lostCount || 0),
-    dropped: Number(droppedCount || 0),
+    dropped: droppedCalls.length,
   },
   callStats: {
     totalCounts,

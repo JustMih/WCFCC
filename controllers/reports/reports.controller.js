@@ -678,7 +678,6 @@ if (typeof offHoursReportController.getOffHoursReport === "function") {
   };
 }
 
-// Notifications Report
 exports.getNotificationsReport = async (req, res) => {
   const { startDate, endDate } = req.params;
 
@@ -1048,3 +1047,15 @@ exports.getSlaReport =
   slaReportController.getSlaReport || getSlaReportHandler;
 exports.getTicketSlaReport =
   slaReportController.getTicketSlaReport || getTicketSlaReportHandler;
+
+let ticketWorkflowTatReportController = {};
+try {
+  ticketWorkflowTatReportController = require("./ticketWorkflowTatReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] ticketWorkflowTatReport.controller:",
+    err.message
+  );
+}
+exports.getTicketWorkflowTatReport =
+  ticketWorkflowTatReportController.getTicketWorkflowTatReport;

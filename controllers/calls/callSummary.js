@@ -1,20 +1,33 @@
 const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
+const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
 const {
+  ensureLostAbandonsInMissedCalls,
   countTodayMissedCalls,
-  countMissedCallsInRange,
   countQueueDroppedInRange,
   countIvrAnsweredExcludingQueueLost,
-  ensureLostAbandonsInMissedCalls,
+  countMissedCallsInRange,
 } = require("../../utils/missedCallHelper");
+
+function buildRangeWhereClause(excludeDestS) {
+  let sql = "WHERE call_start BETWEEN :startDate AND :endDate";
+  if (excludeDestS) {
+    sql += ` AND ${buildCdrDestinationWhere("").sql}`;
+  }
+  return sql;
+}
 
 /**
  * Fetch total, answered (with agent), IVR (answered without agent),
  * dropped, and lost counts from call_summary view for a date range.
  * Uses `status` column (not cdr_status).
  */
-async function getCountsForRange(startDate, endDate) {
-  const dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
+async function getCountsForRange(startDate, endDate, options = {}) {
+  const excludeDestS =
+    options.excludeDestS === true ||
+    options.excludeDestS === "1" ||
+    options.excludeDestS === "true";
+  const dateFilter = buildRangeWhereClause(excludeDestS);
   const params = { startDate, endDate };
 
   const [totalRes, answeredRes, ivrRes, droppedRes, lostRes] = await Promise.all([
@@ -119,10 +132,14 @@ const getCallSummary = async (req, res) => {
     const yearStart = `${y}-01-01 00:00:00`;
     const yearEnd = `${y}-12-31 23:59:59`;
 
+    const excludeDestS =
+      req.query.excludeDestS === "1" || req.query.excludeDestS === "true";
+    const countOptions = { excludeDestS };
+
     const [currentDay, currentMonth, currentYear] = await Promise.all([
-      getCountsForRange(dayStart, dayEnd),
-      getCountsForRange(monthStart, monthEnd),
-      getCountsForRange(yearStart, yearEnd),
+      getCountsForRange(dayStart, dayEnd, countOptions),
+      getCountsForRange(monthStart, monthEnd, countOptions),
+      getCountsForRange(yearStart, yearEnd, countOptions),
     ]);
 
     await ensureLostAbandonsInMissedCalls(sequelize);

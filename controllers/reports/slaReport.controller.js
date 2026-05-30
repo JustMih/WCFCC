@@ -1,8 +1,12 @@
 const sequelize = require("../../config/mysql_connection");
+const { buildSlaMetricsFromRow } = require("../../utils/slaMetricsHelper");
 const {
-  buildSlaMetricsFromRow,
-  SLA_AGGREGATE_SELECT,
-} = require("../../utils/slaMetricsHelper");
+  VIEW_NAME,
+  ensureCallSummaryReady,
+  buildDateRangeWhereBound,
+  buildSlaAggregateSelect,
+  buildCdrDestinationWhere,
+} = require("../../utils/callSummaryReportHelper");
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
 
 /** Call-center SLA report for a date range (summary + daily breakdown) */
@@ -16,16 +20,26 @@ exports.getSlaReport = async (req, res) => {
   }
 
   try {
+    await ensureCallSummaryReady(sequelize);
+    const slaSelect = buildSlaAggregateSelect();
+    const dateFilter = buildDateRangeWhereBound(
+      "cs",
+      `${startDate} 00:00:00`,
+      `${endDate} 23:59:59`
+    );
+    const destFilter = buildCdrDestinationWhere("cs");
+
     const [summaryRow] = await sequelize.query(
       `
-      SELECT ${SLA_AGGREGATE_SELECT}
-      FROM cdr
-      WHERE cdrstarttime BETWEEN :startDate AND :endDate
+      SELECT ${slaSelect}
+      FROM ${VIEW_NAME} cs
+      WHERE ${dateFilter.sql}
+        AND ${destFilter.sql}
       `,
       {
         replacements: {
-          startDate: `${startDate} 00:00:00`,
-          endDate: `${endDate} 23:59:59`,
+          ...dateFilter.replacements,
+          ...destFilter.replacements,
         },
         type: sequelize.QueryTypes.SELECT,
       }
@@ -34,17 +48,18 @@ exports.getSlaReport = async (req, res) => {
     const dailyRows = await sequelize.query(
       `
       SELECT
-        DATE(cdrstarttime) AS date,
-        ${SLA_AGGREGATE_SELECT}
-      FROM cdr
-      WHERE cdrstarttime BETWEEN :startDate AND :endDate
-      GROUP BY DATE(cdrstarttime)
+        DATE(cs.call_start) AS date,
+        ${slaSelect}
+      FROM ${VIEW_NAME} cs
+      WHERE ${dateFilter.sql}
+        AND ${destFilter.sql}
+      GROUP BY DATE(cs.call_start)
       ORDER BY date ASC
       `,
       {
         replacements: {
-          startDate: `${startDate} 00:00:00`,
-          endDate: `${endDate} 23:59:59`,
+          ...dateFilter.replacements,
+          ...destFilter.replacements,
         },
         type: sequelize.QueryTypes.SELECT,
       }
