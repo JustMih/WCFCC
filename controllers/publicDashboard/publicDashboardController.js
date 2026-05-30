@@ -14,12 +14,8 @@ const {
   ensureLostAbandonsInMissedCalls,
   getTodayLostCallsList,
   isLostWaitSeconds,
-  dedupeIncomingLostCdrs,
-  normalizeCaller,
-  callerMatchKey,
-  DEDUP_WINDOW_SECONDS,
+  getTodayBounds,
 } = require("../../utils/missedCallHelper");
-const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
 const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
 const {
   buildAgentsNameMap,
@@ -64,167 +60,8 @@ const getPublicDashboardData = async (req, res) => {
         )
       : [];
 
-    /* =====================================================
-       LOST CALL INSERTION (KEEP AS-IS)
-    ====================================================== */
-    const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
-    const cdrDestFilter = buildCdrDestinationWhere("c", "dst");
-    const lostCdrsRaw = await sequelize.query(
-      `
-      SELECT
-        ${sessionIdExpr} AS session_id,
-        MIN(
-          COALESCE(
-            NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(c.clid, '<', -1), '>', 1)), ''),
-            NULLIF(TRIM(c.src), ''),
-            NULLIF(TRIM(c.clid), '')
-          )
-        ) AS caller,
-        MIN(c.cdrstarttime) AS call_time
-      FROM cdr c
-      WHERE DATE(c.cdrstarttime) = CURDATE()
-        AND c.disposition = 'NO ANSWER'
-        AND c.lastapp = 'Queue'
-        AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
-        AND ${cdrDestFilter.sql}
-      GROUP BY ${sessionIdExpr}
-      ORDER BY call_time DESC
-      LIMIT 200
-      `,
-      { type: QueryTypes.SELECT }
-    );
-
-    const lostCdrs = dedupeIncomingLostCdrs(lostCdrsRaw);
-
-    for (const cdr of lostCdrs) {
-      const caller = normalizeCaller(cdr.caller);
-      if (caller === "UNKNOWN") continue;
-
-      const matchKey = callerMatchKey(caller);
-      const existingRows = await sequelize.query(
-        `
-        SELECT id, caller, time
-        FROM MissedCalls
-        WHERE DATE(time) = CURDATE()
-          AND (archived = 0 OR archived IS NULL)
-          AND ABS(TIMESTAMPDIFF(SECOND, time, :time)) <= :windowSec
-        `,
-        {
-          replacements: {
-            time: cdr.call_time,
-            windowSec: DEDUP_WINDOW_SECONDS,
-          },
-          type: QueryTypes.SELECT,
-        }
-      );
-
-      const duplicate = existingRows.some(
-        (row) => callerMatchKey(row.caller) === matchKey
-      );
-      if (duplicate) continue;
-
-      const linkedExists = await sequelize.query(
-        `
-        SELECT id FROM MissedCalls
-        WHERE DATE(time) = CURDATE()
-          AND linkedid = :linkedid
-          AND linkedid IS NOT NULL
-        LIMIT 1
-        `,
-        {
-          replacements: { linkedid: cdr.session_id },
-          type: QueryTypes.SELECT,
-        }
-      );
-      if (linkedExists.length > 0) continue;
-
-      await sequelize.query(
-        `
-        INSERT INTO MissedCalls
-          (caller, time, agentId, linkedid, status, createdAt, updatedAt)
-        VALUES
-          (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
-        `,
-        {
-          replacements: {
-            caller,
-            time: cdr.call_time,
-            linkedid: cdr.session_id,
-          },
-          type: QueryTypes.INSERT,
-        }
-      );
-    }
-
-    /* =====================================================
-       CALLBACK DETECTION (KEEP AS-IS)
-    ====================================================== */
-    const callbackCdrs = await sequelize.query(
-      `
-      SELECT uniqueid, src, dst, channel, lastdata, billsec,
-             cdrstarttime AS callback_time
-      FROM cdr
-      WHERE DATE(cdrstarttime) = CURDATE()
-        AND disposition = 'ANSWERED'
-        AND (lastapp IN ('Dial','PJSIP','SIP')
-             OR lastdata LIKE '%@%'
-             OR lastdata LIKE '%,%')
-        AND cdrstarttime > DATE_SUB(NOW(), INTERVAL 2 HOUR)
-      ORDER BY cdrstarttime DESC
-      LIMIT 100
-      `,
-      { type: QueryTypes.SELECT }
-    );
-
-    for (const cb of callbackCdrs) {
-      let agentExt = "";
-      const chanMatch = (cb.channel || "").match(/\/(\d+)-/);
-      if (chanMatch) agentExt = chanMatch[1];
-      else {
-        const dataMatch =
-          (cb.lastdata || "").match(/PJSIP\/(\d+)/) ||
-          (cb.lastdata || "").match(/^(\d+),/);
-        if (dataMatch) agentExt = dataMatch[1];
-      }
-
-      let calledNumber = (cb.dst || "").replace(/[^0-9+]/g, "");
-      if (calledNumber.startsWith("255")) calledNumber = "0" + calledNumber.slice(3);
-      if (calledNumber.startsWith("+255")) calledNumber = "0" + calledNumber.slice(4);
-      if (calledNumber.startsWith("+")) calledNumber = calledNumber.slice(1);
-
-      if (!agentExt || agentExt.length < 3 || calledNumber.length < 9) continue;
-
-     await sequelize.query(
-  `
-  UPDATE IGNORE MissedCalls
-  SET
-    status = 'called_back',
-    called_back_at = :callback_time,
-    called_back_by = :agent_ext,
-    agentId = :agent_ext,
-    billsec = :billsec,
-    updatedAt = NOW()
-  WHERE
-    status = 'pending'
-    AND (called_back_by IS NULL OR called_back_by = '')
-    AND DATE(time) = CURDATE()
-    AND :callback_time > time
-    AND (caller = :calledNumber OR caller LIKE CONCAT('%', :calledNumber, '%'))
-  ORDER BY time DESC
-  LIMIT 1
-  `,
-  {
-    replacements: {
-      calledNumber,
-      callback_time: cb.callback_time,
-      agent_ext: agentExt,
-      billsec: cb.billsec || 0,
-    },
-    type: QueryTypes.UPDATE,
-  }
-);
-
-    }
+    /* Sync only >= 5 min queue abandons into MissedCalls (no short-wait inserts). */
+    await ensureLostAbandonsInMissedCalls(sequelize);
 
     /* =====================================================
        CEL LIVE CALL TRACKING (DASHBOARD)
@@ -277,7 +114,6 @@ const getPublicDashboardData = async (req, res) => {
 ).length;
 
 
-    const droppedCalls = allCalls.filter((c) => c.status === "dropped");
 const extensionCandidates = [];
       activeCalls.forEach((c) => {
         if (c.agent_extension) extensionCandidates.push(c.agent_extension);
@@ -335,17 +171,12 @@ const monthlyCounts = await sequelize.query(
 );
 
 
-    const [{ count: lostCount }] = await sequelize.query(
-      `
-      SELECT COUNT(*) AS count
-      FROM cdr
-      WHERE DATE(cdrstarttime)=CURDATE()
-        AND disposition='NO ANSWER'
-        AND lastapp='Queue'
-        AND ${cdrStatsDestFilter.sql}
-      `,
-      { type: QueryTypes.SELECT }
-    );
+    const { start: dayStart, end: dayEnd } = getTodayBounds();
+    const [lostCount, droppedCount] = await Promise.all([
+      countTodayMissedCalls(sequelize),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+    ]);
+
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -360,12 +191,12 @@ const monthlyCounts = await sequelize.query(
     active: activeCalls.length,
     inQueue: inQueueCalls,
     answered: activeCalls.length,
-    dropped: droppedCalls.length,
+    dropped: Number(droppedCount || 0),
     lost: Number(lostCount || 0),
   },
   callStatistics: {
     lost: Number(lostCount || 0),
-    dropped: droppedCalls.length,
+    dropped: Number(droppedCount || 0),
   },
   callStats: {
     totalCounts,

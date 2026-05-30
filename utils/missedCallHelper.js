@@ -400,11 +400,15 @@ async function buildLostEntriesForRange(
       if (lid && (keys.has(`span:${lid}`) || keys.has(`cdr:${lid}`))) {
         continue;
       }
+      const waitSec =
+        lid && waitMap ? waitMap.get(lid) ?? null : null;
+      if (!isLostWaitSeconds(waitSec)) continue;
       add(`mcid:${row.id}`, {
         caller,
         call_time: row.time,
         session_id: row.linkedid || null,
         missed_id: row.id,
+        wait_seconds: waitSec,
         source: "missed_calls",
       });
     }
@@ -911,6 +915,7 @@ async function ensureLostAbandonsInMissedCalls(sequelize, options = {}) {
 
   for (const entry of lostSessions) {
     if (entry.source === "missed_calls") continue;
+    if (!isLostWaitSeconds(entry.wait_seconds)) continue;
 
     const caller = normalizeCaller(entry.caller);
     if (!isCustomerCaller(caller)) continue;
@@ -1043,28 +1048,30 @@ async function getTodayLostCallsList(sequelize) {
     }
   }
 
-  return entries.map((e) => {
-    const mc =
-      (e.missed_id && missedById.get(Number(e.missed_id))) ||
-      (e.session_id && missedByLinked.get(String(e.session_id))) ||
-      null;
-    return mapMissedCallRowToLostDto(
-      mc
-        ? {
-            ...mc,
-            caller: normalizeCaller(e.caller),
-            time: e.call_time,
-            wait_seconds: e.wait_seconds,
-          }
-        : {
-            caller: e.caller,
-            time: e.call_time,
-            linkedid: e.session_id,
-            status: "pending",
-            wait_seconds: e.wait_seconds,
-          }
-    );
-  });
+  return entries
+    .map((e) => {
+      const mc =
+        (e.missed_id && missedById.get(Number(e.missed_id))) ||
+        (e.session_id && missedByLinked.get(String(e.session_id))) ||
+        null;
+      return mapMissedCallRowToLostDto(
+        mc
+          ? {
+              ...mc,
+              caller: normalizeCaller(e.caller),
+              time: e.call_time,
+              wait_seconds: e.wait_seconds,
+            }
+          : {
+              caller: e.caller,
+              time: e.call_time,
+              linkedid: e.session_id,
+              status: "pending",
+              wait_seconds: e.wait_seconds,
+            }
+      );
+    })
+    .filter((dto) => isLostWaitSeconds(dto.wait_seconds));
 }
 
 /** Lost today: each >=5m abandon + each MissedCalls row (same number can repeat). */
