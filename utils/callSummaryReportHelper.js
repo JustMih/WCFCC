@@ -6,8 +6,8 @@
  * total_duration, billsec, cdr_status, status, queue, agent
  *
  * - call_start: session start (maps to API cdrstarttime)
- * - cdr_status: Asterisk disposition (ANSWERED, NO ANSWER, …) → API disposition
- * - status: answered | lost | dropped (dashboard semantics)
+ * - status: answered | lost | dropped → API disposition field
+ * - cdr_status: Asterisk disposition (ANSWERED, NO ANSWER, …) kept separate
  * - agent: extension for agent-attributed calls
  */
 
@@ -19,15 +19,41 @@ const VIEW_NAME = "call_summary";
 let cachedColumns = null;
 let cachedSchema = null;
 
-const UI_DISPOSITION_TO_FILTER = {
-  ANSWERED: { sql: "cdr_status = 'ANSWERED'", replacements: {} },
-  "NO ANSWER": { sql: "cdr_status = 'NO ANSWER'", replacements: {} },
-  BUSY: { sql: "cdr_status = 'BUSY'", replacements: {} },
-  FAILED: {
-    sql: "(LOWER(status) = 'dropped' OR cdr_status IN ('FAILED', 'CONGESTION'))",
+function buildStatusFilterSql(alias, statusValue) {
+  const col = qualify(alias, "status");
+  return {
+    sql: `LOWER(${col}) = '${statusValue}'`,
     replacements: {},
-  },
+  };
+}
+
+const LEGACY_DISPOSITION_TO_STATUS = {
+  ANSWERED: "answered",
+  "NO ANSWER": "lost",
+  BUSY: "dropped",
+  FAILED: "dropped",
 };
+
+function normalizeCallStatus(value) {
+  if (value == null || value === "") return null;
+  const lower = String(value).trim().toLowerCase();
+  if (lower === "answered" || lower === "lost" || lower === "dropped") {
+    return lower;
+  }
+  const legacy = LEGACY_DISPOSITION_TO_STATUS[String(value).trim().toUpperCase()];
+  return legacy ?? null;
+}
+
+function normalizeDispositionFilter(disposition) {
+  if (!disposition || disposition === "all") return null;
+  const lower = String(disposition).trim().toLowerCase();
+  if (lower === "answered" || lower === "lost" || lower === "dropped") {
+    return lower;
+  }
+  const legacy =
+    LEGACY_DISPOSITION_TO_STATUS[String(disposition).trim().toUpperCase()];
+  return legacy ?? null;
+}
 
 async function loadCallSummaryColumns(sequelize) {
   if (cachedColumns) return cachedColumns;
@@ -57,9 +83,9 @@ async function loadCallSummaryColumns(sequelize) {
     columns: cachedColumns,
     timeColumn: pickColumn(cachedColumns, ["call_start", "cdrstarttime"]),
     dispositionColumn: pickColumn(cachedColumns, [
+      "status",
       "disposition",
       "cdr_status",
-      "status",
     ]),
     agentColumn: pickColumn(cachedColumns, ["agent", "src"]),
     durationColumn: pickColumn(cachedColumns, [
@@ -122,30 +148,22 @@ function buildDateRangeWhereBound(alias, startDateTime, endDateTime) {
 }
 
 /**
- * @param {string} disposition - route param: all | ANSWERED | NO ANSWER | BUSY | FAILED
+ * @param {string} disposition - route param: all | answered | lost | dropped (legacy Asterisk values accepted)
+ * @param {string} [alias='cs'] - call_summary table alias (required when Users is joined)
  * @returns {{ sql: string, replacements: object } | null}
  */
-function buildDispositionWhere(disposition) {
+function buildDispositionWhere(disposition, alias = "cs") {
   if (!disposition || disposition === "all") return null;
 
-  const schema = getSchema();
-  const mapped = UI_DISPOSITION_TO_FILTER[disposition];
-
-  if (schema.dispositionColumn === "disposition" && mapped) {
-    return {
-      sql: `${qualify("", "disposition")} = :disposition`,
-      replacements: { disposition },
-    };
+  const normalizedFilter = normalizeDispositionFilter(disposition);
+  if (!normalizedFilter) {
+    console.warn(
+      `[callSummaryReportHelper] Unmapped disposition filter "${disposition}"; returning no rows.`
+    );
+    return { sql: "1 = 0", replacements: {} };
   }
 
-  if (mapped) {
-    return mapped;
-  }
-
-  console.warn(
-    `[callSummaryReportHelper] Unmapped disposition filter "${disposition}"; returning no rows.`
-  );
-  return { sql: "1 = 0", replacements: {} };
+  return buildStatusFilterSql(alias, normalizedFilter);
 }
 
 /**
@@ -268,8 +286,8 @@ function buildCdrReportSelectList(alias = "cs") {
     ${a}.direction,
     ${a}.total_duration AS duration,
     ${a}.billsec,
-    ${a}.cdr_status AS disposition,
-    ${a}.status,
+    ${a}.status AS disposition,
+    ${a}.cdr_status,
     ${a}.queue,
     COALESCE(u_agent.full_name, u_dst.full_name) AS agent_name,
     ${a}.agent AS agent_extension,
@@ -281,14 +299,7 @@ function buildCdrReportSelectList(alias = "cs") {
 
 function mapRowToCdrApiShape(row) {
   if (!row) return row;
-  const disposition =
-    row.disposition != null && row.disposition !== ""
-      ? row.disposition
-      : row.cdr_status != null
-        ? row.cdr_status
-        : row.status != null
-          ? String(row.status).toUpperCase()
-          : null;
+  const disposition = normalizeCallStatus(row.disposition ?? row.status);
 
   return {
     ...row,
@@ -304,6 +315,7 @@ function mapRowToCdrApiShape(row) {
           ? row.total_duration
           : null,
     disposition,
+    cdr_status: row.cdr_status ?? null,
     agent_extension: pickAgentExtensionForRow(row),
     agent_name: row.agent_name || null,
     agent_wait_sec:
@@ -517,6 +529,8 @@ module.exports = {
   buildDateRangeWhere,
   buildDateRangeWhereBound,
   buildDispositionWhere,
+  normalizeCallStatus,
+  normalizeDispositionFilter,
   buildCdrDestinationWhere,
   buildCdrQueueWaitReplacements,
   buildCdrReportFromClause,

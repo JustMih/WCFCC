@@ -2,10 +2,16 @@ const sequelize = require("../../config/mysql_connection");
 const VoiceNote = require("../../models/voice_notes.model");
 const User = require("../../models/User");
 
-const getAllVoiceNotes = async (req, res) => {
-  try {
-    const voiceNotes = await sequelize.query(
-      `
+const PRIVILEGED_VOICE_NOTE_ROLES = new Set([
+  "super-admin",
+  "admin",
+  "supervisor",
+  "director",
+  "director-general",
+  "manager",
+]);
+
+const VOICE_NOTE_SELECT = `
 SELECT 
   vn.id,
   vn.recording_path,
@@ -20,17 +26,80 @@ SELECT
   ) AS playable_path,
   vn.clid,
   vn.assigned_extension,
-  u.full_name AS assigned_agent_name,   -- ✅ FIXED HERE
+  vn.assigned_agent_id,
+  COALESCE(u_agent.full_name, u_ext.full_name) AS assigned_agent_name,
   vn.is_played,
   vn.duration_seconds,
   vn.transcription,
+  vn.status,
   vn.created_at
 FROM Voice_Notes vn
-LEFT JOIN Users u
-  ON u.extension = vn.assigned_extension
-ORDER BY vn.created_at DESC
-      `,
-      { type: sequelize.QueryTypes.SELECT }
+LEFT JOIN Users u_agent ON u_agent.id = vn.assigned_agent_id
+LEFT JOIN Users u_ext ON u_ext.extension = vn.assigned_extension
+`;
+
+const getAllVoiceNotes = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const role = req.user?.role || "";
+    const queryAgentId = req.query.agentId
+      ? String(req.query.agentId).trim()
+      : "";
+    const queryExtension = req.query.extension
+      ? String(req.query.extension).trim()
+      : "";
+
+    const isPrivileged = PRIVILEGED_VOICE_NOTE_ROLES.has(role);
+    let whereSql = "";
+    const replacements = {};
+
+    if (isPrivileged && !queryAgentId && !queryExtension) {
+      // Supervisors/admins: all voice notes when no filter requested
+      whereSql = "";
+    } else {
+      const scopeUserId = isPrivileged && queryAgentId ? queryAgentId : userId;
+
+      if (!scopeUserId && !queryExtension) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      let userExtension = null;
+      if (scopeUserId) {
+        const user = await User.findByPk(scopeUserId, {
+          attributes: ["extension"],
+          raw: true,
+        });
+        userExtension =
+          user?.extension != null ? String(user.extension).trim() : null;
+      }
+
+      const scopeExtension = queryExtension || userExtension;
+      const conditions = [];
+
+      if (scopeUserId) {
+        conditions.push("vn.assigned_agent_id = :scopeUserId");
+        replacements.scopeUserId = scopeUserId;
+      }
+
+      if (scopeExtension) {
+        conditions.push(
+          "(vn.assigned_agent_id IS NULL AND TRIM(CAST(vn.assigned_extension AS CHAR)) = :scopeExtension)"
+        );
+        replacements.scopeExtension = scopeExtension;
+      }
+
+      if (!conditions.length) {
+        return res.status(400).json({ message: "Unable to scope voice notes" });
+      }
+
+      whereSql = `WHERE (${conditions.join(" OR ")})`;
+    }
+
+    const voiceNotes = await sequelize.query(
+      `${VOICE_NOTE_SELECT}
+${whereSql}
+ORDER BY vn.created_at DESC`,
+      { replacements, type: sequelize.QueryTypes.SELECT }
     );
 
     res.status(200).json({ voiceNotes });

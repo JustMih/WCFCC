@@ -99,6 +99,111 @@ async function getCountsForRangeByDirection(startDate, endDate, direction) {
 }
 
 /**
+ * Build WHERE fragment matching calls assigned to an agent extension.
+ * Matches agent/called/caller against extension and optional SIP aliases (username).
+ */
+function buildAgentScopeWhere(direction, agentExtension, options = {}) {
+  const ext = String(agentExtension).trim();
+  const aliases = [
+    ext,
+    ext.padStart(4, "0"),
+    ...(options.agentAliases || [])
+      .map((value) => String(value).trim())
+      .filter(Boolean),
+  ].filter(Boolean);
+  const agentAliases = [...new Set(aliases)];
+
+  const matchParts = ["TRIM(CAST(agent AS CHAR)) IN (:agentAliases)"];
+
+  const extNum = parseInt(ext, 10);
+  if (!Number.isNaN(extNum)) {
+    matchParts.push("CAST(agent AS UNSIGNED) = :agentExtNum");
+  }
+
+  if (direction === "INBOUND") {
+    matchParts.push("TRIM(CAST(called AS CHAR)) IN (:agentAliases)");
+    if (!Number.isNaN(extNum)) {
+      matchParts.push("CAST(called AS UNSIGNED) = :agentExtNum");
+    }
+  }
+
+  if (direction === "OUTBOUND") {
+    matchParts.push("TRIM(CAST(caller AS CHAR)) IN (:agentAliases)");
+    if (!Number.isNaN(extNum)) {
+      matchParts.push("CAST(caller AS UNSIGNED) = :agentExtNum");
+    }
+  }
+
+  const replacements = { agentAliases };
+  if (!Number.isNaN(extNum)) {
+    replacements.agentExtNum = extNum;
+  }
+
+  return { sql: `(${matchParts.join(" OR ")})`, replacements };
+}
+
+/**
+ * Fetch answered, dropped, and lost counts from call_summary for a specific
+ * agent extension and direction.
+ * total = answered + dropped + lost.
+ */
+async function getCountsForAgentByDirection(
+  startDate,
+  endDate,
+  direction,
+  agentExtension,
+  options = {}
+) {
+  const excludeDestS =
+    options.excludeDestS === true ||
+    options.excludeDestS === "1" ||
+    options.excludeDestS === "true";
+
+  const agentScope = buildAgentScopeWhere(direction, agentExtension, options);
+
+  let dateFilter =
+    "WHERE call_start BETWEEN :startDate AND :endDate AND direction = :direction AND " +
+    agentScope.sql;
+  if (excludeDestS) {
+    dateFilter += ` AND ${buildCdrDestinationWhere("").sql}`;
+  }
+
+  const params = {
+    startDate,
+    endDate,
+    direction,
+    ...agentScope.replacements,
+  };
+
+  const [answeredRes, droppedRes, lostRes] = await Promise.all([
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND LOWER(status) = 'answered'`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND LOWER(status) = 'dropped'`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT COUNT(*) AS total FROM call_summary ${dateFilter} AND LOWER(status) = 'lost'`,
+      { replacements: params, type: QueryTypes.SELECT }
+    ),
+  ]);
+
+  const toInt = (row) => parseInt(row?.total || 0, 10);
+  const answered = toInt(answeredRes[0]);
+  const dropped = toInt(droppedRes[0]);
+  const lost = toInt(lostRes[0]);
+
+  return {
+    answered,
+    dropped,
+    lost,
+    total: answered + dropped + lost,
+  };
+}
+
+/**
  * Get call statistics summary from call_summary view.
  * Returns total calls, answered (with agent), IVR (answered without agent),
  * dropped, and lost for current day, month, and year.
@@ -209,5 +314,6 @@ const getInboundOutboundSummary = async (req, res) => {
 module.exports = {
   getCallSummary,
   getInboundOutboundSummary,
+  getCountsForAgentByDirection,
 };
 

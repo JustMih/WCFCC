@@ -11,6 +11,17 @@ const {
   SLA_AGGREGATE_SELECT,
 } = require("../../utils/slaMetricsHelper");
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
+const {
+  ensureCallSummaryReady,
+  buildDateRangeWhere,
+  buildCdrDestinationWhere,
+  buildDispositionWhere,
+  buildCdrReportSelectList,
+  buildCdrReportFromClause,
+  buildCdrQueueWaitReplacements,
+  mapRowsToCdrApiShape,
+  enrichCdrRowsWithAgentNames,
+} = require("../../utils/callSummaryReportHelper");
 
 let offHoursReportController = {};
 let slaReportController = {};
@@ -302,7 +313,7 @@ exports.getVoiceReport = (req, res) => {
     });
 };
 
-exports.getCDRReport = (req, res) => {
+exports.getCDRReport = async (req, res) => {
   const { startDate, endDate, disposition } = req.params;
 
   if (!startDate || !endDate) {
@@ -311,33 +322,50 @@ exports.getCDRReport = (req, res) => {
       .json({ error: "Start date and end date are required" });
   }
 
-  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`;
-  let replacements = { startDate, endDate };
+  try {
+    await ensureCallSummaryReady(sequelize);
 
-  // Add disposition filter if provided
-  if (disposition && disposition !== "all") {
-    query += ` AND disposition = :disposition`;
-    replacements.disposition = disposition;
-  }
+    const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
+    const destFilter = buildCdrDestinationWhere("cs", "called");
+    const dispFilter = buildDispositionWhere(disposition, "cs");
+    const queueWaitOpts = { queueLogDateFilter: true };
 
-  query += ` ORDER BY cdrstarttime DESC`;
+    const whereParts = [dateFilter.sql, destFilter.sql];
+    if (dispFilter) {
+      whereParts.push(dispFilter.sql);
+    }
 
-  const cdrQuery = sequelize.query(query, {
-    replacements,
-    type: sequelize.QueryTypes.SELECT,
-  });
+    const replacements = {
+      ...dateFilter.replacements,
+      ...destFilter.replacements,
+      ...(dispFilter?.replacements || {}),
+      ...buildCdrQueueWaitReplacements(startDate, endDate),
+    };
 
-  cdrQuery
-    .then((cdrData) => {
-      if (cdrData.length === 0) {
-        return res.status(404).json({ message: "No CDR records found" });
+    const rows = await sequelize.query(
+      `
+      SELECT ${buildCdrReportSelectList("cs")}
+      ${buildCdrReportFromClause("cs", queueWaitOpts)}
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY cs.call_start DESC
+      `,
+      {
+        replacements,
+        type: sequelize.QueryTypes.SELECT,
       }
-      res.json(cdrData);
-    })
-    .catch((error) => {
-      console.error("Error fetching CDR data:", error);
-      res.status(500).json({ error: error.message });
-    });
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "No CDR records found" });
+    }
+
+    const mapped = mapRowsToCdrApiShape(rows);
+    const enriched = await enrichCdrRowsWithAgentNames(mapped, User, sequelize);
+    res.json(enriched);
+  } catch (error) {
+    console.error("Error fetching CDR data:", error);
+    res.status(500).json({ error: error.message });
+  }
 };
 
 // Ticket CRM Report
@@ -1039,15 +1067,3 @@ exports.getSlaReport =
   slaReportController.getSlaReport || getSlaReportHandler;
 exports.getTicketSlaReport =
   slaReportController.getTicketSlaReport || getTicketSlaReportHandler;
-
-let ticketWorkflowTatReportController = {};
-try {
-  ticketWorkflowTatReportController = require("./ticketWorkflowTatReport.controller");
-} catch (err) {
-  console.warn(
-    "[reports.controller] ticketWorkflowTatReport.controller:",
-    err.message
-  );
-}
-exports.getTicketWorkflowTatReport =
-  ticketWorkflowTatReportController.getTicketWorkflowTatReport;
