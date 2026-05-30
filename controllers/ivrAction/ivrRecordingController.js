@@ -16,13 +16,22 @@ const getAllVoiceNotes = async (req, res) => {
       const user = await User.findByPk(agentId, {
         attributes: ["extension", "id"],
       });
-      if (user?.extension) {
-        conditions.push("vn.assigned_extension = :agentExtension");
-        replacements.agentExtension = String(user.extension);
+      if (user) {
+        // Match by user id OR extension (round-robin often sets only assigned_agent_id)
+        conditions.push(
+          "(vn.assigned_agent_id = :agentUserId OR vn.assigned_extension = :agentExtension)"
+        );
+        replacements.agentUserId = String(user.id);
+        replacements.agentExtension = user.extension
+          ? String(user.extension)
+          : "__no_extension__";
       } else {
         conditions.push("vn.assigned_agent_id = :agentUserId");
         replacements.agentUserId = String(agentId);
       }
+    } else if (req.query.extension) {
+      conditions.push("vn.assigned_extension = :agentExtension");
+      replacements.agentExtension = String(req.query.extension);
     }
 
     const whereSql =
