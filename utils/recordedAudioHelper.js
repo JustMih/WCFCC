@@ -7,24 +7,11 @@ const {
 } = require("./agentExtensionHelper");
 const { resolveRecordedCallFilePath } = require("./recordedCallAudio");
 
-/** Minimum talk time (seconds) — use billsec or duration (internal calls often billsec=0 on extra CDR leg) */
-const MIN_AGENT_BILLSEC = 3;
-
 const AGENT_ROLES = ["agent", "supervisor"];
 
-const IVR_LAST_APPS = new Set([
-  "Playback",
-  "BackGround",
-  "WaitExten",
-  "Read",
-  "Goto",
-  "GotoIf",
-]);
-
-const AGENT_CALL_LAST_APPS = new Set(["Dial", "Queue", "AppQueue", "Macro"]);
-
 /**
- * Simple CDR query — agent matching done in Node using Users.extension.
+ * Original-style listing: all answered CDR rows with a recording file.
+ * Agent extension/name are added when we can detect them (no row dropped).
  */
 function buildAgentRecordedCallsQuery({ startDate, endDate, limit = 500 } = {}) {
   const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
@@ -48,18 +35,9 @@ function buildAgentRecordedCallsQuery({ startDate, endDate, limit = 500 } = {}) 
     WHERE c.recordingfile IS NOT NULL
       AND TRIM(c.recordingfile) != ''
       AND c.disposition = 'ANSWERED'
-      AND (
-        COALESCE(c.billsec, 0) >= :minBillsec
-        OR COALESCE(c.duration, 0) >= :minBillsec
-      )
-      AND (
-        c.channel LIKE 'PJSIP/%'
-        OR c.dstchannel LIKE 'PJSIP/%'
-      )
-      AND (c.lastapp IS NULL OR c.lastapp NOT IN ('Playback', 'BackGround', 'WaitExten', 'Read', 'Goto', 'GotoIf'))
   `;
 
-  const replacements = { minBillsec: MIN_AGENT_BILLSEC };
+  const replacements = {};
 
   if (startDate) {
     sql += ` AND c.cdrstarttime >= CONCAT(:startDate, ' 00:00:00')`;
@@ -96,38 +74,20 @@ async function buildAllAgentsNameMap(User) {
   return map;
 }
 
-/**
- * Inbound: agent on dstchannel (PJSIP/1007-…).
- * Outbound / internal: agent on channel (PJSIP/1001-…), trunk on dstchannel (PJSIP/eGA-…).
- */
+/** Best-effort agent extension (inbound, internal, outbound, emergency-dial). */
 function resolveAgentExtensionFromCdr(row, agentsMap) {
   const candidates = [
     extractExtensionFromChannel(row.dstchannel),
     extractExtensionFromChannel(row.channel),
+    normalizeExtensionCandidate(row.dst),
+    normalizeExtensionCandidate(row.src),
   ].filter(Boolean);
 
   for (const ext of candidates) {
-    if (agentsMap[ext]) return ext;
+    if (!agentsMap || agentsMap[ext]) return ext;
   }
 
-  const dstExt = normalizeExtensionCandidate(row.dst);
-  if (dstExt && agentsMap[dstExt]) return dstExt;
-
   return candidates[0] || null;
-}
-
-function isAgentCallLeg(row) {
-  if (row.lastapp && IVR_LAST_APPS.has(row.lastapp)) return false;
-  if (row.dcontext === "inbound" && row.lastapp === "BackGround") return false;
-
-  const ext = extractExtensionFromChannel(row.channel) ||
-    extractExtensionFromChannel(row.dstchannel);
-  if (!ext) return false;
-
-  if (row.lastapp && AGENT_CALL_LAST_APPS.has(row.lastapp)) return true;
-  if (row.dcontext === "internal") return true;
-
-  return Boolean(row.channel && row.channel.includes(`PJSIP/${ext}`));
 }
 
 function dedupeByRecordingFile(rows) {
@@ -136,8 +96,8 @@ function dedupeByRecordingFile(rows) {
     const key = String(row.filename || "").trim();
     if (!key) continue;
     const prev = byFile.get(key);
-    const score = (row) =>
-      (Number(row.billsec) || 0) * 10 + (Number(row.duration) || 0);
+    const score = (r) =>
+      (Number(r.billsec) || 0) * 10 + (Number(r.duration) || 0);
     if (!prev || score(row) > score(prev)) {
       byFile.set(key, row);
     }
@@ -148,17 +108,9 @@ function dedupeByRecordingFile(rows) {
 function filterAndEnrichAgentRecordings(rows, agentsMap) {
   if (!Array.isArray(rows)) return [];
 
-  const filtered = rows.filter((row) => {
-    if (!row.filename) return false;
-    if (!isAgentCallLeg(row)) return false;
+  const deduped = dedupeByRecordingFile(rows.filter((row) => row.filename));
 
-    const ext = resolveAgentExtensionFromCdr(row, agentsMap);
-    if (!ext || !agentsMap[ext]) return false;
-
-    return true;
-  });
-
-  return dedupeByRecordingFile(filtered).map((row) => {
+  return deduped.map((row) => {
     const ext = resolveAgentExtensionFromCdr(row, agentsMap);
     const talkSeconds = Math.max(
       Number(row.billsec) || 0,
@@ -175,20 +127,19 @@ function filterAndEnrichAgentRecordings(rows, agentsMap) {
       agent_extension: ext,
       dstchannel: row.dstchannel,
       channel: row.channel,
-      billsec: talkSeconds,
+      billsec: talkSeconds || row.billsec,
       disposition: row.disposition,
       filename: row.filename,
       uniqueid: row.uniqueid,
-      agent_name: agentsMap[ext] || `Agent ${ext}`,
+      agent_name: ext && agentsMap[ext] ? agentsMap[ext] : null,
       file_found: Boolean(diskPath),
-      resolved_path: diskPath || null,
     };
   });
 }
 
 module.exports = {
-  MIN_AGENT_BILLSEC,
   buildAgentRecordedCallsQuery,
   buildAllAgentsNameMap,
+  resolveAgentExtensionFromCdr,
   filterAndEnrichAgentRecordings,
 };
