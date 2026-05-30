@@ -11,7 +11,6 @@ const QueueStatus = db.QueueStatus;
 const {
   countTodayMissedCalls,
   countQueueDroppedInRange,
-  ensureLostAbandonsInMissedCalls,
   getTodayLostCallsList,
   isLostWaitSeconds,
   getTodayBounds,
@@ -60,8 +59,7 @@ const getPublicDashboardData = async (req, res) => {
         )
       : [];
 
-    /* Sync only >= 5 min queue abandons into MissedCalls (no short-wait inserts). */
-    await ensureLostAbandonsInMissedCalls(sequelize);
+    /* Lost sync runs inside countTodayMissedCalls (throttled) — avoid duplicate work every 2s. */
 
     /* =====================================================
        CEL LIVE CALL TRACKING (DASHBOARD)
@@ -237,7 +235,7 @@ const startPeriodicUpdates = () => {
     } catch (err) {
       console.error("Periodic update error:", err);
     }
-  }, 2000);
+  }, 10000);
 };
 
 /* ================= EXPORTS ================= */
