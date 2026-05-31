@@ -144,27 +144,44 @@ const getCallSummary = async (req, res) => {
 
     await ensureLostAbandonsInMissedCalls(sequelize);
 
-    const [
-      lostToday,
-      droppedToday,
-      ivrToday,
-      ivrMonth,
-      ivrYear,
-      lostMonth,
-      droppedMonth,
-      lostYear,
-      droppedYear,
-    ] = await Promise.all([
-      countTodayMissedCalls(sequelize),
-      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
-      countIvrAnsweredExcludingQueueLost(sequelize, dayStart, dayEnd),
-      countIvrAnsweredExcludingQueueLost(sequelize, monthStart, monthEnd),
-      countIvrAnsweredExcludingQueueLost(sequelize, yearStart, yearEnd),
-      countMissedCallsInRange(sequelize, monthStart, monthEnd),
-      countQueueDroppedInRange(sequelize, monthStart, monthEnd),
-      countMissedCallsInRange(sequelize, yearStart, yearEnd),
-      countQueueDroppedInRange(sequelize, yearStart, yearEnd),
-    ]);
+    let lostToday = currentDay.lost;
+    let droppedToday = currentDay.dropped;
+    let ivrToday = currentDay.ivr;
+    let ivrMonth = currentMonth.ivr;
+    let ivrYear = currentYear.ivr;
+    let lostMonth = currentMonth.lost;
+    let droppedMonth = currentMonth.dropped;
+    let lostYear = currentYear.lost;
+    let droppedYear = currentYear.dropped;
+
+    try {
+      [
+        lostToday,
+        droppedToday,
+        ivrToday,
+        ivrMonth,
+        ivrYear,
+        lostMonth,
+        droppedMonth,
+        lostYear,
+        droppedYear,
+      ] = await Promise.all([
+        countTodayMissedCalls(sequelize),
+        countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+        countIvrAnsweredExcludingQueueLost(sequelize, dayStart, dayEnd),
+        countIvrAnsweredExcludingQueueLost(sequelize, monthStart, monthEnd),
+        countIvrAnsweredExcludingQueueLost(sequelize, yearStart, yearEnd),
+        countMissedCallsInRange(sequelize, monthStart, monthEnd),
+        countQueueDroppedInRange(sequelize, monthStart, monthEnd),
+        countMissedCallsInRange(sequelize, yearStart, yearEnd),
+        countQueueDroppedInRange(sequelize, yearStart, yearEnd),
+      ]);
+    } catch (lostDropErr) {
+      console.error(
+        "Lost/dropped/IVR counts failed (using call_summary fallback):",
+        lostDropErr?.message || lostDropErr
+      );
+    }
 
     /** Total must equal answered + ivr + lost + dropped (same sources as breakdown). */
     const dayAnswered = currentDay.answered;

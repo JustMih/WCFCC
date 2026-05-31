@@ -170,10 +170,19 @@ const monthlyCounts = await sequelize.query(
 
 
     const { start: dayStart, end: dayEnd } = getTodayBounds();
-    const [lostCount, droppedCount] = await Promise.all([
-      countTodayMissedCalls(sequelize),
-      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
-    ]);
+    let lostCount = 0;
+    let droppedCount = 0;
+    try {
+      [lostCount, droppedCount] = await Promise.all([
+        countTodayMissedCalls(sequelize),
+        countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+      ]);
+    } catch (lostDropErr) {
+      console.error(
+        "Lost/dropped counts failed (dashboard continues):",
+        lostDropErr?.message || lostDropErr
+      );
+    }
 
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
