@@ -27,10 +27,22 @@ const {
   ticketAttachmentsDirectory 
 } = require("../config/multerConfig");
 
+const optionalUploadSingle = (req, res, next) => {
+  const contentType = req.headers["content-type"] || "";
+  if (contentType.includes("multipart/form-data")) {
+    return uploadSingle(req, res, (err) => {
+      if (err) return handleMulterError(err, req, res, next);
+      next();
+    });
+  }
+  next();
+};
+
 // Create User route
 router.post(
   "/create-ticket",
   authMiddleware,
+  optionalUploadSingle,
   // roleMiddleware(["agent", "attendee", "super-admin", "reviewer"]),
   createTicket
 );

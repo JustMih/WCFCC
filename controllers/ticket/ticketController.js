@@ -955,6 +955,12 @@ const createTicket = async (req, res) => {
     console.log("Dependents field received:", req.body.dependents);
     console.log("Is New Registration received:", req.body.is_new_registration, "Type:", typeof req.body.is_new_registration);
 
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`;
+      console.log("✅ Creator attachment uploaded:", attachmentPath);
+    }
+
     const {
       firstName: rawFirstName,
       middleName: rawMiddleName,
@@ -1011,6 +1017,12 @@ const createTicket = async (req, res) => {
     } = req.body;
 
     const notificationReportId = req.body.notification_report_id ?? null;
+
+    const closeOnCreate =
+      shouldClose === true ||
+      shouldClose === "true" ||
+      shouldClose === 1 ||
+      shouldClose === "1";
 
     // Debug: Log raw representative_name from request
     console.log("🔍 RAW DATA FROM REQUEST BODY:");
@@ -1090,23 +1102,26 @@ const createTicket = async (req, res) => {
     }
 
     // Get the function name to use as subject if subject is not provided
-    let finalSubject = subject;
+    let finalSubject =
+      subject && String(subject).trim() ? String(subject).trim() : null;
+    const functionIdForLookup = functionId || responsible_unit_id;
     console.log("Initial finalSubject:", finalSubject);
 
-    if (!finalSubject && functionId) {
+    if (!finalSubject && functionIdForLookup) {
       console.log(
         "Subject not provided, trying to get from functionId:",
-        functionId
+        functionIdForLookup
       );
       try {
-        const functionData = await FunctionData.findOne({
-          where: { id: functionId },
+        const functionDataRow = await FunctionData.findOne({
+          where: { id: functionIdForLookup },
           include: [{ model: Function, as: "function" }],
         });
-        console.log("FunctionData found:", functionData);
-        if (functionData && functionData.function) {
-          finalSubject = functionData.function.name;
-          console.log("Using function name as subject:", finalSubject);
+        console.log("FunctionData found:", functionDataRow);
+        if (functionDataRow) {
+          finalSubject =
+            functionDataRow.name || functionDataRow.function?.name || null;
+          console.log("Using function data name as subject:", finalSubject);
         }
       } catch (error) {
         console.error("Error fetching function name:", error);
@@ -1123,7 +1138,7 @@ const createTicket = async (req, res) => {
     let assignedUser = null;
 
     // If ticket is closed on creation, set creator as assigned user and skip assignment logic
-    if (shouldClose) {
+    if (closeOnCreate) {
       console.log("✅ Ticket is closed on creation - Setting creator as assigned user");
       const creatorUser = await User.findOne({
         where: { id: userId },
@@ -1154,7 +1169,7 @@ const createTicket = async (req, res) => {
     console.log("  - category:", category);
     console.log("  - shouldClose:", shouldClose);
     console.log("  - isInquiry:", category === "Inquiry");
-    console.log("  - willRunAssignmentLogic:", !shouldClose && category === "Inquiry");
+    console.log("  - willRunAssignmentLogic:", !closeOnCreate && category === "Inquiry");
     
     // Check multiple possible field names including employerAllocatedStaffUsername
     // CRITICAL: Check ALL possible field names to ensure we capture allocated user
@@ -1181,12 +1196,12 @@ const createTicket = async (req, res) => {
     console.log("  - allocatedUserUsername === '':", allocatedUserUsername === '');
     console.log("  - allocatedUserUsername trimmed:", allocatedUserUsername ? allocatedUserUsername.trim() : "N/A");
     console.log("  - allocatedUserUsername trimmed length:", allocatedUserUsername ? allocatedUserUsername.trim().length : 0);
-    console.log("  - Will proceed to Inquiry assignment?", !shouldClose && category === "Inquiry" && allocatedUserUsername && allocatedUserUsername.trim() !== "");
+    console.log("  - Will proceed to Inquiry assignment?", !closeOnCreate && category === "Inquiry" && allocatedUserUsername && allocatedUserUsername.trim() !== "");
     console.log("🔵 ========== ALLOCATED USER DEBUG - END ==========");
 
     // ESSP: assign to employer allocated staff when username is provided
     if (
-      !shouldClose &&
+      !closeOnCreate &&
       !assignedUser &&
       req.externalSource === "ESSP" &&
       employerAllocatedStaffUsername &&
@@ -1209,7 +1224,7 @@ const createTicket = async (req, res) => {
     }
 
     // Only run assignment logic if ticket is NOT closed on creation
-    if (!assignedUser && !shouldClose && category === "Inquiry") {
+    if (!assignedUser && !closeOnCreate && category === "Inquiry") {
       console.log("🔵 ========== INQUIRY ASSIGNMENT LOGIC STARTED ==========");
       console.log("🔵 CRITICAL: For Inquiry tickets, allocated user ALWAYS takes priority over checklist user, even if claim exists");
       console.log("🔵 STEP 1 CHECK - Allocated User Username:");
@@ -1454,7 +1469,7 @@ const createTicket = async (req, res) => {
       }
     } else if (
       !assignedUser &&
-      !shouldClose &&
+      !closeOnCreate &&
       ["Complaint", "Suggestion", "Compliment"].includes(category)
     ) {
       // Assign to reviewer
@@ -1511,7 +1526,7 @@ const createTicket = async (req, res) => {
       console.log("Using section/sub-section from fallback:", finalSectionName, "/", finalSubSectionName);
     }
 
-    const initialStatus = shouldClose ? "Closed" : status || "Open";
+    const initialStatus = closeOnCreate ? "Closed" : status || "Open";
     const resolvedComplaintType =
       bodyComplaintType ||
       (category === "Complaint" ? "Minor" : null);
@@ -1632,6 +1647,7 @@ const createTicket = async (req, res) => {
       employer_registration_number: employerRegistrationNumber || null,
       // Add new registration flag if provided (convert to boolean explicitly)
       is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
+      attachment_path: attachmentPath,
     };
 
     console.log("Final dependents value to be saved:", ticketData.dependents);
@@ -1651,7 +1667,7 @@ const createTicket = async (req, res) => {
     );
     console.log("=====================================");
 
-    if (shouldClose) {
+    if (closeOnCreate) {
       ticketData.resolution_details =
         resolution_details || description || "Ticket resolved during creation";
       ticketData.resolution_type = resolution_type || "Resolved";
@@ -1710,7 +1726,7 @@ const createTicket = async (req, res) => {
     // No need for separate Dependent records
 
     // --- Create Ticket Assignment Record ---
-    if (!shouldClose) {
+    if (!closeOnCreate) {
       // For tickets that are NOT closed on creation, create "Assigned" action
       // await AssignedOfficer.create({
       //   ticket_id: newTicket.id,
@@ -1728,6 +1744,7 @@ const createTicket = async (req, res) => {
         assigned_to_role: assignedUser.role,
         action: "Assigned",
         reason: description,
+        attachment_path: attachmentPath,
         created_at: new Date(),
       });
     } else {
@@ -1741,6 +1758,7 @@ const createTicket = async (req, res) => {
         assigned_to_role: closingUser.role,
         action: "Closed",
         reason: resolution_details || "Ticket closed by agent",
+        attachment_path: attachmentPath,
         created_at: new Date(),
       });
     }
@@ -1759,12 +1777,12 @@ const createTicket = async (req, res) => {
     console.log("- employerPhone:", employerPhone);
     console.log("- requesterPhoneNumber:", requesterPhoneNumber);
     console.log("- shouldClose value:", shouldClose);
-    console.log("- !shouldClose value:", !shouldClose);
+    console.log("- !closeOnCreate value:", !closeOnCreate);
 
     // Only send SMS if ticket is NOT closed at creation
     // Include all requester types: Employee, Employer, Pensioners, Stakeholders, Representative, Spouse, Parent, Child, Sibling
     if (
-      !shouldClose &&
+      !closeOnCreate &&
       (requester === "Employee" || requester === "Employer" || requester === "Pensioners" || requester === "Stakeholders" || requester === "Representative" || requester === "Spouse" || requester === "Parent" || requester === "Child" || requester === "Sibling") &&
       isValidTzPhone(smsRecipient)
     ) {
@@ -1806,13 +1824,13 @@ const createTicket = async (req, res) => {
         .catch((smsError) => {
           console.error("Error sending SMS:", smsError.message);
         });
-    } else if (!shouldClose) {
+    } else if (!closeOnCreate) {
       console.log("Not sending SMS, invalid phone:", smsRecipient);
     }
 
     // --- Email Notification to Assignee ---
     let emailWarning = "";
-    if (assignedUser.email && !shouldClose) {
+    if (assignedUser.email && !closeOnCreate) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const bodyHtml = `<p>Dear ${assignedUser.full_name},</p><p>A new ${category} ticket has been assigned to you.</p>`;
       const detailsHtml = `
@@ -1830,7 +1848,7 @@ const createTicket = async (req, res) => {
       sendEmailNonBlocking({ to: ticketEmailTo(assignedUser.email), subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
-    if (!shouldClose) {
+    if (!closeOnCreate) {
     await Notification.create({
       ticket_id: newTicket.id,
       sender_id: userId,
@@ -1860,7 +1878,7 @@ const createTicket = async (req, res) => {
             <li><strong>Assigned To:</strong> ${assignedUser.full_name} (${assignedUser.role})</li>
             <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
             <li><strong>Channel:</strong> ${newTicket.channel}</li>
-            <li><strong>Status:</strong> ${shouldClose ? "Closed" : "Open"}</li>
+            <li><strong>Status:</strong> ${closeOnCreate ? "Closed" : "Open"}</li>
           </ul>`;
         const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
         
@@ -1905,7 +1923,7 @@ const createTicket = async (req, res) => {
                 <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
                 <li><strong>Sub-section:</strong> ${newTicket.sub_section}</li>
                 <li><strong>Channel:</strong> ${newTicket.channel}</li>
-                <li><strong>Status:</strong> ${shouldClose ? "Closed" : "Open"}</li>
+                <li><strong>Status:</strong> ${closeOnCreate ? "Closed" : "Open"}</li>
               </ul>`;
             const supervisorEmailHtmlBody = renderEmailCard(inquirySupervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
             
@@ -1928,7 +1946,7 @@ const createTicket = async (req, res) => {
     }
 
     // --- Email to Creator (Agent) when ticket is created ---
-    if (userId && !shouldClose) {
+    if (userId && !closeOnCreate) {
       const creatorUser = await User.findOne({
         where: { id: userId },
         attributes: ["id", "full_name", "email"],
@@ -1966,7 +1984,7 @@ const createTicket = async (req, res) => {
     }
 
     // --- Email to Head of Unit if Closed on Creation (background) ---
-    if (shouldClose) {
+    if (closeOnCreate) {
       // Find head-of-unit or director for the ticket's section/unit
       let headOfUnit = await User.findOne({
         where: {
@@ -2232,8 +2250,8 @@ const createTicket = async (req, res) => {
       : "Unassigned";
 
     const successMessage = `Ticket created successfully${
-      shouldClose ? " and closed" : ""
-    }${emailWarning}${shouldClose ? "" : ` and assigned to ${assignedToLabel}`}`;
+      closeOnCreate ? " and closed" : ""
+    }${emailWarning}${closeOnCreate ? "" : ` and assigned to ${assignedToLabel}`}`;
 
     if (req.externalSource === "ESSP") {
       return res.status(201).json({
@@ -2259,7 +2277,7 @@ const createTicket = async (req, res) => {
         : null,
     });
     // --- Send email to assignee in background ---
-    if (assignedUser.email && !shouldClose) {
+    if (assignedUser.email && !closeOnCreate) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const bodyHtml2 = `<p>Dear ${assignedUser.full_name},</p><p>A new ${category} ticket has been assigned to you.</p>`;
       const detailsHtml2 = `
@@ -2286,7 +2304,7 @@ const createTicket = async (req, res) => {
       });
     }
     // --- Email to Supervisor if Closed on Creation (background) ---
-    if (shouldClose) {
+    if (closeOnCreate) {
       // Find head-of-unit or director for the ticket's section/unit
       let headOfUnit = await User.findOne({
         where: {
