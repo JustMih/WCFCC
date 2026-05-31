@@ -62,6 +62,32 @@ function parseQueueLogWaitSeconds(row) {
   return null;
 }
 
+/**
+ * Asterisk Queue() lastdata on exit, e.g. support-queue,tT,,,300,queue-exit
+ * The numeric before queue-exit is queue timeout / time in queue (seconds).
+ */
+function parseCdrLastdataQueueWait(lastdata) {
+  if (lastdata == null || lastdata === "") return null;
+  const s = String(lastdata).trim();
+  const lower = s.toLowerCase();
+  if (!lower.includes("queue-exit") && !lower.includes("exitwithtimeout")) {
+    return null;
+  }
+
+  const parts = s.split(",");
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (!/queue-exit|exitwithtimeout/i.test(parts[i])) continue;
+    for (let j = i - 1; j >= 0; j--) {
+      const token = String(parts[j] || "").trim();
+      if (/^\d+$/.test(token)) {
+        const n = Number(token);
+        if (Number.isFinite(n) && n > 0) return Math.floor(n);
+      }
+    }
+  }
+  return null;
+}
+
 function effectiveQueueWaitSeconds(sessionRow, queueWaitByCallId, celWaitBySession) {
   const sid = sessionRow.session_id != null ? String(sessionRow.session_id) : "";
   let qlWait = 0;
@@ -75,9 +101,13 @@ function effectiveQueueWaitSeconds(sessionRow, queueWaitByCallId, celWaitBySessi
   }
   const celWait =
     sid && celWaitBySession ? celWaitBySession.get(sid) || 0 : 0;
+  const sumDuration = Number(sessionRow.sum_duration) || 0;
   const cdrWait = Math.max(
+    sumDuration,
     Number(sessionRow.max_duration) || 0,
-    Number(sessionRow.max_billsec) || 0
+    Number(sessionRow.max_billsec) || 0,
+    Number(sessionRow.lastdata_queue_wait) || 0,
+    parseCdrLastdataQueueWait(sessionRow.sample_queue_exit_lastdata) || 0
   );
   const csWait = Number(sessionRow.call_summary_duration) || 0;
   const best = Math.max(qlWait, celWait, cdrWait, csWait);
@@ -732,8 +762,22 @@ async function fetchQueueAbandonSessionsRaw(
           )
         ) AS caller,
         MIN(c.cdrstarttime) AS call_time,
+        SUM(COALESCE(c.duration, 0)) AS sum_duration,
         MAX(COALESCE(c.duration, 0)) AS max_duration,
-        MAX(COALESCE(c.billsec, 0)) AS max_billsec
+        MAX(COALESCE(c.billsec, 0)) AS max_billsec,
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(
+            CASE
+              WHEN LOWER(c.lastdata) LIKE '%queue-exit%'
+                OR LOWER(c.lastdata) LIKE '%exitwithtimeout%'
+              THEN c.lastdata
+              ELSE NULL
+            END
+            ORDER BY c.cdrstarttime DESC SEPARATOR '||'
+          ),
+          '||',
+          1
+        ) AS sample_queue_exit_lastdata
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :startDateTime AND :endDateTime
         AND (
@@ -773,8 +817,14 @@ async function fetchQueueAbandonSessionsRaw(
 
   const withWait = rows.map((row) => {
     const sid = String(row.session_id || "");
+    const lastdataWait = parseCdrLastdataQueueWait(row.sample_queue_exit_lastdata);
+    const enriched = {
+      ...row,
+      call_summary_duration: csDurMap.get(sid) || 0,
+      lastdata_queue_wait: lastdataWait || 0,
+    };
     const baseWait = effectiveQueueWaitSeconds(
-      { ...row, call_summary_duration: csDurMap.get(sid) || 0 },
+      enriched,
       queueWaitByCallId,
       celWaitBySession
     );
@@ -782,7 +832,7 @@ async function fetchQueueAbandonSessionsRaw(
       baseWait,
       csDurMap.get(sid)
     );
-    return { ...row, wait_seconds };
+    return { ...enriched, wait_seconds };
   });
 
   const classified = withWait.filter((row) => {
