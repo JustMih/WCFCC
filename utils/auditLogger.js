@@ -3,8 +3,10 @@ const { AuditLog } = require("../models");
 const REDACTED = "[REDACTED]";
 const MAX_STRING_LENGTH = 1000;
 const MAX_ARRAY_ITEMS = 50;
+const MAX_JSON_DEPTH = 10;
 const SENSITIVE_KEY_PATTERN =
   /(pass(word)?|token|secret|authorization|cookie|credential|api[-_]?key|set-cookie|jwt)/i;
+const AUDIT_BODY_SKIP_KEYS = new Set(["allClaims", "attachment", "attachments"]);
 
 function truncateString(value) {
   if (typeof value !== "string") {
@@ -18,7 +20,11 @@ function truncateString(value) {
   return `${value.slice(0, MAX_STRING_LENGTH)}...[truncated]`;
 }
 
-function sanitizeAuditValue(value, key = "", seen = new WeakSet()) {
+function sanitizeAuditValue(value, key = "", seen = new WeakSet(), depth = 0) {
+  if (depth > MAX_JSON_DEPTH) {
+    return "[MaxDepth]";
+  }
+
   if (value === null || value === undefined) {
     return value;
   }
@@ -48,22 +54,36 @@ function sanitizeAuditValue(value, key = "", seen = new WeakSet()) {
   }
 
   if (Array.isArray(value)) {
-    return value.slice(0, MAX_ARRAY_ITEMS).map((item) => sanitizeAuditValue(item, "", seen));
+    return value
+      .slice(0, MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeAuditValue(item, key, seen, depth + 1));
   }
 
   if (typeof value === "object") {
     if (seen.has(value)) {
-      return "[Circular]";
+      return "[Duplicate]";
     }
 
     seen.add(value);
+
+    const source =
+      value.dataValues && typeof value.dataValues === "object"
+        ? value.dataValues
+        : value;
     const sanitized = {};
 
-    Object.entries(value).forEach(([entryKey, entryValue]) => {
-      sanitized[entryKey] = sanitizeAuditValue(entryValue, entryKey, seen);
+    Object.entries(source).forEach(([entryKey, entryValue]) => {
+      if (entryKey.startsWith("_") || entryKey === "uniqno" || entryKey === "isNewRecord") {
+        return;
+      }
+      sanitized[entryKey] = sanitizeAuditValue(
+        entryValue,
+        entryKey,
+        seen,
+        depth + 1
+      );
     });
 
-    seen.delete(value);
     return sanitized;
   }
 
@@ -120,11 +140,49 @@ function buildResponseSummary(responseBody) {
     }
   });
 
+  if (responseBody.ticket) {
+    summary.ticket_id =
+      responseBody.ticket.ticket_id ||
+      responseBody.ticket.dataValues?.ticket_id ||
+      responseBody.ticket.id ||
+      null;
+  }
+
+  if (responseBody.ticket_id) {
+    summary.ticket_id = responseBody.ticket_id;
+  }
+
   if (Object.keys(summary).length > 0) {
     return summary;
   }
 
-  return sanitizeAuditValue(responseBody);
+  return {
+    type: Array.isArray(responseBody) ? "array" : "object",
+    count: Array.isArray(responseBody) ? responseBody.length : undefined,
+    keys: Object.keys(responseBody).slice(0, 20),
+  };
+}
+
+function sanitizeRequestBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return sanitizeAuditValue(body);
+  }
+
+  const sanitized = {};
+  Object.entries(body).forEach(([entryKey, entryValue]) => {
+    if (AUDIT_BODY_SKIP_KEYS.has(entryKey)) {
+      if (Array.isArray(entryValue)) {
+        sanitized[entryKey] = `[${entryValue.length} items omitted]`;
+      } else if (typeof entryValue === "string") {
+        sanitized[entryKey] = truncateString(entryValue);
+      } else {
+        sanitized[entryKey] = "[omitted]";
+      }
+      return;
+    }
+    sanitized[entryKey] = sanitizeAuditValue(entryValue, entryKey);
+  });
+  return sanitized;
 }
 
 function inferMessage(action, status, responseBody, explicitMessage) {
@@ -181,6 +239,7 @@ async function logAuditEvent(payload) {
 module.exports = {
   REDACTED,
   sanitizeAuditValue,
+  sanitizeRequestBody,
   buildResponseSummary,
   inferMessage,
   logAuditEvent,
