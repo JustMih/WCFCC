@@ -13,12 +13,21 @@ const {
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
 
 let offHoursReportController = {};
+let lostCallsReportController = {};
 let slaReportController = {};
 try {
   offHoursReportController = require("./offHoursReport.controller");
 } catch (err) {
   console.warn(
     "[reports.controller] offHoursReport.controller not loaded:",
+    err.message
+  );
+}
+try {
+  lostCallsReportController = require("./lostCallsReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] lostCallsReport.controller not loaded:",
     err.message
   );
 }
@@ -674,6 +683,17 @@ if (typeof offHoursReportController.getOffHoursReport === "function") {
     res.status(503).json({
       error:
         "Off-hours report is not available. Deploy offHoursReport.controller.js and utils/offHoursReportHelper.js.",
+    });
+  };
+}
+
+if (typeof lostCallsReportController.getLostCallsReport === "function") {
+  exports.getLostCallsReport = lostCallsReportController.getLostCallsReport;
+} else {
+  exports.getLostCallsReport = async (req, res) => {
+    res.status(503).json({
+      error:
+        "Lost calls report is not available. Deploy lostCallsReport.controller.js and latest missedCallHelper.js.",
     });
   };
 }
