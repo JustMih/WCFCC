@@ -23,14 +23,20 @@ const {
   getMessage,
   getConversations,
   createMessage,
-  updateAgentStatus,
   updateUserStatus,
+  getAgentPauseState,
+  markPauseExceeded,
+  getPauseReport,
   getUsersByRole,
   unReadMessage,
   getSenderReceiverUnreadCount,
   updateIsRead,
   getOnlineUser,
   getInActiveUser,
+  startUserHandover,
+  revokeUserHandover,
+  getActiveHandovers,
+  getHandoverBlockedUsers,
 } = require("../controllers/users/userController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const { roleMiddleware } = require("../middleware/roleMiddleware");
@@ -128,6 +134,15 @@ router.get(
   getCRMUsers
 );
 
+router.post("/handover/start", authMiddleware, startUserHandover);
+router.post("/handover/:id/revoke", authMiddleware, revokeUserHandover);
+router.get("/handover/active", authMiddleware, getActiveHandovers);
+router.get(
+  "/handover/blocked-participants",
+  authMiddleware,
+  getHandoverBlockedUsers
+);
+
 // route to get users by role
 router.get(
   "/users-by-role/:role",
@@ -141,6 +156,27 @@ router.get(
   authMiddleware,
   roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   getAgentOnline
+);
+
+router.get(
+  "/agent-status/:userId",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  getAgentPauseState
+);
+
+router.patch(
+  "/pause-session/:userId/mark-exceeded",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  markPauseExceeded
+);
+
+router.get(
+  "/pause-report",
+  authMiddleware,
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
+  getPauseReport
 );
 
 router.get(
@@ -222,19 +258,12 @@ router.put(
   activateUser
 );
 
-// Update User Status route
+// Update User Status route (agents, supervisors, admins)
 router.put(
   "/status/:userId",
   authMiddleware,
-  roleMiddleware(["agent"]),
+  roleMiddleware(["admin", "super-admin", "supervisor", "agent"]),
   updateUserStatus
-);
-
-router.put(
-  "/status/:userId",
-  authMiddleware,
-  roleMiddleware(["admin", "super-admin", "agent"]),
-  updateAgentStatus
 );
 
 // Deactivate User route

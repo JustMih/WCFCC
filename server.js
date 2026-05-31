@@ -31,6 +31,7 @@ const server = http.createServer(app);
 const ChatMassage = require("./models/chart_message");
 const InstagramComment = require("./models/instagram_comment");
 const VoiceNote = require("./models/voice_notes.model");
+const { streamVoiceNote } = require("./controllers/reports/reports.controller");
 
 /* ------------------------------ CONTROLLERS ------------------------------ */
 /* ------------------------------ CONTROLLERS ------------------------------ */
@@ -61,14 +62,22 @@ const recordedAudioRoutes = require("./routes/recordedAudioRoutes");
 const reportsRoutes = require("./routes/reports.routes");
 const ivrDtmfRoutes = require("./routes/ivr-dtmf-routes");
 const spyRoutes = require("./routes/spy");
+const alertsRoutes = require("./routes/alertsRoutes");
+const { getQueueCallStats } = require("./controllers/queueStatsController");
 
 
-// const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+const {
+  getRecordedStaticDirectory,
+} = require("./utils/recordedCallAudio");
+
 const baseAudioPath =
-  process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+  process.env.audio_recorded_path || "/home/wcf/WCFCC";
+const recordedCallsDir = getRecordedStaticDirectory();
+console.log("[recordings] serving wav files from:", recordedCallsDir);
 
 require("./cron/escalationJob");
 require("./cron/dailyLogoutJob");
+require("./cron/handoverExpiryJob");
 
 require("./amiServer"); // ✅ This line ensures AMI event listeners start
 /* ------------------------------ MIDDLEWARE ------------------------------ */
@@ -91,18 +100,24 @@ app.use(
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
       "https://contactcenter.wcf.go.tz",
+      "https://democc.wcf.go.tz",
+      "http://democc.wcf.go.tz",
       // Allow any origin in development (you can remove this in production)
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-request-id"],
     credentials: true,
   })
 );
 
+const { attachRequestContext } = require("./middleware/requestContext");
 // Request logging middleware (must come after JSON/CORS, before routes)
 const { requestLogger } = require("./middleware/requestLogger");
+const { auditLogger } = require("./middleware/auditLogger");
+app.use(attachRequestContext);
 app.use(requestLogger);
+app.use(auditLogger);
 setInterval(() => {
   if (!amiLive?.getLiveQueueCalls) return;
 
@@ -124,36 +139,12 @@ setInterval(() => {
 }, 2000);
 
 /* ------------------------------ STATIC FILES ------------------------------ */
-// Voice note audio files
-app.get("/api/voice-notes/:id/audio", async (req, res) => {
-  const { id } = req.params;
-  try {
-    const voiceNote = await VoiceNote.findByPk(id);
-    if (!voiceNote || !voiceNote.recording_path) {
-      return res.status(404).send("Voice note not found");
-    }
-
-    const filePath = path.resolve(voiceNote.recording_path);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).send("Voice file not found on disk");
-    }
-
-    res.sendFile(filePath, (err) => {
-      if (err) {
-        console.error("Failed to send audio file:", err);
-        res.status(500).send("Error sending file");
-      }
-    });
-  } catch (error) {
-    console.error("Unexpected error fetching voice note:", error);
-    res.status(500).send("Internal server error");
-  }
-});
+app.get("/api/voice-notes/:id/audio", streamVoiceNote);
 
 // Static folders for voice and recorded audio
 app.use(
   "/voice",
-  express.static(`${baseAudioPath}voice`, {
+  express.static(path.join(baseAudioPath, "voice"), {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".wav")) {
         res.set("Content-Type", "audio/wav");
@@ -161,7 +152,16 @@ app.use(
     },
   })
 );
-app.use("/recordings", express.static(`${baseAudioPath}recorded`));
+app.use(
+  "/recordings",
+  express.static(recordedCallsDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".wav")) {
+        res.set("Content-Type", "audio/wav");
+      }
+    },
+  })
+);
 
 /* ------------------------------ API ROUTES ------------------------------ */
 // Static ticket attachment files
@@ -188,10 +188,18 @@ app.use(
 
 // Health check (always available)
 app.get("/api/health", (req, res) => {
+  let missedCallInsertSafe = false;
+  try {
+    const MissedCall = require("./models/missedcall");
+    missedCallInsertSafe = MissedCall.create.__usesInsertIgnore === true;
+  } catch (_) {
+    missedCallInsertSafe = false;
+  }
   res.json({
     ok: true,
     dbReady: DB_READY,
     allowNoDb: ALLOW_NO_DB,
+    missedCallInsertSafe,
     time: new Date().toISOString(),
   });
 });
@@ -212,12 +220,15 @@ app.use("/api", (req, res, next) => {
 // API routes
 app.use("/api", routes);
 app.use("/api", ivrDtmfRoutes);
-app.use("/api", recordingRoutes);
+app.use("/api/voice-notes", recordingRoutes);
+app.post("/api/voicenotes", require("./controllers/voiceNoteController").captureVoiceNote);
 app.use("/api/holidays", holidayRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/recorded-audio", recordedAudioRoutes);
 app.use("/api/livestream", livestreamRoutes);
+app.get("/api/queue-call-stats", getQueueCallStats);
+app.use("/api/alerts", alertsRoutes);
 app.use("/api/instagram", instagramWebhookRoutes);
 app.use("/api/instagram-management", instagramManagementRoutes);
 app.use("/api", require("./routes/dtmfRoutes"));
@@ -240,6 +251,8 @@ const io = new Server(server, {
       "https://portal.wcf.go.tz",
       "https://essp.wcf.go.tz",
       "https://contactcenter.wcf.go.tz",
+      "https://democc.wcf.go.tz",
+      "http://democc.wcf.go.tz",
       // Allow any origin in development
       process.env.NODE_ENV === "development" ? true : false,
     ].filter(Boolean),
@@ -487,6 +500,8 @@ sequelize
             "https://portal.wcf.go.tz",
             "https://essp.wcf.go.tz",
             "https://contactcenter.wcf.go.tz",
+            "https://democc.wcf.go.tz",
+            "http://democc.wcf.go.tz",
             process.env.NODE_ENV === "development" ? true : false,
           ].filter(Boolean),
           methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -559,6 +574,8 @@ sequelize
               "https://portal.wcf.go.tz",
               "https://essp.wcf.go.tz",
               "https://contactcenter.wcf.go.tz",
+              "https://democc.wcf.go.tz",
+              "http://democc.wcf.go.tz",
               process.env.NODE_ENV === "development" ? true : false,
             ].filter(Boolean),
             methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],

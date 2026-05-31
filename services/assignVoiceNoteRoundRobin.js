@@ -1,4 +1,4 @@
-// const VoiceNote = require('../models/VoiceNote');
+const VoiceNote = require("../models/VoiceNote");
 const User = require('../models/User');
 const VoiceNoteAssignmentTracker = require('../models/VoiceNoteAssignmentTracker');
 const sequelize = require('../config/mysql_connection'); // Ensure Sequelize instance is available
@@ -36,10 +36,16 @@ async function assignVoiceNoteRoundRobin(voiceNoteData) {
 
     const selectedAgent = agents[nextAgentIndex];
 
-    const voiceNote = await VoiceNote.create({
-      ...voiceNoteData,
-      assigned_agent_id: selectedAgent.id
-    }, { transaction });
+    const voiceNote = await VoiceNote.create(
+      {
+        ...voiceNoteData,
+        assigned_agent_id: selectedAgent.id,
+        assigned_extension: selectedAgent.extension
+          ? String(selectedAgent.extension)
+          : voiceNoteData.assigned_extension || null,
+      },
+      { transaction }
+    );
 
     tracker.last_assigned_agent_id = selectedAgent.id;
     await tracker.save({ transaction });

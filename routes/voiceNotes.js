@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const { Op } = require("sequelize");
 const VoiceNote = require("../../models/voice_notes.model");
-const authMiddleware = require("../middleware/authMiddleware");
+const { authMiddleware } = require("../middleware/authMiddleware");
 const { streamVoiceNote } = require("../controllers/reports.controller");
 router.get("/voice-notes", authMiddleware, async (req, res) => {
   try {
@@ -49,17 +49,5 @@ router.put("/voice-notes/:id/mark-played", authMiddleware, async (req, res) => {
 
 // Stream audio (🔥 MUST be before generic routes)
 router.get("/voice-notes/:id/audio", streamVoiceNote);
-
-// Mark as played
-router.put("/voice-notes/:id/mark-played", async (req, res) => {
-  try {
-    const { id } = req.params;
-    await VoiceNote.update({ is_played: true }, { where: { id } });
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Mark played error:", error);
-    res.status(500).json({ error: "Failed to mark as played" });
-  }
-});
 
 module.exports = router;

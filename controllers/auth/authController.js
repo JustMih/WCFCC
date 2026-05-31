@@ -9,48 +9,6 @@ const { Op } = require("sequelize");
 // const { getEffectiveRoles } = require("../../utils/roleMapper");
 require("dotenv").config();
 
-/**
- * Returns seconds until the next daily logout time (default 2:00 PM / 14:00 server local time).
- * Uses DAILY_LOGOUT_TIME env (e.g. "14:00" or "14:00:00"); TZ env controls timezone.
- */
-function getSecondsUntilNextDailyLogout() {
-  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();  
-  const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
-  const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
-  const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
-  const second = Math.min(59, Math.max(0, parts[2] ?? 0));
-
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(hour, minute, second, 0);
-
-  if (now >= target) {
-    target.setDate(target.getDate() + 1);
-  }
-  const seconds = Math.max(1, Math.floor((target - now) / 1000));
-  return seconds;
-}
-
-/**
- * Returns the Date (ms) of the next daily logout time for the login response (expiresAt).
- */
-function getNextDailyLogoutDate() {
-  const timeStr = (process.env.DAILY_LOGOUT_TIME || "20:10").trim();
-  const parts = timeStr.split(":").map((p) => parseInt(p, 10) || 0);
-  const hour = Math.min(23, Math.max(0, parts[0] ?? 14));
-  const minute = Math.min(59, Math.max(0, parts[1] ?? 0));
-  const second = Math.min(59, Math.max(0, parts[2] ?? 0));
-
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(hour, minute, second, 0);
-
-  if (now >= target) {
-    target.setDate(target.getDate() + 1);
-  }
-  return target;
-}
-
 const registerSuperAdmin = async () => {
   try {
     const existingAdmin = await User.findOne({
@@ -76,12 +34,12 @@ const registerSuperAdmin = async () => {
 };
 
 const authenticateActiveDirectory = async (username, password) => {
-  // const url = "ldap://10.0.7.78";
-  // const bindDN = `TTCLHQ\\${username}`;
-  // const baseDN = "dc=ttcl,dc=co,dc=tz";
-  const url = "ldap://192.168.1.15";
-  const baseDN = "dc=wcf,dc=go,dc=tz";
-  const bindDN = `WCF\\${username}`;
+  const url = "ldap://10.0.7.78";
+  const bindDN = `TTCLHQ\\${username}`;
+  const baseDN = "dc=ttcl,dc=co,dc=tz";
+  // const url = "ldap://192.168.1.15";
+  // const baseDN = "dc=wcf,dc=go,dc=tz";
+  // const bindDN = `WCF\\${username}`;
   const client = new Client({ url });
 
   try {
@@ -110,20 +68,69 @@ const authenticateActiveDirectory = async (username, password) => {
   }
 };
 
+const setAuditContextSafely = (req, updates) => {
+  if (typeof req?.setAuditContext === "function") {
+    req.setAuditContext(updates);
+  }
+};
+
+const setAuthenticationAudit = (req, options = {}) => {
+  const {
+    action = "login",
+    status = "success",
+    message,
+    user = null,
+    username = null,
+    metadata = {},
+    entityType = "user",
+    entityId = null,
+  } = options;
+
+  const normalizedUsername =
+    typeof username === "string" && username.trim() ? username.trim() : null;
+  const actorEmail =
+    user?.email ||
+    (normalizedUsername && normalizedUsername.includes("@")
+      ? normalizedUsername
+      : null);
+
+  setAuditContextSafely(req, {
+    category: "authentication",
+    action,
+    status,
+    entityType,
+    entityId: entityId || user?.id || normalizedUsername,
+    userId: user?.id || null,
+    role: user?.role || null,
+    actorName: user?.full_name || normalizedUsername || null,
+    actorEmail,
+    message,
+    metadata,
+  });
+};
+
 const login = async (req, res) => {
   const { username, password } = req.body;
 
   try {
     let user;
+    let authSource = "database";
 
     // Step 1: Check if username is superadmin
     if (username === "superadmin@wcf.go.tz") {
+      authSource = "super-admin";
       // Authenticate directly from the local database
       user = await User.findOne({
         where: { email: username },
       });
 
       if (!user) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message: "Super Admin not found in the database.",
+          username,
+          metadata: { authSource },
+        });
         return res.status(400).json({
           message: "Super Admin not found in the database.",
         });
@@ -132,49 +139,62 @@ const login = async (req, res) => {
       // Check password for super admin (can be skipped if hashed)
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message: "Invalid password",
+          user,
+          username,
+          metadata: { authSource },
+        });
         return res.status(400).json({ message: "Invalid password" });
       }
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      // If username is an email, extract username and authenticate using LDAP (AD password)
-      const emailUsername = username.split('@')[0];
-      console.log(`🔍 Email login detected. Extracted username: ${emailUsername}`);
-      
-      try {
-        // Authenticate with Active Directory using extracted username and password
-        await authenticateActiveDirectory(emailUsername, password);
-        console.log(`✅ LDAP authentication successful for email: ${username}`);
-        
-        // LDAP success, now check or create user in DB
-        user = await User.findOne({
-          where: { email: username },
+      authSource = "database";
+      // If username is an email, authenticate using DB only
+      user = await User.findOne({
+        where: { email: username },
+      });
+
+      if (!user) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message: "Authentication failed. User not found.",
+          username,
+          metadata: { authSource },
         });
-
-        if (!user) {
-          // If user doesn't exist, create a new user with inactive status
-          user = await User.create({
-            full_name: emailUsername,
-            email: username,
-            password: "wcf12345", // Placeholder password (not used for AD auth)
-            extension: null,
-            role: "agent",
-            isActive: false,
-          });
-          console.log(`User ${emailUsername} created with inactive status.`);
-        }
-
-        if (user.isActive === false) {
-          return res.status(400).json({
-            message:
-              "Your account is inactive. Please wait for the super admin to activate it.",
-          });
-        }
-      } catch (ldapError) {
-        console.error("LDAP authentication failed for email login:", ldapError.message);
-        return res.status(400).json({ 
-          message: "LDAP authentication failed. Please check your Active Directory password." 
+        return res
+          .status(400)
+          .json({ message: "Authentication failed. User not found." });
+      }
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message: "Authentication failed. Invalid password.",
+          user,
+          username,
+          metadata: { authSource },
+        });
+        return res
+          .status(400)
+          .json({ message: "Authentication failed. Invalid password." });
+      }
+      if (user.isActive === false) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message:
+            "Your account is inactive. Please wait for the super admin to activate it.",
+          user,
+          username,
+          metadata: { authSource },
+        });
+        return res.status(400).json({
+          message:
+            "Your account is inactive. Please wait for the super admin to activate it.",
         });
       }
     } else {
+      authSource = "ldap";
       // If not an email, authenticate using LDAP only
       try {
         await authenticateActiveDirectory(username, password);
@@ -197,12 +217,26 @@ const login = async (req, res) => {
         }
 
         if (user.isActive === false) {
+          setAuthenticationAudit(req, {
+            status: "failure",
+            message:
+              "Your account is inactive. Please wait for the super admin to activate it.",
+            user,
+            username,
+            metadata: { authSource },
+          });
           return res.status(400).json({
             message:
               "Your account is inactive. Please wait for the super admin to activate it.",
           });
         }
       } catch (ldapError) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message: "LDAP authentication failed.",
+          username,
+          metadata: { authSource },
+        });
         return res.status(400).json({ message: "LDAP authentication failed." });
       }
     }
@@ -223,28 +257,10 @@ const login = async (req, res) => {
     }
 
     // Step 5: Generate JWT token
-    // Agents: expire at DAILY_LOGOUT_TIME (e.g. 2 PM) – forced logout at that time.
-    // Other roles (supervisor, admin, etc.): expire after 24h – forced logout after 24h.
-    const roleLower = (user.role && String(user.role).toLowerCase()) || "";
-    const isAgent = roleLower === "agent";
-    const TWENTY_FOUR_HOURS_SEC = 24 * 60 * 60;
-    const expiresInSeconds = isAgent
-      ? getSecondsUntilNextDailyLogout()
-      : TWENTY_FOUR_HOURS_SEC;
-    const expiresAt = isAgent
-      ? getNextDailyLogoutDate()
-      : new Date(Date.now() + TWENTY_FOUR_HOURS_SEC * 1000);
-
-    if (isAgent) {
-      console.log("[Agent login] DAILY_LOGOUT_TIME:", process.env.DAILY_LOGOUT_TIME);
-      console.log("[Agent login] Token expires at (server local):", expiresAt.toLocaleString());
-      console.log("[Agent login] expiresAt (ms):", expiresAt.getTime(), "| in", Math.round(expiresInSeconds / 60), "minutes");
-    }
-
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: expiresInSeconds }
+      { expiresIn: "24h" }
     );
 
     // Log agent login in AgentLoginLog
@@ -262,10 +278,21 @@ const login = async (req, res) => {
     // Get effective roles based on user's base role and unit section
     // const effectiveRoles = getEffectiveRoles(user.role, user.unit_section);
 
+    setAuthenticationAudit(req, {
+      action: "login",
+      status: "success",
+      message: "Login successful",
+      user,
+      username,
+      metadata: {
+        authSource,
+        isActive: user.isActive,
+      },
+    });
+
     res.json({
       message: "Login successful",
       token,
-      expiresAt: expiresAt.getTime(), // ms; agents = next DAILY_LOGOUT_TIME, others = 24h
       user: {
         full_name: user.full_name,
         isActive: user.isActive,
@@ -289,6 +316,14 @@ const login = async (req, res) => {
     console.log("Login response includes credentials for user:", username);
   } catch (error) {
     console.error("Login error:", error);
+    setAuthenticationAudit(req, {
+      status: "failure",
+      message: error.message || "Server error",
+      username,
+      metadata: {
+        authSource: "unknown",
+      },
+    });
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -296,58 +331,85 @@ const login = async (req, res) => {
 const logout = async (req, res) => {
   const { userId } = req.body;
 
-  // Find the user
-  const user = await User.findByPk(userId);
-  if (!user) {
-    return res.status(400).json({ message: "User not found" });
+  try {
+    // Find the user
+    const user = await User.findByPk(userId);
+    if (!user) {
+      setAuthenticationAudit(req, {
+        action: "logout",
+        status: "failure",
+        message: "User not found",
+        entityId: userId || null,
+        metadata: { requestedUserId: userId || null },
+      });
+      return res.status(400).json({ message: "User not found" });
+    }
+
+    // Update user status to "offline"
+    user.status = "offline";
+    await user.save();
+
+    // Update AgentStatus for agents
+    if (user.role === "agent") {
+      await AgentStatus.update(
+        {
+          status: "offline",
+          logoutTime: new Date(),
+        },
+        {
+          where: { userId: user.id, status: "online" },
+        }
+      );
+    }
+
+    // Find the latest login entry where logoutTime is NULL
+    // if (user.role === "agent") {
+    //   const agentLog = await AgentLoginLog.findOne({
+    //     where: { userId, logoutTime: null },
+    //     order: [["loginTime", "DESC"]],
+    //   });
+
+    //   if (!agentLog) {
+    //     return res
+    //       .status(400)
+    //       .json({ message: "No active login session found." });
+    //   }
+
+    //   // Calculate online duration
+    //   const logoutTime = new Date();
+    //   const onlineDuration = Math.floor((logoutTime - agentLog.loginTime) / 1000); // Convert to seconds
+
+    //   // Update logout time and totalOnlineTime
+    //   await agentLog.update({
+    //     logoutTime: logoutTime,
+    //     totalOnlineTime: onlineDuration,
+    //   });
+
+    //   console.log(
+    //     `Agent ${userId} logged out at ${logoutTime}. Total time online: ${onlineDuration} seconds.`
+    //   );
+    // }
+
+    setAuthenticationAudit(req, {
+      action: "logout",
+      status: "success",
+      message: "Logged out successfully",
+      user,
+      metadata: { requestedUserId: userId || null },
+    });
+
+    res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Logout error:", error);
+    setAuthenticationAudit(req, {
+      action: "logout",
+      status: "failure",
+      message: error.message || "Server error",
+      entityId: userId || null,
+      metadata: { requestedUserId: userId || null },
+    });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
-
-  // Update user status to "offline"
-  user.status = "offline";
-  await user.save();
-
-  // Update AgentStatus for agents
-  if (user.role === "agent") {
-    await AgentStatus.update(
-      {
-        status: "offline",
-        logoutTime: new Date(),
-      },
-      {
-        where: { userId: user.id, status: "online" },
-      }
-    );
-  }
-
-  // Find the latest login entry where logoutTime is NULL
-  // if (user.role === "agent") {
-  //   const agentLog = await AgentLoginLog.findOne({
-  //     where: { userId, logoutTime: null },
-  //     order: [["loginTime", "DESC"]],
-  //   });
-
-  //   if (!agentLog) {
-  //     return res
-  //       .status(400)
-  //       .json({ message: "No active login session found." });
-  //   }
-
-  //   // Calculate online duration
-  //   const logoutTime = new Date();
-  //   const onlineDuration = Math.floor((logoutTime - agentLog.loginTime) / 1000); // Convert to seconds
-
-  //   // Update logout time and totalOnlineTime
-  //   await agentLog.update({
-  //     logoutTime: logoutTime,
-  //     totalOnlineTime: onlineDuration,
-  //   });
-
-  //   console.log(
-  //     `Agent ${userId} logged out at ${logoutTime}. Total time online: ${onlineDuration} seconds.`
-  //   );
-  // }
-
-  res.json({ message: "Logged out successfully" });
 };
 
 // Get time of agent login
@@ -502,6 +564,12 @@ const loginRedirect = async (req, res) => {
     // 1. Authenticate via JWT
     const token = req.headers.authorization?.replace("Bearer ", "");
     if (!token) {
+      setAuthenticationAudit(req, {
+        action: "login_redirect",
+        status: "failure",
+        message: "Authentication required",
+        entityType: "external-login",
+      });
       return res.status(401).json({ message: "Authentication required" });
     }
 
@@ -509,6 +577,13 @@ const loginRedirect = async (req, res) => {
     const user = await User.findByPk(decoded.userId);
 
     if (!user) {
+      setAuthenticationAudit(req, {
+        action: "login_redirect",
+        status: "failure",
+        message: "User not found",
+        entityType: "external-login",
+        entityId: decoded.userId,
+      });
       return res.status(401).json({ message: "User not found" });
     }
 
@@ -525,39 +600,8 @@ const loginRedirect = async (req, res) => {
       fullBody: req.body,
     });
 
-    // Extract username for MAC/AD
-    // Prefer email prefix (usually matches AD account). Fallback to user.username.
-    const usernameSource =
-      (user.email && user.email.includes("@") ? user.email.split("@")[0] : "") ||
-      user.username ||
-      "";
-    let username = usernameSource;
-    if (!username) {
-      return res.status(400).json({ 
-        message: "User username not found. Cannot proceed with MAC login." 
-      });
-    }
-
-    // MAC redirect: omit middle name (3+ parts cause "page not found").
-    // Keep separator style: if source uses dots -> "first.last", else -> "first last".
-    const trimmed = String(username).trim();
-    const parts = trimmed.split(/[\s.]+/).filter(Boolean);
-    if (parts.length >= 3) {
-      const sep = trimmed.includes(".") ? "." : " ";
-      username = `${parts[0]}${sep}${parts[parts.length - 1]}`;
-    } else {
-      username = trimmed;
-    }
-
-    console.log("🔍 Using logged-in user credentials:", {
-      userId: user.id,
-      usernameSource,
-      username,
-      email: user.email,
-    });
-
     const auth_data = {
-      username: username,
+      username: "mmsaki-admin",
       notification_report_id: idRaw || "",
       employer_id:
         employerRaw !== undefined && employerRaw !== null ? employerRaw : "",
@@ -570,7 +614,7 @@ const loginRedirect = async (req, res) => {
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
     // 4. Build MAC App URL
-    const macAppUrl = process.env.MAC_APP_URL || "https://mac.wcf.go.tz/";
+    const macAppUrl = process.env.MAC_APP_URL || "https://demomac.wcf.go.tz/";
     const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
       encryptedToken
     )}`;
@@ -579,6 +623,19 @@ const loginRedirect = async (req, res) => {
     const acceptsJson =
       req.headers.accept?.includes("application/json") ||
       req.headers["content-type"]?.includes("application/json");
+
+    setAuthenticationAudit(req, {
+      action: "login_redirect",
+      status: "success",
+      message: "Continue on MAC!",
+      user,
+      entityType: "external-login",
+      entityId: idRaw || employerRaw || user.id,
+      metadata: {
+        notification_report_id: idRaw || null,
+        employer_id: employerRaw || null,
+      },
+    });
 
     if (acceptsJson) {
       return res.json({
@@ -592,6 +649,12 @@ const loginRedirect = async (req, res) => {
     return res.redirect(url);
   } catch (error) {
     console.error("Login redirect error:", error);
+    setAuthenticationAudit(req, {
+      action: "login_redirect",
+      status: "failure",
+      message: error.message || "Internal server error",
+      entityType: "external-login",
+    });
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,

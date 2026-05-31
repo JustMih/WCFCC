@@ -1,6 +1,20 @@
 const sequelize = require("../../config/database");
 const { Op } = require("sequelize");
 const CDR = require("../../models/CDR");
+const {
+  DEDUP_WINDOW_SECONDS,
+  LOST_MIN_DURATION_SECONDS,
+  normalizeCaller,
+  callerMatchKey,
+  dedupeLostCalls,
+  getTodayLostCallsList,
+  getLostCallsDiagnostics,
+} = require("../../utils/missedCallHelper");
+const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
+const {
+  buildSlaMetricsFromRow,
+  SLA_AGGREGATE_SELECT,
+} = require("../../utils/slaMetricsHelper");
 
 // Controller to get data for different time frames (Total, Monthly, Weekly, Daily)
 const getCdrCounts = async (req, res) => {
@@ -51,14 +65,14 @@ const getAgentCdrStats = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) < :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) >= :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -69,14 +83,14 @@ const getAgentCdrStats = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) < :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) >= :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -103,14 +117,14 @@ const getAgentCdrStatsToday = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) < :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) >= :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE dstchannel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -121,14 +135,14 @@ const getAgentCdrStatsToday = async (req, res) => {
       SELECT 
         COUNT(*) AS total,
         SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) <= 60 THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) > 60 THEN 1 ELSE 0 END) AS lost
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) < :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
+        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) >= :lostMinDuration THEN 1 ELSE 0 END) AS lost
       FROM cdr
       WHERE channel LIKE :dstPattern
         AND DATE(cdrstarttime) = CURDATE()
     `,
       {
-        replacements: { dstPattern },
+        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -143,51 +157,29 @@ const getAgentCdrStatsToday = async (req, res) => {
   }
 };
 const syncMissedCallsFromCdrToday = async () => {
-  await sequelize.query(
-    `
-    INSERT INTO MissedCalls
-      (caller, time, agentId, status, archived, createdAt, updatedAt, linkedid)
-    SELECT
-      c.clid AS caller,
-      c.cdrstarttime AS time,
-      SUBSTRING_INDEX(c.dstchannel, '/', -1) AS agentId,
-      'pending' AS status,
-      0 AS archived,
-      NOW(),
-      NOW(),
-      c.linkedid
-    FROM cdr c
-    WHERE
-      c.lastapp = 'Queue'
-      AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
-      AND DATE(c.cdrstarttime) = CURDATE()
-      AND c.clid IS NOT NULL
-      AND c.clid != ''
-      AND NOT EXISTS (
-        SELECT 1
-        FROM MissedCalls mc
-        WHERE mc.caller = c.clid
-          AND mc.time = c.cdrstarttime
-          AND mc.agentId = SUBSTRING_INDEX(c.dstchannel, '/', -1)
-      )
-    `
-  );
+  const { ensureLostAbandonsInMissedCalls } = require("../../utils/missedCallHelper");
+  await ensureLostAbandonsInMissedCalls(sequelize);
 };
 
-// Get lost calls for today with phone numbers
+// Get lost calls for today (queue abandon, wait >= 5 min — excludes dropped)
 const getLostCallsToday = async (req, res) => {
   try {
-    const lostCalls = await sequelize.query(
-      `SELECT mc.caller, mc.time AS call_time, mc.status, mc.called_back_by AS callback_agent_extension, u.full_name AS callback_agent_name, mc.called_back_at AS callback_time, mc.billsec AS callback_duration FROM MissedCalls mc LEFT JOIN Users u ON u.extension = mc.called_back_by WHERE DATE(mc.time) = CURDATE() AND mc.archived = 0 ORDER BY mc.time DESC`,
-      {
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
-
+    const lostCalls = await getTodayLostCallsList(sequelize);
     res.json(lostCalls);
   } catch (err) {
     console.error("Error retrieving lost calls:", err.message);
     res.status(500).send("Internal Server Error");
+  }
+};
+
+/** Why lost count is N — use while testing (GET /api/calls/lost-calls-diagnostics). */
+const getLostCallsDiagnosticsHandler = async (req, res) => {
+  try {
+    const data = await getLostCallsDiagnostics(sequelize);
+    res.json(data);
+  } catch (err) {
+    console.error("lost-calls-diagnostics:", err.message);
+    res.status(500).json({ error: err.message });
   }
 };
 /**
@@ -386,13 +378,17 @@ const getLostCalls = async (req, res) => {
         lastapp
       FROM cdr 
       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND duration > 60
+        AND duration >= :lostMinDuration
         AND clid IS NOT NULL
         AND clid != ''
       ORDER BY cdrstarttime DESC
       LIMIT :limit OFFSET :offset`,
       {
-        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        replacements: {
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          lostMinDuration: LOST_MIN_DURATION_SECONDS,
+        },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -402,10 +398,11 @@ const getLostCalls = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM cdr 
        WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-         AND duration > 60
+         AND duration >= :lostMinDuration
          AND clid IS NOT NULL
          AND clid != ''`,
       {
+        replacements: { lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -435,13 +432,17 @@ const getDroppedCalls = async (req, res) => {
         lastapp
       FROM cdr 
       WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-        AND duration <= 60
+        AND duration < :lostMinDuration
         AND clid IS NOT NULL
         AND clid != ''
       ORDER BY cdrstarttime DESC
       LIMIT :limit OFFSET :offset`,
       {
-        replacements: { limit: parseInt(limit), offset: parseInt(offset) },
+        replacements: {
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          lostMinDuration: LOST_MIN_DURATION_SECONDS,
+        },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -450,10 +451,11 @@ const getDroppedCalls = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM cdr 
        WHERE (disposition = 'NO ANSWER' OR disposition = 'BUSY' OR disposition = 'FAILED')
-         AND duration <= 60
+         AND duration < :lostMinDuration
          AND clid IS NOT NULL
          AND clid != ''`,
       {
+        replacements: { lostMinDuration: LOST_MIN_DURATION_SECONDS },
         type: sequelize.QueryTypes.SELECT,
       }
     );
@@ -516,16 +518,43 @@ const markLostCallAsAnswered = async (req, res) => {
   }
 };
 
+/** Call-center SLA snapshot for supervisor dashboard (today's CDR) */
+const getSlaMetrics = async (req, res) => {
+  try {
+    const [row] = await sequelize.query(
+      `
+      SELECT ${SLA_AGGREGATE_SELECT}
+      FROM cdr
+      WHERE DATE(cdrstarttime) = CURDATE()
+      `,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+
+    const metrics = buildSlaMetricsFromRow(row);
+    res.json({
+      averageResponseTime: metrics.averageResponseTime,
+      averageHandleTime: metrics.averageHandleTime,
+      serviceLevel: metrics.serviceLevel,
+      abandonmentRate: metrics.abandonmentRate,
+    });
+  } catch (err) {
+    console.error("Error fetching SLA metrics:", err.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
 // ✅ Correct combined export
 module.exports = {
   getCdrCounts,
   getAgentCdrStats,
   dailyAgentCallStatus: getAgentCdrStatsToday,
   getLostCallsToday,
+  getLostCallsDiagnosticsHandler,
   getReceivedCalls,
   getLostCalls,
   getDroppedCalls,
   markLostCallAsAnswered,
   markMissedCallCallback,
   syncMissedCallsFromCdrToday,
+  getSlaMetrics,
 };

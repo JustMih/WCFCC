@@ -144,6 +144,18 @@ const Ticket = sequelize.define(
       type: DataTypes.STRING(50),
       allowNull: true
     },
+    handover_id: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    handover_from_user_id: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    handover_effective_role: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
     workflow_notes: {
       type: DataTypes.TEXT,
       allowNull: true
@@ -176,6 +188,8 @@ Ticket.associate = (models) => {
   Ticket.belongsTo(models.User, { foreignKey: 'converted_by_id', as: 'convertedBy' });
   Ticket.belongsTo(models.User, { foreignKey: 'forwarded_by_id', as: 'forwardedBy' });
   Ticket.belongsTo(models.User, { foreignKey: 'assigned_by', as: 'assignedBy' });
+  Ticket.belongsTo(models.UserHandover, { foreignKey: 'handover_id', as: 'handoverRecord' });
+  Ticket.belongsTo(models.User, { foreignKey: 'handover_from_user_id', as: 'handoverFromUser' });
   Ticket.belongsTo(models.Employer, { foreignKey: 'employerId', as: 'employer' });
 
   Ticket.belongsTo(models.Section, { foreignKey: 'responsible_unit_id', as: 'responsibleSection' });

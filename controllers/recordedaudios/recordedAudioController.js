@@ -1,50 +1,96 @@
- const path = require("path");
+const path = require("path");
 const fs = require("fs");
-const { sequelize } = require("../../models");
+const { sequelize, User } = require("../../models");
+const {
+  buildAgentRecordedCallsQuery,
+  buildAllAgentsNameMap,
+  filterAndEnrichAgentRecordings,
+} = require("../../utils/recordedAudioHelper");
+const {
+  resolveRecordedCallFilePath,
+  DEFAULT_RECORDED_DIR,
+} = require("../../utils/recordedCallAudio");
+
+function buildRecordingUrls(filename) {
+  const encoded = encodeURIComponent(filename);
+  return {
+    url: `/recorded-audio/${encoded}`,
+    play_url: `/recordings/${encoded}`,
+    stream_url: `/api/recorded-audio/${encoded}`,
+  };
+}
 
 const getAllRecordedAudio = async (req, res) => {
   try {
-    const [rows] = await sequelize.query(`
-      SELECT
-        id,
-        cdrstarttime,
-        src AS caller,
-        recordingfile AS filename
-      FROM cdr
-      WHERE recordingfile IS NOT NULL
-      ORDER BY cdrstarttime DESC
-      LIMIT 100
-    `);
+    const { startDate, endDate, limit } = req.query;
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
 
-    const data = rows.map(r => ({
-      ...r,
-      url: `/recorded-audio/${encodeURIComponent(r.filename)}`
-    }));
+    const { sql, replacements } = buildAgentRecordedCallsQuery({
+      startDate: startDate || null,
+      endDate: endDate || null,
+      limit: parsedLimit,
+    });
+
+    const rows = await sequelize.query(sql, {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    const agentsMap = await buildAllAgentsNameMap(User);
+    const enriched = filterAndEnrichAgentRecordings(rows, agentsMap);
+
+    const data = enriched.map((r) => {
+      const diskPath =
+        r.resolved_path ||
+        resolveRecordedCallFilePath(r.filename, r.uniqueid);
+      const { resolved_path: _rp, ...safe } = r;
+      return {
+        ...safe,
+        ...buildRecordingUrls(r.filename),
+        file_found: Boolean(diskPath),
+      };
+    });
 
     res.json(data);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch recordings" });
+    console.error("getAllRecordedAudio:", err.message, err.stack);
+    res.status(500).json({
+      error: "Failed to fetch agent call recordings",
+      detail: process.env.NODE_ENV === "production" ? undefined : err.message,
+    });
   }
 };
 
 const getRecordedAudio = async (req, res) => {
   const filename = path.basename(decodeURIComponent(req.params.filename));
-  const filePath = path.resolve(__dirname, '../../recorded', filename);
+  const uniqueid = req.query.uniqueid
+    ? decodeURIComponent(req.query.uniqueid)
+    : null;
+  const filePath = resolveRecordedCallFilePath(filename, uniqueid);
+
+  if (!filePath) {
+    console.warn("Recorded file not found:", filename);
+    return res.status(404).json({
+      error: "File not found",
+      filename,
+      hint: `Expected under ${DEFAULT_RECORDED_DIR}`,
+    });
+  }
 
   try {
     await fs.promises.access(filePath, fs.constants.R_OK);
 
-    const isDownload = req.query.download === 'true';
+    const isDownload = req.query.download === "true";
 
-    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader("Content-Type", "audio/wav");
     res.setHeader(
-      'Content-Disposition',
-      `${isDownload ? 'attachment' : 'inline'}; filename="${filename}"`
+      "Content-Disposition",
+      `${isDownload ? "attachment" : "inline"}; filename="${filename}"`
     );
 
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
+    console.error("getRecordedAudio stream error:", err.message, filePath);
     res.status(404).json({ error: "File not found" });
   }
 };

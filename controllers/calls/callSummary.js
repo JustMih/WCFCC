@@ -1,13 +1,33 @@
 const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
+const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
+const {
+  ensureLostAbandonsInMissedCalls,
+  countTodayMissedCalls,
+  countQueueDroppedInRange,
+  countIvrAnsweredExcludingQueueLost,
+  countMissedCallsInRange,
+} = require("../../utils/missedCallHelper");
+
+function buildRangeWhereClause(excludeDestS) {
+  let sql = "WHERE call_start BETWEEN :startDate AND :endDate";
+  if (excludeDestS) {
+    sql += ` AND ${buildCdrDestinationWhere("").sql}`;
+  }
+  return sql;
+}
 
 /**
  * Fetch total, answered (with agent), IVR (answered without agent),
  * dropped, and lost counts from call_summary view for a date range.
  * Uses `status` column (not cdr_status).
  */
-async function getCountsForRange(startDate, endDate) {
-  const dateFilter = "WHERE call_start BETWEEN :startDate AND :endDate";
+async function getCountsForRange(startDate, endDate, options = {}) {
+  const excludeDestS =
+    options.excludeDestS === true ||
+    options.excludeDestS === "1" ||
+    options.excludeDestS === "true";
+  const dateFilter = buildRangeWhereClause(excludeDestS);
   const params = { startDate, endDate };
 
   const [totalRes, answeredRes, ivrRes, droppedRes, lostRes] = await Promise.all([
@@ -112,33 +132,69 @@ const getCallSummary = async (req, res) => {
     const yearStart = `${y}-01-01 00:00:00`;
     const yearEnd = `${y}-12-31 23:59:59`;
 
+    const excludeDestS =
+      req.query.excludeDestS === "1" || req.query.excludeDestS === "true";
+    const countOptions = { excludeDestS };
+
     const [currentDay, currentMonth, currentYear] = await Promise.all([
-      getCountsForRange(dayStart, dayEnd),
-      getCountsForRange(monthStart, monthEnd),
-      getCountsForRange(yearStart, yearEnd),
+      getCountsForRange(dayStart, dayEnd, countOptions),
+      getCountsForRange(monthStart, monthEnd, countOptions),
+      getCountsForRange(yearStart, yearEnd, countOptions),
     ]);
+
+    await ensureLostAbandonsInMissedCalls(sequelize);
+
+    const [
+      lostToday,
+      droppedToday,
+      ivrToday,
+      ivrMonth,
+      ivrYear,
+      lostMonth,
+      droppedMonth,
+      lostYear,
+      droppedYear,
+    ] = await Promise.all([
+      countTodayMissedCalls(sequelize),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+      countIvrAnsweredExcludingQueueLost(sequelize, dayStart, dayEnd),
+      countIvrAnsweredExcludingQueueLost(sequelize, monthStart, monthEnd),
+      countIvrAnsweredExcludingQueueLost(sequelize, yearStart, yearEnd),
+      countMissedCallsInRange(sequelize, monthStart, monthEnd),
+      countQueueDroppedInRange(sequelize, monthStart, monthEnd),
+      countMissedCallsInRange(sequelize, yearStart, yearEnd),
+      countQueueDroppedInRange(sequelize, yearStart, yearEnd),
+    ]);
+
+    /** Total must equal answered + ivr + lost + dropped (same sources as breakdown). */
+    const dayAnswered = currentDay.answered;
+    const dayIvr = ivrToday;
+    const monthAnswered = currentMonth.answered;
+    const monthIvr = ivrMonth;
+    const yearAnswered = currentYear.answered;
+    const yearIvr = ivrYear;
 
     const response = {
       currentDay: {
-        totalCalls: currentDay.totalCalls,
-        answered: currentDay.answered,
-        ivr: currentDay.ivr,
-        dropped: currentDay.dropped,
-        lost: currentDay.lost,
+        answered: dayAnswered,
+        ivr: dayIvr,
+        dropped: droppedToday,
+        lost: lostToday,
+        totalCalls: dayAnswered + dayIvr + lostToday + droppedToday,
       },
       currentMonth: {
-        totalCalls: currentMonth.totalCalls,
-        answered: currentMonth.answered,
-        ivr: currentMonth.ivr,
-        dropped: currentMonth.dropped,
-        lost: currentMonth.lost,
+        answered: monthAnswered,
+        ivr: monthIvr,
+        dropped: droppedMonth,
+        lost: lostMonth,
+        totalCalls: monthAnswered + monthIvr + lostMonth + droppedMonth,
       },
       currentYear: {
-        totalCalls: currentYear.totalCalls,
-        answered: currentYear.answered,
-        ivr: currentYear.ivr,
-        dropped: currentYear.dropped,
-        lost: currentYear.lost,
+        answered: yearAnswered,
+        ivr: yearIvr,
+        dropped: droppedYear,
+        lost: lostYear,
+        totalCalls: yearAnswered + yearIvr + lostYear + droppedYear,
       },
       timestamp: new Date().toISOString(),
     };

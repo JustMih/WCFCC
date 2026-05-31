@@ -1,88 +1,72 @@
 "use strict";
 
-const AmiClient = require("asterisk-manager");
+const {
+  supervisorSpyOnLinkedCall,
+} = require("../services/supervisorCallControl");
+const { getAmiStatus } = require("../services/amiService");
+const {
+  refreshLiveCallsCacheIfStale,
+} = require("./livestream/livestreamController");
+const {
+  notifyAgentSupervisorIntervention,
+} = require("../services/supervisorSpyNotify");
 
-const ami = new AmiClient(
-  5038,
-  process.env.ASTERISK_HOST,
-  process.env.AMI_USER,
-  process.env.AMI_PASS,
-  true
-);
-
-/* ====================== MODE NORMALIZER ====================== */
-const normalizeSpyMode = (mode) => {
-  switch (mode) {
-    case "listen":
-      return "q";
-    case "whisper":
-      return "qw";
-    case "barge":
-      return "qb";
-    default:
-      return "q";
-  }
-};
-
-/* ====================== SPY ACTION (NO AUTH) ====================== */
 const spyOnCall = async (req, res) => {
   try {
-    console.log("🧪 TEST SPY REQUEST BODY:", req.body);
+    const { linkedid, mode } = req.body || {};
 
-    const { linkedid, mode } = req.body;
+    await refreshLiveCallsCacheIfStale();
+    const getLiveCalls = req.app.locals.getLiveCalls;
 
-    if (!linkedid || !mode) {
-      return res.status(400).json({ error: "Missing parameters" });
-    }
+    const result = await supervisorSpyOnLinkedCall({
+      userId: req.user?.userId,
+      linkedid,
+      mode: mode || "listen",
+      supervisorExtension: req.body?.supervisorExtension,
+      getLiveCalls,
+    });
 
-    /* 🔍 GET LIVE CALLS */
-    if (typeof req.app.locals.getLiveCalls !== "function") {
-      return res.status(500).json({ error: "Live call cache not available" });
-    }
-
-    const liveCalls = await req.app.locals.getLiveCalls();
-
-    const call = liveCalls.find(
-      (c) => c.linkedid === linkedid && c.status === "active"
+    console.log(
+      `🎧 Spy ${result.mode}: sup ${result.supervisor_extension} → ${result.spy_channel} (${linkedid})`
     );
 
-    if (!call || !call.spyCallId) {
-      return res.status(400).json({ error: "Call not spyiable" });
+    if (result.mode === "whisper" || result.mode === "barge") {
+      const supervisorName =
+        req.user?.full_name || req.user?.username || req.user?.name;
+      await notifyAgentSupervisorIntervention({
+        agentExtension: result.agent_extension,
+        mode: result.mode,
+        supervisorUserId: req.user?.userId,
+        supervisorExtension: result.supervisor_extension,
+        supervisorName,
+        linkedid,
+      }).catch((err) =>
+        console.warn("Agent intervention notify failed:", err.message)
+      );
     }
 
-    /* 🎧 NORMALIZE MODE */
-    const spyMode = normalizeSpyMode(mode);
-
-    /* ⚠️ TEMP: HARD-CODE SUPERVISOR EXTENSION FOR TESTING */
-    const supervisorExtension = "9000"; // 🔴 CHANGE IF NEEDED
-
-    console.log("📞 Spying on:", call.spyCallId, "mode:", spyMode);
-
-    /* 📞 ORIGINATE SUPERVISOR CALL */
-    ami.action({
-      action: "Originate",
-      channel: `PJSIP/${supervisorExtension}`,
-      context: "chanspy",
-      exten: "chanspy",
-      priority: 1,
-      async: true,
-      variable: {
-        SIPADDHEADER:
-          `X-Spy-Channel: ${call.spyCallId}\r\n` +
-          `X-Spy-Mode: ${spyMode}`,
-      },
-    });
-
-    return res.json({
-      status: "ok",
-      spying_on: call.agent_extension,
-      mode,
-      test: true,
-    });
+    return res.json(result);
   } catch (err) {
-    console.error("❌ Spy error:", err);
-    return res.status(500).json({ error: "Spy failed" });
+    const status = err.statusCode || 500;
+    if (status >= 500) {
+      console.error("❌ Spy error:", err);
+    }
+    return res.status(status).json({
+      error: err.message || "Spy failed",
+      asterisk_state: err.asterisk_state,
+      endpoint_line: err.endpoint_line,
+    });
   }
 };
 
-module.exports = { spyOnCall };
+const getSpyStatus = (req, res) => {
+  const status = getAmiStatus();
+  return res.json({
+    ...status,
+    hint: status.configured
+      ? "AMI credentials are set; spy should work if Asterisk manager allows Originate + ChanSpy."
+      : "Set AMI_PASS (and AMI_HOST if needed) in the server .env, then restart the API.",
+  });
+};
+
+module.exports = { spyOnCall, getSpyStatus };

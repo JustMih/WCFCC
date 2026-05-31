@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 
-const SIP_DOMAIN = process.env.SIP_DOMAIN || '';
+const SIP_DOMAIN = process.env.SIP_DOMAIN || 'contactcenter.wcf.go.tz';
 
 /**
  * Render a standardized email card with consistent styling

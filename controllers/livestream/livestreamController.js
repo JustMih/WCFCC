@@ -3,6 +3,7 @@
 
 /* ============================== LIVE CALL CACHE ============================== */
 let liveCallsCache = [];
+let lastCacheRefresh = 0;
 
 const sequelize = require("../../config/mysql_connection");
 const { DataTypes, Op } = require("sequelize");
@@ -11,6 +12,19 @@ const moment = require("moment");
 const CEL = require("../../models/CEL")(sequelize, DataTypes);
 const QueueLog = require("../../models/QueueLog")(sequelize, DataTypes);
 const User = require("../../models/User");
+const {
+  extractExtensionFromChannel,
+  extractExtensionFromQueueAgent,
+  normalizeExtensionCandidate,
+  buildAgentsNameMap,
+  resolveAgentForCall,
+} = require("../../utils/agentExtensionHelper");
+const { isLostWaitSeconds } = require("../../utils/missedCallHelper");
+const {
+  loadSupervisorExtensionSet,
+  applyCelRowToCall,
+  filterCallsForDisplay,
+} = require("../../utils/liveCallCelHelper");
 
 /* ============================== SOCKET STATE ============================== */
 let ioInstance = null;
@@ -31,12 +45,25 @@ const setupSocket = (io) => {
 
 /* ============================== HELPERS ============================== */
 
-// Extract extension from QueueLog.agent OR CEL channel
-const extractExtension = (value) => {
-  if (!value) return null;
-  const match = value.match(/\/(\d+)-|(\d+)/);
-  return match ? (match[1] || match[2]) : null;
-};
+/** Avoid showing Asterisk dialplan tokens (s, t, h) as customer destination */
+function resolveCalleeFromCelRow(row) {
+  const dnid = row.cid_dnid;
+  const peer = row.peer;
+  const exten = row.exten;
+
+  const isUseful = (v) => {
+    if (v == null || v === "" || v === "-") return false;
+    const s = String(v).trim();
+    if (s.length <= 2) return false;
+    if (/^[sthi]$/i.test(s)) return false;
+    return true;
+  };
+
+  if (isUseful(dnid)) return String(dnid).trim();
+  if (isUseful(peer)) return String(peer).trim();
+  if (isUseful(exten)) return String(exten).trim();
+  return dnid || peer || exten || "-";
+}
 
 /* ============================== SOCKET EMITTER ============================== */
 const emitLiveCall = (callData) => {
@@ -74,6 +101,7 @@ const getAllLiveCalls = async (req, res) => {
     });
 
     const calls = {};
+    const supervisorExts = await loadSupervisorExtensionSet(User);
 
     /* ================= BUILD CALL OBJECTS ================= */
     for (const row of events) {
@@ -83,7 +111,7 @@ const getAllLiveCalls = async (req, res) => {
       calls[key] ??= {
         linkedid: key,
         caller: row.cid_num || "-",
-        callee: row.cid_dnid || row.peer || row.exten || "-",
+        callee: resolveCalleeFromCelRow(row),
         channel: row.channame || row.channel || "-",
         spyCallId: row.channame || row.channel || null,
         call_start: null,
@@ -97,54 +125,13 @@ const getAllLiveCalls = async (req, res) => {
         voicemail_path: null,
 
         agent_extension: null,
+        agent_channel: null,
         agent_name: "Unassigned",
       };
 
       const c = calls[key];
 
-      switch (row.eventtype) {
-        case "CHAN_START":
-          c.call_start ??= row.eventtime;
-          c.queue_entry_time ??= row.eventtime;
-          c.status = "calling";
-          break;
-
-        case "ANSWER":
-          c.call_answered ??= row.eventtime;
-          break;
-
-        case "BRIDGE_ENTER":
-          c.status = "active";
-
-          // ✅ ensure spyCallId is ALWAYS populated
-          if (!c.spyCallId && row.channame) {
-            c.spyCallId = row.channame;
-          }
-          // ✅ PRIMARY AGENT SOURCE → CEL
-          if (!c.agent_extension) {
-            const ext = extractExtension(
-              row.channel || row.peer || row.channame
-            );
-            if (ext) c.agent_extension = ext;
-          }
-          break;
-
-        case "HANGUP":
-          c.call_end = row.eventtime;
-          if (!c.call_answered && c.queue_entry_time) c.status = "lost";
-          else if (!c.call_answered) c.status = "dropped";
-          else c.status = "ended";
-          break;
-
-        case "APP_START":
-          if (row.appname === "Queue") {
-            c.queue_entry_time = row.eventtime;
-          }
-          if (row.appname === "VoiceMail") {
-            c.voicemail_path = `/recorded/voicemails/${key}.wav`;
-          }
-          break;
-      }
+      applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds });
 
      // Durations
         if (c.call_start && c.call_end) {
@@ -186,7 +173,7 @@ const getAllLiveCalls = async (req, res) => {
       });
 
       agentConnects.forEach((row) => {
-        const ext = extractExtension(row.agent);
+        const ext = extractExtensionFromQueueAgent(row.agent);
         if (ext && !calls[row.callid]?.agent_extension) {
           calls[row.callid].agent_extension = ext;
         }
@@ -194,45 +181,36 @@ const getAllLiveCalls = async (req, res) => {
     }
 
     /* ================= AGENT NAME RESOLUTION ================= */
-    const agentExtensions = [
-      ...new Set(
-        Object.values(calls)
-          .map((c) => c.agent_extension)
-          .filter(Boolean)
-      ),
-    ];
+    const extensionCandidates = [];
+    Object.values(calls).forEach((c) => {
+      if (c.agent_extension) extensionCandidates.push(c.agent_extension);
+      if (c.caller) extensionCandidates.push(c.caller);
+      const fromChan = extractExtensionFromChannel(c.agent_channel || c.channel);
+      if (fromChan) extensionCandidates.push(fromChan);
+    });
 
-    let agentsMap = {};
-    if (agentExtensions.length > 0) {
-      const agents = await User.findAll({
-        where: { extension: agentExtensions },
-        attributes: ["extension", "full_name", "username"],
-        raw: true,
-      });
-
-      agents.forEach((a) => {
-        agentsMap[a.extension] =
-          a.full_name || a.username || `Agent ${a.extension}`;
-      });
-    }
+    const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
     Object.values(calls).forEach((c) => {
-      if (c.agent_extension) {
-        c.agent_name = agentsMap[c.agent_extension] || "Unknown Agent";
-      }
+      const resolved = resolveAgentForCall(c, agentsMap);
+      c.agent_extension = resolved.agent_extension;
+      c.agent_name = resolved.agent_name;
     });
 
     /* ================= SORT ================= */
-    const result = Object.values(calls).sort((a, b) => {
-      if (a.status === "active" && b.status !== "active") return -1;
-      if (b.status === "active" && a.status !== "active") return 1;
-      return new Date(b.call_start || 0) - new Date(a.call_start || 0);
-    });
+    const result = filterCallsForDisplay(Object.values(calls), supervisorExts).sort(
+      (a, b) => {
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (b.status === "active" && a.status !== "active") return 1;
+        return new Date(b.call_start || 0) - new Date(a.call_start || 0);
+      }
+    );
 
     /* ✅ UPDATE LIVE CALL CACHE */
-liveCallsCache = result;
+    liveCallsCache = result;
+    lastCacheRefresh = Date.now();
 
-res.json(result);
+    res.json(result);
 
   } catch (err) {
     console.error("❌ Livestream error:", err);
@@ -241,10 +219,27 @@ res.json(result);
 };
 const getLiveCallsCache = () => liveCallsCache;
 
+/** Refresh cache before spy if stale (no poll in last 8s) */
+const refreshLiveCallsCacheIfStale = async () => {
+  if (Date.now() - lastCacheRefresh < 8000 && liveCallsCache.length > 0) {
+    return liveCallsCache;
+  }
+  const fakeRes = {
+    json: (data) => {
+      liveCallsCache = data;
+      lastCacheRefresh = Date.now();
+    },
+    status: () => ({ json: () => {} }),
+  };
+  await getAllLiveCalls({}, fakeRes);
+  return liveCallsCache;
+};
+
 /* ============================== EXPORTS ============================== */
 module.exports = {
   setupSocket,
   emitLiveCall,
   getAllLiveCalls,
-  getLiveCallsCache, // 👈 ADD THIS
+  getLiveCallsCache,
+  refreshLiveCallsCacheIfStale,
 };

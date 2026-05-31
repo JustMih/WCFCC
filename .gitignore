@@ -10,7 +10,7 @@ middleware\corsConfig.js
 # server.js
 utils\celPoller.js
 #services\emailService.js    
-controllers\ticket\ticketController.js
+# controllers\ticket\ticketController.js
 test-socket-connection.js   
 
 # Lo

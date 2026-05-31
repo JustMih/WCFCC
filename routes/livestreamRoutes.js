@@ -1,13 +1,18 @@
- const express = require("express");
+const express = require("express");
 const router = express.Router();
-const { spyOnCall } = require("../controllers/spyController");
-//get all live calls
-const {
-  getAllLiveCalls,
-  
-} = require("../controllers/livestream/livestreamController");
+const { spyOnCall, getSpyStatus } = require("../controllers/spyController");
+const { authMiddleware } = require("../middleware/authMiddleware");
+const { roleMiddleware } = require("../middleware/roleMiddleware");
+const { SUPERVISOR_ROLES } = require("../services/supervisorCallControl");
+const { getAllLiveCalls } = require("../controllers/livestream/livestreamController");
 
 router.get("/live-calls", getAllLiveCalls);
-router.post("/spy", spyOnCall);
+router.get("/spy-status", authMiddleware, getSpyStatus);
+router.post(
+  "/spy",
+  authMiddleware,
+  roleMiddleware(SUPERVISOR_ROLES),
+  spyOnCall
+);
 
 module.exports = router;

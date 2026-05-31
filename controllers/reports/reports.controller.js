@@ -1,85 +1,83 @@
-
-// Safely require models with error handling
-let VoiceNote,
-  CDR,
-  IVRDTMFMapping,
-  IVRAction,
-  IVRVoice,
-  Ticket,
-  User,
-  Notification,
-  TicketAssignment,
-  RequesterDetails,
-  IVRDTMFLog;
-try {
-  console.log("Loading VoiceNote model...");
-  VoiceNote = require("../../models/voice_notes.model");
-  console.log("Loading CDR model...");
-  CDR = require("../../models/cdr.model");
-  console.log("Loading IVRDTMFMapping model...");
-  IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
-  console.log("Loading Ticket model...");
-  Ticket = require("../../models/Ticket");
-  console.log("Loading User model...");
-  User = require("../../models/User");
-  console.log("Loading Notification model...");
-  Notification = require("../../models/Notification");
-  console.log("Loading TicketAssignment model...");
-  TicketAssignment = require("../../models/TicketAssignment");
-  console.log("Loading RequesterDetails model...");
-  RequesterDetails = require("../../models/RequesterDetails");
-  console.log("Loading models index...");
-  let models;
-  try {
-    models = require("../../models");
-    console.log("Models loaded, available keys:", Object.keys(models || {}));
-    // Safely get IVRAction, IVRVoice, and IVRDTMFLog with fallback
-    if (models) {
-      IVRAction = models.IVRAction;
-      IVRVoice = models.IVRVoice;
-      IVRDTMFLog = models.IVRDTMFLog;
-    }
-  } catch (modelsError) {
-    console.error(
-      "Error loading models index, trying direct require:",
-      modelsError.message
-    );
-  }
-
-  // Fallback: try direct require if models index failed
-  if (!IVRAction) {
-    try {
-      IVRAction = require("../../models/IVRAction");
-    } catch (e) {
-      console.error("Failed to load IVRAction:", e.message);
-    }
-  }
-  if (!IVRVoice) {
-    try {
-      IVRVoice = require("../../models/IVRVoice");
-    } catch (e) {
-      console.error("Failed to load IVRVoice:", e.message);
-    }
-  }
-  if (!IVRDTMFLog) {
-    try {
-      const DataTypes = require("sequelize").DataTypes;
-      IVRDTMFLog = require("../../models/IVRDTMFLog")(sequelize, DataTypes);
-    } catch (e) {
-      console.error("Failed to load IVRDTMFLog:", e.message);
-    }
-  }
-  console.log("Model loading complete");
-} catch (error) {
-  console.error("Error loading models in reports controller:", error);
-  console.error("Error stack:", error.stack);
-  // Models will be undefined, but we'll handle this in the functions
-}
-
 const path = require("path");
 const fs = require("fs");
-const sequelize = require("../../config/mysql_connection"); // Adjust the path as necessary
+const sequelize = require("../../config/mysql_connection");
 const { Op } = require("sequelize");
+const {
+  buildPlayablePath,
+  resolveVoiceNoteFilePath,
+} = require("../../utils/voiceNoteAudio");
+const {
+  buildSlaMetricsFromRow,
+  SLA_AGGREGATE_SELECT,
+} = require("../../utils/slaMetricsHelper");
+const { checkSLACompliance } = require("../../services/workflowCommunicationService");
+
+let offHoursReportController = {};
+let slaReportController = {};
+try {
+  offHoursReportController = require("./offHoursReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] offHoursReport.controller not loaded:",
+    err.message
+  );
+}
+try {
+  slaReportController = require("./slaReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] slaReport.controller not loaded:",
+    err.message
+  );
+}
+
+let VoiceNote;
+let CDR;
+let IVRDTMFMapping;
+let IVRAction;
+let IVRVoice;
+let Ticket;
+let User;
+let Notification;
+let TicketAssignment;
+let RequesterDetails;
+let IVRDTMFLog;
+let Holiday;
+
+try {
+  VoiceNote = require("../../models/voice_notes.model");
+  CDR = require("../../models/cdr.model");
+  IVRDTMFMapping = require("../../models/ivr_dtmf_mappings.model");
+  Ticket = require("../../models/Ticket");
+  User = require("../../models/User");
+  Notification = require("../../models/Notification");
+  TicketAssignment = require("../../models/TicketAssignment");
+  RequesterDetails = require("../../models/RequesterDetails");
+
+  const models = require("../../models");
+  IVRAction = models.IVRAction;
+  IVRVoice = models.IVRVoice;
+  IVRDTMFLog = models.IVRDTMFLog;
+  Holiday = models.holidays;
+} catch (error) {
+  console.error("Error loading models in reports controller:", error.message);
+  try {
+    IVRAction = require("../../models/IVRAction");
+  } catch (e) {
+    /* optional */
+  }
+  try {
+    IVRVoice = require("../../models/IVRVoice");
+  } catch (e) {
+    /* optional */
+  }
+  try {
+    const { DataTypes } = require("sequelize");
+    IVRDTMFLog = require("../../models/IVRDTMFLog")(sequelize, DataTypes);
+  } catch (e) {
+    /* optional */
+  }
+}
 
 exports.getVoiceNotes = async (req, res) => {
   try {
@@ -100,19 +98,28 @@ exports.streamVoiceNote = async (req, res) => {
     const voiceNote = await VoiceNote.findByPk(id);
 
     if (!voiceNote || !voiceNote.recording_path) {
-      return res.status(404).send("Voice note not found in database");
+      return res.status(404).json({ error: "Voice note not found in database" });
     }
 
-    const filePath = path.resolve(voiceNote.recording_path);
+    const filePath = resolveVoiceNoteFilePath(voiceNote.recording_path);
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).send("Voice file not found on disk");
+    if (!filePath) {
+      console.warn(
+        "Voice file missing on disk:",
+        id,
+        voiceNote.recording_path
+      );
+      return res.status(404).json({
+        error: "Voice file not found on disk",
+        recording_path: voiceNote.recording_path,
+        hint: "Use /voice/custom/... URL from the live server if running API locally",
+      });
     }
 
     res.sendFile(filePath, { headers: { "Content-Type": "audio/wav" } });
   } catch (error) {
     console.error("Error streaming voice note:", error);
-    res.status(500).send("Internal server error");
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -172,6 +179,12 @@ exports.testIVRTable = async (req, res) => {
  
 exports.getIVRInteractions = async (req, res) => {
   try {
+    const { startDate, endDate } = req.params;
+    const dateFilter =
+      startDate && endDate
+        ? `WHERE m.createdAt BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`
+        : "";
+
     const query = `
       SELECT
         m.id,
@@ -193,11 +206,13 @@ exports.getIVRInteractions = async (req, res) => {
         ON a.id = m.action_id
       LEFT JOIN IVRVoices v
         ON v.id = m.ivr_voice_id
+      ${dateFilter}
       ORDER BY m.createdAt DESC
-      LIMIT 1000
+      LIMIT 5000
     `;
 
     const rows = await sequelize.query(query, {
+      replacements: startDate && endDate ? { startDate, endDate } : {},
       type: sequelize.QueryTypes.SELECT,
     });
 
@@ -304,7 +319,7 @@ exports.getCDRReport = (req, res) => {
       .json({ error: "Start date and end date are required" });
   }
 
-  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN :startDate AND :endDate`;
+  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`;
   let replacements = { startDate, endDate };
 
   // Add disposition filter if provided
@@ -652,7 +667,17 @@ exports.getTicketAssignmentsReport = async (req, res) => {
   }
 };
 
-// Notifications Report
+if (typeof offHoursReportController.getOffHoursReport === "function") {
+  exports.getOffHoursReport = offHoursReportController.getOffHoursReport;
+} else {
+  exports.getOffHoursReport = async (req, res) => {
+    res.status(503).json({
+      error:
+        "Off-hours report is not available. Deploy offHoursReport.controller.js and utils/offHoursReportHelper.js.",
+    });
+  };
+}
+
 exports.getNotificationsReport = async (req, res) => {
   const { startDate, endDate } = req.params;
 
@@ -853,9 +878,184 @@ exports.getEscalationReport = async (req, res) => {
       return res.status(404).json({ message: "No escalated tickets found" });
     }
 
-    res.json(formattedEscalations);
+    res.json(formattedEscalations); 
   } catch (error) {
     console.error("Error fetching escalation report:", error);
     res.status(500).json({ error: error.message });
   }
 };
+
+/** Call-center SLA report (inline fallback if slaReport.controller.js missing on server) */
+async function getSlaReportHandler(req, res) {
+  const { startDate, endDate } = req.params;
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  try {
+    const [summaryRow] = await sequelize.query(
+      `
+      SELECT ${SLA_AGGREGATE_SELECT}
+      FROM cdr
+      WHERE cdrstarttime BETWEEN :startDate AND :endDate
+      `,
+      {
+        replacements: {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const dailyRows = await sequelize.query(
+      `
+      SELECT
+        DATE(cdrstarttime) AS date,
+        ${SLA_AGGREGATE_SELECT}
+      FROM cdr
+      WHERE cdrstarttime BETWEEN :startDate AND :endDate
+      GROUP BY DATE(cdrstarttime)
+      ORDER BY date ASC
+      `,
+      {
+        replacements: {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const summary = buildSlaMetricsFromRow(summaryRow);
+    const daily = dailyRows.map((row) =>
+      buildSlaMetricsFromRow(row, row.date)
+    );
+
+    res.json({ summary, daily });
+  } catch (error) {
+    console.error("Error fetching SLA report:", error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/** Ticket SLA report (inline fallback) */
+async function getTicketSlaReportHandler(req, res) {
+  const { startDate, endDate } = req.params;
+  const statusFilter = (req.query.status || "all").toLowerCase();
+
+  if (!startDate || !endDate) {
+    return res
+      .status(400)
+      .json({ error: "Start date and end date are required" });
+  }
+
+  try {
+    const tickets = await sequelize.query(
+      `
+      SELECT
+        t.*,
+        u1.full_name AS assigned_to_name,
+        u2.full_name AS creator_name
+      FROM Tickets t
+      LEFT JOIN Users u1 ON t.assigned_to_id = u1.id
+      LEFT JOIN Users u2 ON t.created_by = u2.id
+      WHERE t.created_at BETWEEN :startDate AND :endDate
+      ORDER BY t.created_at DESC
+      `,
+      {
+        replacements: {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const summary = {
+      total: 0,
+      onTime: 0,
+      approaching: 0,
+      overdue: 0,
+      noSla: 0,
+      unknown: 0,
+    };
+
+    const rows = tickets.map((ticket) => {
+      const compliance = checkSLACompliance(ticket);
+      const slaStatus = compliance?.status || "Unknown";
+      const slaDetails = compliance?.details || "";
+      const slaSeverity = compliance?.severity || null;
+
+      switch (slaStatus) {
+        case "On Time":
+          summary.onTime += 1;
+          break;
+        case "Approaching Deadline":
+          summary.approaching += 1;
+          break;
+        case "Overdue":
+          summary.overdue += 1;
+          break;
+        case "No SLA":
+          summary.noSla += 1;
+          break;
+        default:
+          summary.unknown += 1;
+      }
+      summary.total += 1;
+
+      return {
+        id: ticket.id,
+        ticket_id: ticket.ticket_id || ticket.id,
+        subject: ticket.subject || "-",
+        status: ticket.status || "-",
+        workflow_current_role: ticket.workflow_current_role || "-",
+        assigned_to_name: ticket.assigned_to_name || "-",
+        created_at: ticket.created_at,
+        sla_status: slaStatus,
+        sla_details: slaDetails,
+        sla_severity: slaSeverity,
+      };
+    });
+
+    const statusMap = {
+      overdue: "Overdue",
+      approaching: "Approaching Deadline",
+      "on-time": "On Time",
+      ontime: "On Time",
+      "no-sla": "No SLA",
+    };
+
+    const filterLabel = statusMap[statusFilter];
+    const filtered =
+      filterLabel && statusFilter !== "all"
+        ? rows.filter((r) => r.sla_status === filterLabel)
+        : rows;
+
+    res.json({ summary, tickets: filtered });
+  } catch (error) {
+    console.error("Error fetching ticket SLA report:", error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+exports.getSlaReport =
+  slaReportController.getSlaReport || getSlaReportHandler;
+exports.getTicketSlaReport =
+  slaReportController.getTicketSlaReport || getTicketSlaReportHandler;
+
+let ticketWorkflowTatReportController = {};
+try {
+  ticketWorkflowTatReportController = require("./ticketWorkflowTatReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] ticketWorkflowTatReport.controller:",
+    err.message
+  );
+}
+exports.getTicketWorkflowTatReport =
+  ticketWorkflowTatReportController.getTicketWorkflowTatReport;

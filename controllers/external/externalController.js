@@ -175,6 +175,7 @@
 
 const { Ticket, User, TicketAssignment } = require("../../models");
 const { Op } = require("sequelize");
+const { createTicket } = require("../ticket/ticketController");
 
 // --- helpers (no extra packages) ---
 const newReqId = () => Math.random().toString(36).slice(2, 10);
@@ -360,4 +361,98 @@ const getTicketStatusExternal = async (req, res) => {
   }
 };
 
-module.exports = { getTicketStatusExternal };
+const VALID_CATEGORIES = [
+  "Inquiry",
+  "Complaint",
+  "Suggestion",
+  "Compliment",
+  "Congrats",
+];
+
+const unwrapPayload = (body) => {
+  if (!body || typeof body !== "object") return null;
+  if (body.payload && typeof body.payload === "object") return body.payload;
+  return body;
+};
+
+const validateEsspPayload = (payload) => {
+  const errors = [];
+  if (!payload.phoneNumber?.toString().trim()) {
+    errors.push("phoneNumber is required");
+  }
+  if (!payload.requester?.toString().trim()) {
+    errors.push("requester is required");
+  }
+  if (!payload.category?.toString().trim()) {
+    errors.push("category is required");
+  } else if (!VALID_CATEGORIES.includes(payload.category)) {
+    errors.push(
+      `category must be one of: ${VALID_CATEGORIES.join(", ")}`
+    );
+  }
+  if (!payload.subject?.toString().trim()) {
+    errors.push("subject is required");
+  }
+  if (!payload.description?.toString().trim()) {
+    errors.push("description is required");
+  }
+  return errors;
+};
+
+/**
+ * POST /api/essp/create-ticket
+ * ESSP and other portals — body: { payload: { ... } } or flat fields.
+ */
+const createTicketExternal = async (req, res) => {
+  try {
+    const payload = unwrapPayload(req.body);
+    if (!payload) {
+      return res.status(400).json({
+        success: false,
+        message: "Request body must include a payload object",
+        error: "INVALID_BODY",
+      });
+    }
+
+    const validationErrors = validateEsspPayload(payload);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        error: "VALIDATION_ERROR",
+        details: validationErrors,
+      });
+    }
+
+    const systemUser = await User.findOne({
+      where: { username: "system" },
+      attributes: ["id", "role", "full_name"],
+    });
+
+    if (!systemUser) {
+      return res.status(500).json({
+        success: false,
+        message: "System user is not configured for external ticket creation",
+        error: "SYSTEM_USER_NOT_CONFIGURED",
+      });
+    }
+
+    req.user = { userId: systemUser.id, role: systemUser.role };
+    req.body = {
+      ...payload,
+      channel: payload.channel || "ESSP",
+    };
+    req.externalSource = "ESSP";
+
+    return createTicket(req, res);
+  } catch (error) {
+    console.error("createTicketExternal error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error: "INTERNAL_SERVER_ERROR",
+    });
+  }
+};
+
+module.exports = { getTicketStatusExternal, createTicketExternal };

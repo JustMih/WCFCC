@@ -8,6 +8,23 @@ const CEL = require("../../models/CEL")(
   require("sequelize").DataTypes
 );
 const QueueStatus = db.QueueStatus;
+const {
+  countTodayMissedCalls,
+  countQueueDroppedInRange,
+  getTodayLostCallsList,
+  isLostWaitSeconds,
+  getTodayBounds,
+} = require("../../utils/missedCallHelper");
+const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
+const {
+  buildAgentsNameMap,
+  resolveAgentForCall,
+} = require("../../utils/agentExtensionHelper");
+const {
+  loadSupervisorExtensionSet,
+  applyCelRowToCall,
+  filterCallsForDisplay,
+} = require("../../utils/liveCallCelHelper");
 
 /* ================= SOCKET.IO ================= */
 let ioInstance = null;
@@ -42,122 +59,7 @@ const getPublicDashboardData = async (req, res) => {
         )
       : [];
 
-    /* =====================================================
-       LOST CALL INSERTION (KEEP AS-IS)
-    ====================================================== */
-    const lostCdrs = await sequelize.query(
-      `
-      SELECT uniqueid, src AS caller, cdrstarttime AS call_time
-      FROM cdr
-      WHERE DATE(cdrstarttime) = CURDATE()
-        AND disposition = 'NO ANSWER'
-        AND lastapp = 'Queue'
-        AND uniqueid NOT IN (
-          SELECT linkedid
-          FROM MissedCalls
-          WHERE DATE(time) = CURDATE()
-            AND linkedid IS NOT NULL
-        )
-      ORDER BY cdrstarttime DESC
-      LIMIT 100
-      `,
-      { type: QueryTypes.SELECT }
-    );
-
-    for (const cdr of lostCdrs) {
-      let caller = (cdr.caller || "UNKNOWN").replace(/[^+\d]/g, "");
-      if (caller.startsWith("255")) caller = "0" + caller.slice(3);
-      if (caller.startsWith("+255")) caller = "0" + caller.slice(4);
-      if (!caller.startsWith("0") && caller.length === 9) caller = "0" + caller;
-      if (!caller || caller.length < 9) caller = "UNKNOWN";
-
-      await sequelize.query(
-        `
-        INSERT IGNORE INTO MissedCalls
-          (caller, time, agentId, linkedid, status, createdAt, updatedAt)
-        VALUES
-          (:caller, :time, NULL, :linkedid, 'pending', NOW(), NOW())
-        `,
-        {
-          replacements: {
-            caller,
-            time: cdr.call_time,
-            linkedid: cdr.uniqueid,
-          },
-          type: QueryTypes.INSERT,
-        }
-      );
-    }
-
-    /* =====================================================
-       CALLBACK DETECTION (KEEP AS-IS)
-    ====================================================== */
-    const callbackCdrs = await sequelize.query(
-      `
-      SELECT uniqueid, src, dst, channel, lastdata, billsec,
-             cdrstarttime AS callback_time
-      FROM cdr
-      WHERE DATE(cdrstarttime) = CURDATE()
-        AND disposition = 'ANSWERED'
-        AND (lastapp IN ('Dial','PJSIP','SIP')
-             OR lastdata LIKE '%@%'
-             OR lastdata LIKE '%,%')
-        AND cdrstarttime > DATE_SUB(NOW(), INTERVAL 2 HOUR)
-      ORDER BY cdrstarttime DESC
-      LIMIT 100
-      `,
-      { type: QueryTypes.SELECT }
-    );
-
-    for (const cb of callbackCdrs) {
-      let agentExt = "";
-      const chanMatch = (cb.channel || "").match(/\/(\d+)-/);
-      if (chanMatch) agentExt = chanMatch[1];
-      else {
-        const dataMatch =
-          (cb.lastdata || "").match(/PJSIP\/(\d+)/) ||
-          (cb.lastdata || "").match(/^(\d+),/);
-        if (dataMatch) agentExt = dataMatch[1];
-      }
-
-      let calledNumber = (cb.dst || "").replace(/[^0-9+]/g, "");
-      if (calledNumber.startsWith("255")) calledNumber = "0" + calledNumber.slice(3);
-      if (calledNumber.startsWith("+255")) calledNumber = "0" + calledNumber.slice(4);
-      if (calledNumber.startsWith("+")) calledNumber = calledNumber.slice(1);
-
-      if (!agentExt || agentExt.length < 3 || calledNumber.length < 9) continue;
-
-     await sequelize.query(
-  `
-  UPDATE IGNORE MissedCalls
-  SET
-    status = 'called_back',
-    called_back_at = :callback_time,
-    called_back_by = :agent_ext,
-    agentId = :agent_ext,
-    billsec = :billsec,
-    updatedAt = NOW()
-  WHERE
-    status = 'pending'
-    AND (called_back_by IS NULL OR called_back_by = '')
-    AND DATE(time) = CURDATE()
-    AND :callback_time > time
-    AND (caller = :calledNumber OR caller LIKE CONCAT('%', :calledNumber, '%'))
-  ORDER BY time DESC
-  LIMIT 1
-  `,
-  {
-    replacements: {
-      calledNumber,
-      callback_time: cb.callback_time,
-      agent_ext: agentExt,
-      billsec: cb.billsec || 0,
-    },
-    type: QueryTypes.UPDATE,
-  }
-);
-
-    }
+    /* Lost sync runs inside countTodayMissedCalls (throttled) — avoid duplicate work every 2s. */
 
     /* =====================================================
        CEL LIVE CALL TRACKING (DASHBOARD)
@@ -180,15 +82,17 @@ const getPublicDashboardData = async (req, res) => {
     });
 
     const calls = {};
+    const supervisorExts = await loadSupervisorExtensionSet(User);
+
     for (const row of events) {
       const key = row.linkedid || row.uniqueid;
       if (!key) continue;
- 
+
       calls[key] ??= {
         linkedid: key,
         caller: row.cid_num || "-",
         callee: row.exten || row.cid_dnid || "-",
-        agent_extension: null, // 👈 starts empty
+        agent_extension: null,
         call_start: null,
         call_answered: null,
         call_end: null,
@@ -196,41 +100,10 @@ const getPublicDashboardData = async (req, res) => {
         status: "calling",
       };
 
-      const c = calls[key];
-      switch (row.eventtype) {
-        case "CHAN_START":
-          c.call_start ??= row.eventtime;
-          break;
-        case "APP_START":
-          if (row.appname === "Queue" || row.appname === "AppQueue")
-            c.queue_entry_time ??= row.eventtime;
-          break;
-       case "ANSWER":
-        case "BRIDGE_ENTER": {
-          c.call_answered ??= row.eventtime;
-          c.status = "active";
-
-          // ✅ Extract agent extension ONLY here
-          if (!c.agent_extension) {
-            const src = row.channel || row.peer || "";
-            const match = src.match(/\/(\d+)-/);
-            if (match) {
-              c.agent_extension = match[1];
-            }
-          }
-          break;
-        }
-
-        case "HANGUP":
-          c.call_end = row.eventtime;
-          if (!c.call_answered && c.queue_entry_time) c.status = "lost";
-          else if (!c.call_answered) c.status = "dropped";
-          else c.status = "ended";
-          break;
-      }
+      applyCelRowToCall(calls[key], row, supervisorExts, { isLostWaitSeconds });
     }
 
-    const allCalls = Object.values(calls);
+    const allCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
     const liveCalls = allCalls.filter((c) => !c.call_end);
     const activeCalls = liveCalls.filter((c) => c.status === "active");
    
@@ -239,46 +112,32 @@ const getPublicDashboardData = async (req, res) => {
 ).length;
 
 
-    const droppedCalls = allCalls.filter((c) => c.status === "dropped");
-// Collect unique agent extensions from active calls
-const agentExtensions = [
-  ...new Set(
-    activeCalls
-      .map(c => c.agent_extension)
-      .filter(ext => ext && ext.length >= 3)
-  )
-];
+const extensionCandidates = [];
+      activeCalls.forEach((c) => {
+        if (c.agent_extension) extensionCandidates.push(c.agent_extension);
+        if (c.caller) extensionCandidates.push(c.caller);
+      });
+      const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-let agentsMap = {};
-
-if (agentExtensions.length > 0) {
-  const agents = await User.findAll({
-    where: {
-      extension: agentExtensions,
-    },
-    attributes: ["extension", "full_name", "username"],
-    raw: true,
-  });
-
-        agents.forEach(a => {
-          agentsMap[a.extension] = a.full_name || a.username || `Agent ${a.extension}`;
-        });
-      }
-      const enrichedActiveCalls = activeCalls.map(call => ({
-        ...call,
-        agent_name: call.agent_extension
-          ? agentsMap[call.agent_extension] || "Unknown Agent"
-          : "Unknown Agent",
-      }));
+      const enrichedActiveCalls = activeCalls.map((call) => {
+        const resolved = resolveAgentForCall(call, agentsMap);
+        return {
+          ...call,
+          agent_extension: resolved.agent_extension,
+          agent_name: resolved.agent_name,
+        };
+      });
 
   
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
     ====================================================== */
+    const cdrStatsDestFilter = buildCdrDestinationWhere("", "dst");
 const totalCounts = await sequelize.query(
   `
   SELECT disposition, COUNT(*) AS count
   FROM cdr
+  WHERE ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -291,6 +150,7 @@ const monthlyCounts = await sequelize.query(
   FROM cdr
   WHERE YEAR(cdrstarttime)=YEAR(CURDATE())
     AND MONTH(cdrstarttime)=MONTH(CURDATE())
+    AND ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
@@ -302,22 +162,19 @@ const monthlyCounts = await sequelize.query(
   SELECT disposition, COUNT(*) AS count
   FROM cdr
   WHERE DATE(cdrstarttime)=CURDATE()
+    AND ${cdrStatsDestFilter.sql}
   GROUP BY disposition
   `,
   { type: QueryTypes.SELECT }
 );
 
 
-    const [{ count: lostCount }] = await sequelize.query(
-      `
-      SELECT COUNT(*) AS count
-      FROM cdr
-      WHERE DATE(cdrstarttime)=CURDATE()
-        AND disposition='NO ANSWER'
-        AND lastapp='Queue'
-      `,
-      { type: QueryTypes.SELECT }
-    );
+    const { start: dayStart, end: dayEnd } = getTodayBounds();
+    const [lostCount, droppedCount] = await Promise.all([
+      countTodayMissedCalls(sequelize),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+    ]);
+
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -332,8 +189,12 @@ const monthlyCounts = await sequelize.query(
     active: activeCalls.length,
     inQueue: inQueueCalls,
     answered: activeCalls.length,
-    dropped: droppedCalls.length,
+    dropped: Number(droppedCount || 0),
     lost: Number(lostCount || 0),
+  },
+  callStatistics: {
+    lost: Number(lostCount || 0),
+    dropped: Number(droppedCount || 0),
   },
   callStats: {
     totalCounts,
@@ -357,25 +218,7 @@ const monthlyCounts = await sequelize.query(
 /* ================= LOST CALLS LIST ================= */
 const getLostCallsToday = async (req, res) => {
   try {
-    const rows = await sequelize.query(
-      `
-      SELECT
-        mc.id,
-        mc.caller,
-        mc.time AS lost_time,
-        mc.status,
-        mc.called_back_at,
-        mc.called_back_by,
-        mc.billsec,
-        COALESCE(u.full_name, u.username, mc.called_back_by, '—') AS agent_name
-      FROM MissedCalls mc
-      LEFT JOIN Users u ON u.extension = mc.called_back_by
-      WHERE DATE(mc.time)=CURDATE()
-        AND mc.archived=0
-      ORDER BY mc.time DESC
-      `,
-      { type: QueryTypes.SELECT }
-    );
+    const rows = await getTodayLostCallsList(sequelize);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch lost calls" });
@@ -392,7 +235,7 @@ const startPeriodicUpdates = () => {
     } catch (err) {
       console.error("Periodic update error:", err);
     }
-  }, 2000);
+  }, 10000);
 };
 
 /* ================= EXPORTS ================= */
