@@ -75,7 +75,9 @@ function effectiveQueueWaitSeconds(sessionRow, queueWaitByCallId, celWaitBySessi
   }
   const celWait =
     sid && celWaitBySession ? celWaitBySession.get(sid) || 0 : 0;
+  const sumDuration = Number(sessionRow.sum_duration) || 0;
   const cdrWait = Math.max(
+    sumDuration,
     Number(sessionRow.max_duration) || 0,
     Number(sessionRow.max_billsec) || 0
   );
@@ -703,6 +705,43 @@ function dedupeIncomingLostCdrs(cdrs) {
   return kept.sort((a, b) => new Date(b.call_time) - new Date(a.call_time));
 }
 
+/** Sessions where an agent extension answered (exclude from lost/dropped). */
+async function fetchAnsweredAgentSessionIdSet(
+  sequelize,
+  startDateTime,
+  endDateTime
+) {
+  const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
+  const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "a");
+  try {
+    const rows = await sequelize.query(
+      `
+      SELECT DISTINCT ${sessionIdExpr} AS session_id
+      FROM cdr a
+      WHERE a.cdrstarttime BETWEEN :startDateTime AND :endDateTime
+        AND a.disposition = 'ANSWERED'
+        AND (
+          a.dstchannel LIKE 'PJSIP/%'
+          OR a.dstchannel LIKE 'SIP/%'
+        )
+      `,
+      {
+        replacements: { startDateTime, endDateTime },
+        type: QueryTypes.SELECT,
+      }
+    );
+    return new Set(
+      rows.map((r) => String(r.session_id || "").trim()).filter(Boolean)
+    );
+  } catch (err) {
+    console.warn(
+      "[fetchAnsweredAgentSessionIdSet] skipped:",
+      err?.message || err
+    );
+    return new Set();
+  }
+}
+
 /** Queue NO ANSWER sessions in a date range; lostOnly=true => wait >= 5 min, false => dropped (< 5 min). */
 async function fetchQueueAbandonSessionsRaw(
   sequelize,
@@ -719,9 +758,16 @@ async function fetchQueueAbandonSessionsRaw(
     ? "AND c.lastapp IN ('Queue', 'AppQueue')"
     : "";
 
-  const [rows, queueLogMeta, celWaitBySession] = await Promise.all([
-    sequelize.query(
-      `
+  let rows = [];
+  let queueWaitByCallId = new Map();
+  let uniqueidToSession = new Map();
+  let celWaitBySession = new Map();
+
+  try {
+    const [cdrRows, queueLogMeta, celWaitMap, answeredSessionIds] =
+      await Promise.all([
+        sequelize.query(
+          `
       SELECT
         ${sessionIdExpr} AS session_id,
         MIN(
@@ -732,34 +778,40 @@ async function fetchQueueAbandonSessionsRaw(
           )
         ) AS caller,
         MIN(c.cdrstarttime) AS call_time,
+        SUM(COALESCE(c.duration, 0)) AS sum_duration,
         MAX(COALESCE(c.duration, 0)) AS max_duration,
         MAX(COALESCE(c.billsec, 0)) AS max_billsec
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :startDateTime AND :endDateTime
-        AND (
-          c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
-          OR (
-            c.disposition = 'ANSWERED'
-            AND c.lastapp IN ('Queue', 'AppQueue')
-          )
-        )
+        AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
         ${lastappFilter}
         AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
       GROUP BY ${sessionIdExpr}
       ORDER BY call_time DESC
       LIMIT 2000
       `,
-      {
-        replacements: { startDateTime, endDateTime },
-        type: QueryTypes.SELECT,
-      }
-    ),
-    fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
-    fetchCelQueueWaitMap(sequelize, startDateTime, endDateTime),
-  ]);
+          {
+            replacements: { startDateTime, endDateTime },
+            type: QueryTypes.SELECT,
+          }
+        ),
+        fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
+        fetchCelQueueWaitMap(sequelize, startDateTime, endDateTime),
+        fetchAnsweredAgentSessionIdSet(sequelize, startDateTime, endDateTime),
+      ]);
 
-  const queueWaitByCallId = queueLogMeta.waitByCallId;
-  const uniqueidToSession = queueLogMeta.uniqueidToSession;
+    rows = (cdrRows || []).filter((row) => {
+      const sid = String(row.session_id || "").trim();
+      return !sid || !answeredSessionIds.has(sid);
+    });
+
+    queueWaitByCallId = queueLogMeta.waitByCallId;
+    uniqueidToSession = queueLogMeta.uniqueidToSession;
+    celWaitBySession = celWaitMap;
+  } catch (err) {
+    console.error("[fetchQueueAbandonSessionsRaw] query failed:", err?.message || err);
+    return [];
+  }
 
   const sessionIds = rows
     .map((r) => String(r.session_id || ""))
@@ -773,8 +825,12 @@ async function fetchQueueAbandonSessionsRaw(
 
   const withWait = rows.map((row) => {
     const sid = String(row.session_id || "");
+    const enriched = {
+      ...row,
+      call_summary_duration: csDurMap.get(sid) || 0,
+    };
     const baseWait = effectiveQueueWaitSeconds(
-      { ...row, call_summary_duration: csDurMap.get(sid) || 0 },
+      enriched,
       queueWaitByCallId,
       celWaitBySession
     );
@@ -782,7 +838,7 @@ async function fetchQueueAbandonSessionsRaw(
       baseWait,
       csDurMap.get(sid)
     );
-    return { ...row, wait_seconds };
+    return { ...enriched, wait_seconds };
   });
 
   const classified = withWait.filter((row) => {
