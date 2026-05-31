@@ -133,7 +133,7 @@ function buildDateRangeWhere(alias, startDate, endDate) {
   const schema = getSchema();
   const col = qualify(alias, schema.timeColumn);
   return {
-    sql: `${col} BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`,
+    sql: `${col} >= CONCAT(:startDate, ' 00:00:00') AND ${col} < DATE_ADD(CONCAT(:endDate, ' 00:00:00'), INTERVAL 1 DAY)`,
     replacements: { startDate, endDate },
   };
 }
@@ -322,6 +322,21 @@ function mapRowToCdrApiShape(row) {
       row.agent_wait_sec != null && row.agent_wait_sec !== ""
         ? Number(row.agent_wait_sec)
         : null,
+    talk_time_sec: (() => {
+      const wait =
+        row.agent_wait_sec != null && row.agent_wait_sec !== ""
+          ? Number(row.agent_wait_sec)
+          : null;
+      if (wait == null || Number.isNaN(wait)) return 0;
+      const total =
+        row.duration != null
+          ? Number(row.duration)
+          : row.total_duration != null
+            ? Number(row.total_duration)
+            : NaN;
+      if (!Number.isFinite(total)) return 0;
+      return Math.max(0, total - wait);
+    })(),
   };
 }
 
@@ -521,6 +536,139 @@ async function enrichCdrRowsWithAgentNames(rows, User, sequelize) {
   return enriched;
 }
 
+function buildAgentPerformanceFromClause(alias = "cs", options = {}) {
+  const a = alias;
+  return `
+    FROM ${VIEW_NAME} ${a}
+    LEFT JOIN Users u_agent
+      ON ${a}.agent IS NOT NULL
+      AND TRIM(${a}.agent) <> ''
+      AND (
+        u_agent.extension = CAST(${a}.agent AS UNSIGNED)
+        OR CAST(u_agent.extension AS CHAR) COLLATE utf8mb4_unicode_ci
+          = TRIM(${a}.agent) COLLATE utf8mb4_unicode_ci
+        OR u_agent.username = TRIM(${a}.agent)
+      )
+    LEFT JOIN Users u_dst
+      ON (${a}.agent IS NULL OR TRIM(${a}.agent) = '')
+      AND ${a}.called IS NOT NULL
+      AND TRIM(${a}.called) REGEXP '^[0-9]{3,6}$'
+      AND TRIM(${a}.called) NOT REGEXP '^0+$'
+      AND (
+        u_dst.extension = CAST(TRIM(${a}.called) AS UNSIGNED)
+        OR CAST(u_dst.extension AS CHAR) COLLATE utf8mb4_unicode_ci
+          = TRIM(${a}.called) COLLATE utf8mb4_unicode_ci
+      )${buildCdrQueueWaitJoin(a, options)}`;
+}
+
+function buildAgentPerformanceAggregateSelect(alias = "cs") {
+  const a = alias;
+  const schema = getSchema();
+  const durationCol = qualify(a, schema.durationColumn || "total_duration");
+  const agentWaitExpr = buildCdrAgentWaitSelect().replace(/\s+AS agent_wait_sec\s*$/, "");
+  const answeredExpr = `(LOWER(${a}.status) = 'answered' OR ${a}.cdr_status = 'ANSWERED')`;
+
+  return `
+    COALESCE(u_agent.id, u_dst.id) AS agent_id,
+    COALESCE(u_agent.full_name, u_dst.full_name) AS agent_name,
+    COUNT(*) AS total_calls,
+    SUM(CASE WHEN ${answeredExpr} THEN 1 ELSE 0 END) AS answered_calls,
+    SUM(
+      CASE
+        WHEN LOWER(${a}.status) IN ('lost', 'dropped') THEN 1
+        WHEN ${a}.cdr_status IS NOT NULL AND ${a}.cdr_status != 'ANSWERED' AND NOT (${answeredExpr}) THEN 1
+        ELSE 0
+      END
+    ) AS missed_calls,
+    AVG(CASE WHEN ${answeredExpr} THEN ${durationCol} END) AS avg_duration,
+    SUM(
+      CASE
+        WHEN ${answeredExpr} THEN
+          CASE
+            WHEN (${agentWaitExpr}) IS NOT NULL
+              THEN GREATEST(0, COALESCE(${durationCol}, 0) - (${agentWaitExpr}))
+            ELSE 0
+          END
+        ELSE 0
+      END
+    ) AS total_talk_time
+  `;
+}
+
+/**
+ * Aggregate agent performance metrics from call_summary for a date range.
+ * @param {import('sequelize').Sequelize} sequelize
+ * @param {{ startDate: string, endDate: string, agentUserId?: number|string|null }} options
+ * @returns {Promise<Array<object>>}
+ */
+async function queryAgentPerformanceAggregates(
+  sequelize,
+  { startDate, endDate, agentUserId = null }
+) {
+  await ensureCallSummaryReady(sequelize);
+
+  const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
+  const destFilter = buildCdrDestinationWhere("cs", "called");
+  const queueWaitOpts = { queueLogDateFilter: true };
+
+  const whereParts = [
+    dateFilter.sql,
+    destFilter.sql,
+    "COALESCE(u_agent.id, u_dst.id) IS NOT NULL",
+  ];
+
+  const replacements = {
+    ...dateFilter.replacements,
+    ...destFilter.replacements,
+    ...buildCdrQueueWaitReplacements(startDate, endDate),
+  };
+
+  if (agentUserId != null && agentUserId !== "" && agentUserId !== "all") {
+    whereParts.push("COALESCE(u_agent.id, u_dst.id) = :agentUserId");
+    replacements.agentUserId = agentUserId;
+  }
+
+  const rows = await sequelize.query(
+    `
+    SELECT ${buildAgentPerformanceAggregateSelect("cs")}
+    ${buildAgentPerformanceFromClause("cs", queueWaitOpts)}
+    WHERE ${whereParts.join(" AND ")}
+    GROUP BY COALESCE(u_agent.id, u_dst.id), COALESCE(u_agent.full_name, u_dst.full_name)
+    ORDER BY agent_name ASC
+    `,
+    {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    }
+  );
+
+  return (rows || []).map((row) => {
+    const totalCalls = Number(row.total_calls) || 0;
+    const answeredCalls = Number(row.answered_calls) || 0;
+    const missedCalls =
+      Number(row.missed_calls) ||
+      Math.max(0, totalCalls - answeredCalls);
+    const avgDuration = row.avg_duration != null ? Math.round(Number(row.avg_duration)) : 0;
+    const totalTalkTime = Number(row.total_talk_time) || 0;
+    const fcrRate =
+      totalCalls > 0
+        ? `${Math.round((answeredCalls / totalCalls) * 100)}%`
+        : "0%";
+
+    return {
+      id: row.agent_id,
+      agent_id: row.agent_id,
+      agent_name: row.agent_name || "Unknown Agent",
+      total_calls: totalCalls,
+      answered_calls: answeredCalls,
+      missed_calls: missedCalls,
+      avg_duration: avgDuration,
+      total_talk_time: totalTalkTime,
+      fcr_rate: fcrRate,
+    };
+  });
+}
+
 module.exports = {
   VIEW_NAME,
   loadCallSummaryColumns,
@@ -543,5 +691,8 @@ module.exports = {
   enrichCdrRowsWithAgentNames,
   buildSlaAggregateSelect,
   buildCallSummaryAggregateSelect,
+  buildAgentPerformanceFromClause,
+  buildAgentPerformanceAggregateSelect,
+  queryAgentPerformanceAggregates,
   resetCallSummarySchemaCache,
 };
