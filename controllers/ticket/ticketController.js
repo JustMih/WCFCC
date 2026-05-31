@@ -77,6 +77,16 @@ function getWorkingDays(startDate, endDate, holidays = []) {
   return count;
 }
 
+/** Set true for 2-min SLA testing; false for production working-days SLA */
+const ESCALATION_TEST_MODE = true;
+const ESCALATION_TEST_SLA_MINUTES = 2;
+
+function getElapsedMinutes(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  return Math.floor((end - start) / (1000 * 60));
+}
+
 // Utility: Capitalize first letter of each word
 /**
  * Capitalizes the first letter of each word in a string.
@@ -169,8 +179,9 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   const currentRole = (lastAssignment.assigned_to_role || "").toLowerCase();
   const complaintType = (ticket.complaint_type || "").toLowerCase();
 
-  // Determine SLA days for this role
+  // Determine SLA for this role (minutes in test mode, working days in production)
   let slaDays = 0;
+  let slaMinutes = ESCALATION_TEST_SLA_MINUTES;
   // if (ticket.category === "Inquiry") {
   //   slaDays = 3; // Inquiries: 3 days
   // } else if (ticket.category === "Complaint") {
@@ -180,8 +191,11 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     return false; // Not applicable
   }
 
-  // Calculate working days since assigned to this role
-  const workingDays = getWorkingDays(assignedAt, new Date(), holidays);
+  const now = new Date();
+  const workingDays = ESCALATION_TEST_MODE
+    ? getElapsedMinutes(assignedAt, now)
+    : getWorkingDays(assignedAt, now, holidays);
+  const slaLimit = ESCALATION_TEST_MODE ? slaMinutes : slaDays;
 
   // Debug log for escalation decision
   console.log("Escalation debug:", {
@@ -190,33 +204,55 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     complaint_type: ticket.complaint_type,
     currentRole,
     assignedAt,
-    slaDays,
-    workingDays,
-    breached: workingDays > slaDays,
+    testMode: ESCALATION_TEST_MODE,
+    slaLimit,
+    slaUnit: ESCALATION_TEST_MODE ? "minutes" : "working days",
+    elapsed: workingDays,
+    breached: workingDays > slaLimit,
   });
 
   // Check if breached
-  const breached = workingDays > slaDays;
+  const breached = workingDays > slaLimit;
   if (!breached) return false;
 
-  // Determine if ticket is for directorate or unit based on section
-  // Check both section and unit_section fields to determine ticket type
+  // Determine if ticket is for directorate or unit based on section / responsible unit
   const sectionLower = (ticket.section || "").toLowerCase();
   const unitSectionLower = (ticket.unit_section || "").toLowerCase();
-  
-  // More accurate detection: check if section contains "directorate" or equals "unit"
-  const isTicketDirectorate = sectionLower.includes("directorate") || unitSectionLower.includes("directorate");
-  const isTicketUnit = sectionLower === "unit" || unitSectionLower.includes("unit");
+  const subSectionLower = (ticket.sub_section || "").toLowerCase();
+  const responsibleUnitLower = (ticket.responsible_unit_name || "").toLowerCase();
+  const sectionNorm = (ticket.section || "").toLowerCase().trim();
+  const isGenericUnitSection = sectionNorm === "unit" || sectionNorm === "units";
 
-  // Check if current role is one that needs special escalation handling
-  // Entry-level roles: attendee, agent, super-admin, focal-person, supervisor, reviewer
-  const isEntryLevelRole = ["attendee", "agent", "super-admin", "focal-person", "supervisor", "reviewer"].includes(currentRole);
+  const isTicketUnit =
+    isGenericUnitSection ||
+    sectionLower === "unit" ||
+    unitSectionLower.includes("unit") ||
+    (subSectionLower.includes("unit") && !subSectionLower.includes("directorate")) ||
+    (responsibleUnitLower.includes("unit") && !responsibleUnitLower.includes("directorate"));
+
+  const isTicketDirectorate =
+    !isTicketUnit &&
+    (sectionLower.includes("directorate") ||
+      unitSectionLower.includes("directorate") ||
+      responsibleUnitLower.includes("directorate"));
+
+  // Entry-level roles (reviewer has its own path → director-general)
+  const isEntryLevelRole = ["attendee", "agent", "super-admin", "focal-person", "supervisor"].includes(currentRole);
 
   // Determine escalation path based on ticket type and current role
   let nextRole;
   
-  if (isEntryLevelRole) {
-    // For entry-level roles (attendee, agent, super-admin, focal-person, supervisor, reviewer)
+  if (currentRole === "reviewer") {
+    // Reviewer SLA breach → Director General (not manager/head-of-unit)
+    nextRole = "director-general";
+  } else if (currentRole === "head-of-unit") {
+    // Head of unit (e.g. after forward from reviewer) → Director General on SLA breach
+    nextRole = "director-general";
+  } else if (currentRole === "director") {
+    // Director (e.g. after forward from reviewer) → Director General on SLA breach
+    nextRole = "director-general";
+  } else if (isEntryLevelRole) {
+    // For entry-level roles (attendee, agent, super-admin, focal-person, supervisor)
     // Same entry-level roles for both Unit and Directorate
     if (isTicketDirectorate) {
       // Directorate path: entry-level → manager → director → director-general
@@ -260,17 +296,27 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     }
   }
 
-  // Find next user by role and section/sub_section matching ticket details
+  // Find next user by role and section field on User model
   let sectionValue;
   let sectionField; // 'unit_section' or 'sub_section' on User model
 
-  if (isTicketDirectorate) {
-    // For directorate: role is manager (then director, director-general). Match by sub_section = ticket's sub_section.
-    sectionValue = ticket.sub_section;
-    sectionField = "sub_section";
+  if (nextRole === "director-general") {
+    // DG is org-wide — no section filter (matches workflowService behaviour)
+    sectionValue = null;
+    sectionField = null;
+  } else if (isTicketDirectorate) {
+    // Directorate managers/directors use unit_section = directorate name (not generic "Units")
+    sectionValue = responsibleUnitLower.includes("directorate")
+      ? ticket.responsible_unit_name
+      : sectionLower.includes("directorate")
+        ? ticket.section
+        : ticket.responsible_unit_name || ticket.section;
+    sectionField = "unit_section";
   } else if (isTicketUnit) {
-    // For unit: match by unit_section = ticket's sub_section
-    sectionValue = ticket.sub_section;
+    // Unit path: prefer specific unit name over generic "Unit"/"Units" section label
+    sectionValue = isGenericUnitSection
+      ? ticket.sub_section || ticket.responsible_unit_name
+      : ticket.sub_section || ticket.responsible_unit_name || ticket.section;
     sectionField = "unit_section";
   } else {
     // Cannot determine section value
@@ -278,11 +324,37 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     return false;
   }
 
-  // Find user by role and section field (unit_section or sub_section)
-  const userWhere = { role: nextRole };
-  if (sectionValue && sectionField) {
-    userWhere[sectionField] = sectionValue;
-  }
+  const findUserByRoleAndSection = async (role, field, value) => {
+    if (!value) {
+      return User.findOne({ where: { role } });
+    }
+    const normalized = String(value).toLowerCase().trim();
+
+    let user = await User.findOne({
+      where: {
+        role,
+        [Op.and]: Sequelize.where(
+          Sequelize.fn("LOWER", Sequelize.col(field)),
+          normalized
+        ),
+      },
+    });
+
+    // Fallback: partial match (e.g. ticket "ICT Unit" vs user "ict unit")
+    if (!user) {
+      user = await User.findOne({
+        where: {
+          role,
+          [Op.and]: Sequelize.where(
+            Sequelize.fn("LOWER", Sequelize.col(field)),
+            { [Op.like]: `%${normalized}%` }
+          ),
+        },
+      });
+    }
+
+    return user;
+  };
 
   /**
    * Map ticket context to manager designation for Directorate escalations to `manager`.
@@ -300,13 +372,27 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   };
 
   let nextUser = null;
-  if (isTicketDirectorate && nextRole === "manager") {
+  if (nextRole === "director-general") {
+    nextUser = await User.findOne({
+      where: { role: "director-general", isActive: true },
+    });
+    if (!nextUser) {
+      nextUser = await User.findOne({ where: { role: "director-general" } });
+    }
+  } else if (isTicketDirectorate && nextRole === "manager") {
     const managerDesignation = getManagerDesignationForSubSection(
-      sectionValue || ticket.sub_section
+      ticket.sub_section || sectionValue
     );
     if (managerDesignation) {
+      const directorateName = (
+        responsibleUnitLower.includes("directorate")
+          ? ticket.responsible_unit_name
+          : sectionLower.includes("directorate")
+            ? ticket.section
+            : ticket.responsible_unit_name || ticket.section || ""
+      ).trim();
       const designationWhere = {
-        ...userWhere,
+        role: "manager",
         designation: managerDesignation,
       };
 
@@ -319,16 +405,31 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
         nextRole,
         managerDesignation,
         designationWhere,
+        directorateName,
       });
 
-      nextUser = await User.findOne({ where: designationWhere });
+      if (directorateName) {
+        nextUser = await User.findOne({
+          where: {
+            ...designationWhere,
+            [Op.and]: Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("unit_section")),
+              directorateName.toLowerCase()
+            ),
+          },
+        });
+      }
+      if (!nextUser) {
+        nextUser = await User.findOne({ where: designationWhere });
+      }
       if (!nextUser) {
         console.log(
-          "DEBUG: Designation-based manager not found, falling back to sub_section lookup",
+          "DEBUG: Designation-based manager not found, falling back to directorate unit_section lookup",
           {
             ticketId: ticket.id,
             managerDesignation,
-            originalWhere: userWhere,
+            sectionField,
+            sectionValue,
           }
         );
       }
@@ -344,14 +445,18 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     }
   }
 
-  if (!nextUser) {
-    nextUser = await User.findOne({ where: userWhere });
+  if (!nextUser && nextRole !== "director-general") {
+    nextUser = await findUserByRoleAndSection(nextRole, sectionField, sectionValue);
   }
 
   // If no user found, cannot escalate
   if (!nextUser) {
+    const lookupDetail =
+      nextRole === "director-general"
+        ? "no active director-general user in the system"
+        : `${sectionField} '${sectionValue}'`;
     console.error(
-      `Escalation failed: No user found for role '${nextRole}' with ${sectionField} '${sectionValue}'. Cannot escalate ticket ${ticket.id}.`
+      `Escalation failed: No user found for role '${nextRole}' with ${lookupDetail}. Cannot escalate ticket ${ticket.id}.`
     );
     return false;
   }
@@ -370,14 +475,18 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   // Find system user for assigned_by_id
   const systemUser = await User.findOne({ where: { username: "system" } });
 
-  // Record escalation in assignment history
+  // Record escalation in assignment history (assigned_by = previous holder, not system — so reverse works)
   await TicketAssignment.create({
     ticket_id: ticket.id,
-    assigned_by_id: systemUser ? systemUser.id : (ticket.assigned_to_id || nextUser.id), // Fallback to nextUser.id if both are null
+    assigned_by_id:
+      lastAssignment.assigned_to_id ||
+      (systemUser ? systemUser.id : ticket.assigned_to_id || nextUser.id),
     assigned_to_id: nextUser.id,
     assigned_to_role: nextRole,
     action: "Escalated",
-    reason: `SLA breached for role '${currentRole}' after ${workingDays} working days (SLA: ${slaDays} days). Escalated automatically to ${nextRole}.`,
+    reason: ESCALATION_TEST_MODE
+      ? `SLA breached for role '${currentRole}' after ${workingDays} minutes (SLA: ${slaMinutes} minutes). Escalated automatically to ${nextRole}.`
+      : `SLA breached for role '${currentRole}' after ${workingDays} working days (SLA: ${slaDays} days). Escalated automatically to ${nextRole}.`,
     created_at: new Date(),
   });
 
@@ -5173,7 +5282,7 @@ const getTicketAssignments = async (req, res) => {
         });
         
         const assignedByUser = await User.findByPk(assignment.assigned_by_id, {
-          attributes: ["id", "full_name"]
+          attributes: ["id", "full_name", "role"]
         });
         
         return {
@@ -5188,6 +5297,9 @@ const getTicketAssignments = async (req, res) => {
       assigned_to_id: a.assigned_to_id,
       assigned_to_name: a.assignedTo ? a.assignedTo.full_name : "Unknown User",
       assigned_to_role: a.assignedTo ? a.assignedTo.role : null,
+      assigned_by_id: a.assigned_by_id,
+      assigned_by_name: a.assignedBy ? a.assignedBy.full_name : "Unknown User",
+      assigned_by_role: a.assignedBy ? a.assignedBy.role : null,
       reason: a.reason,
       action: a.action,
       created_at: a.created_at,
@@ -6333,28 +6445,61 @@ const reverseTicket = async (req, res) => {
         console.log(`🔍 DEBUG: currentUserAssignment exists but NOT using its reason - will use reason from frontend`);
       }
     } else if (assignments.length >= 1) {
-      // Normal reverse (like attendee): return to the user who assigned this ticket to the current user.
-      // IMPORTANT: Skip "self-assignments" where assigned_by_id === assigned_to_id (these would bounce back to self).
-      // IMPORTANT: Also skip "Rated" actions where reviewer assigned to themselves (assigned_to_id === assigned_by_id)
-      // This ensures we don't use reviewer's rating assignment as the previous assignment
-      const senderAssignment = assignments.find(a =>
-        a.assigned_to_id === userId &&
-        a.assigned_by_id &&
-        a.assigned_by_id !== userId &&
-        a.action !== "Rated" // Skip rating actions where reviewer assigned to themselves
+      // Normal reverse: return to whoever had the ticket before the current user received it.
+      const systemUser = await User.findOne({ where: { username: "system" } });
+      const systemUserId = systemUser?.id;
+
+      const receiveIdx = assignments.findIndex(
+        (a) => a.assigned_to_id === userId && a.action !== "Rated"
       );
 
-      if (senderAssignment) {
-        const senderUser = await User.findByPk(senderAssignment.assigned_by_id);
-        if (senderUser) {
-          // IMPORTANT: Only use senderAssignment to find the previous user
-          // Do NOT use senderAssignment.reason - always use reason from frontend
-          prevAssignment = { assigned_to_id: senderUser.id, assigned_to_role: senderUser.role };
-          targetUserId = senderUser.id;
-          targetUserRole = senderUser.role;
-          console.log(`DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`);
-          console.log(`🔍 DEBUG: senderAssignment exists but NOT using its reason - will use reason from frontend`);
-          console.log(`🔍 DEBUG: senderAssignment action: "${senderAssignment.action}", assigned_by_id: ${senderAssignment.assigned_by_id}, assigned_to_id: ${senderAssignment.assigned_to_id}`);
+      if (receiveIdx !== -1) {
+        const received = assignments[receiveIdx];
+
+        // Auto-escalation used "system" as assigner — reverse to previous holder, not system
+        if (
+          received.action === "Escalated" &&
+          systemUserId &&
+          received.assigned_by_id === systemUserId
+        ) {
+          for (let i = receiveIdx + 1; i < assignments.length; i++) {
+            const prior = assignments[i];
+            if (
+              prior.assigned_to_id &&
+              prior.assigned_to_id !== userId &&
+              prior.action !== "Rated"
+            ) {
+              const priorUser = await User.findByPk(prior.assigned_to_id);
+              if (priorUser) {
+                prevAssignment = {
+                  assigned_to_id: priorUser.id,
+                  assigned_to_role: priorUser.role,
+                };
+                targetUserId = priorUser.id;
+                targetUserRole = priorUser.role;
+                console.log(
+                  `DEBUG: Reversing after auto-escalation - returning to previous holder: ${priorUser.full_name} (${priorUser.role})`
+                );
+                break;
+              }
+            }
+          }
+        } else if (received.assigned_by_id && received.assigned_by_id !== userId) {
+          const senderUser = await User.findByPk(received.assigned_by_id);
+          if (senderUser) {
+            prevAssignment = {
+              assigned_to_id: senderUser.id,
+              assigned_to_role: senderUser.role,
+            };
+            targetUserId = senderUser.id;
+            targetUserRole = senderUser.role;
+            console.log(
+              `DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`
+            );
+            console.log(
+              `🔍 DEBUG: received action: "${received.action}", assigned_by_id: ${received.assigned_by_id}, assigned_to_id: ${received.assigned_to_id}`
+            );
+          }
         }
       }
 
