@@ -6,8 +6,8 @@
  * total_duration, billsec, cdr_status, status, queue, agent
  *
  * - call_start: session start (maps to API cdrstarttime)
- * - cdr_status: Asterisk disposition (ANSWERED, NO ANSWER, …) → API disposition
- * - status: answered | lost | dropped (dashboard semantics)
+ * - status: answered | lost | dropped → API disposition field
+ * - cdr_status: Asterisk disposition (ANSWERED, NO ANSWER, …) kept separate
  * - agent: extension for agent-attributed calls
  */
 
@@ -19,15 +19,41 @@ const VIEW_NAME = "call_summary";
 let cachedColumns = null;
 let cachedSchema = null;
 
-const UI_DISPOSITION_TO_FILTER = {
-  ANSWERED: { sql: "cdr_status = 'ANSWERED'", replacements: {} },
-  "NO ANSWER": { sql: "cdr_status = 'NO ANSWER'", replacements: {} },
-  BUSY: { sql: "cdr_status = 'BUSY'", replacements: {} },
-  FAILED: {
-    sql: "(LOWER(status) = 'dropped' OR cdr_status IN ('FAILED', 'CONGESTION'))",
+function buildStatusFilterSql(alias, statusValue) {
+  const col = qualify(alias, "status");
+  return {
+    sql: `LOWER(${col}) = '${statusValue}'`,
     replacements: {},
-  },
+  };
+}
+
+const LEGACY_DISPOSITION_TO_STATUS = {
+  ANSWERED: "answered",
+  "NO ANSWER": "lost",
+  BUSY: "dropped",
+  FAILED: "dropped",
 };
+
+function normalizeCallStatus(value) {
+  if (value == null || value === "") return null;
+  const lower = String(value).trim().toLowerCase();
+  if (lower === "answered" || lower === "lost" || lower === "dropped") {
+    return lower;
+  }
+  const legacy = LEGACY_DISPOSITION_TO_STATUS[String(value).trim().toUpperCase()];
+  return legacy ?? null;
+}
+
+function normalizeDispositionFilter(disposition) {
+  if (!disposition || disposition === "all") return null;
+  const lower = String(disposition).trim().toLowerCase();
+  if (lower === "answered" || lower === "lost" || lower === "dropped") {
+    return lower;
+  }
+  const legacy =
+    LEGACY_DISPOSITION_TO_STATUS[String(disposition).trim().toUpperCase()];
+  return legacy ?? null;
+}
 
 async function loadCallSummaryColumns(sequelize) {
   if (cachedColumns) return cachedColumns;
@@ -57,9 +83,9 @@ async function loadCallSummaryColumns(sequelize) {
     columns: cachedColumns,
     timeColumn: pickColumn(cachedColumns, ["call_start", "cdrstarttime"]),
     dispositionColumn: pickColumn(cachedColumns, [
+      "status",
       "disposition",
       "cdr_status",
-      "status",
     ]),
     agentColumn: pickColumn(cachedColumns, ["agent", "src"]),
     durationColumn: pickColumn(cachedColumns, [
@@ -107,7 +133,7 @@ function buildDateRangeWhere(alias, startDate, endDate) {
   const schema = getSchema();
   const col = qualify(alias, schema.timeColumn);
   return {
-    sql: `${col} BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`,
+    sql: `${col} >= CONCAT(:startDate, ' 00:00:00') AND ${col} < DATE_ADD(CONCAT(:endDate, ' 00:00:00'), INTERVAL 1 DAY)`,
     replacements: { startDate, endDate },
   };
 }
@@ -122,30 +148,22 @@ function buildDateRangeWhereBound(alias, startDateTime, endDateTime) {
 }
 
 /**
- * @param {string} disposition - route param: all | ANSWERED | NO ANSWER | BUSY | FAILED
+ * @param {string} disposition - route param: all | answered | lost | dropped (legacy Asterisk values accepted)
+ * @param {string} [alias='cs'] - call_summary table alias (required when Users is joined)
  * @returns {{ sql: string, replacements: object } | null}
  */
-function buildDispositionWhere(disposition) {
+function buildDispositionWhere(disposition, alias = "cs") {
   if (!disposition || disposition === "all") return null;
 
-  const schema = getSchema();
-  const mapped = UI_DISPOSITION_TO_FILTER[disposition];
-
-  if (schema.dispositionColumn === "disposition" && mapped) {
-    return {
-      sql: `${qualify("", "disposition")} = :disposition`,
-      replacements: { disposition },
-    };
+  const normalizedFilter = normalizeDispositionFilter(disposition);
+  if (!normalizedFilter) {
+    console.warn(
+      `[callSummaryReportHelper] Unmapped disposition filter "${disposition}"; returning no rows.`
+    );
+    return { sql: "1 = 0", replacements: {} };
   }
 
-  if (mapped) {
-    return mapped;
-  }
-
-  console.warn(
-    `[callSummaryReportHelper] Unmapped disposition filter "${disposition}"; returning no rows.`
-  );
-  return { sql: "1 = 0", replacements: {} };
+  return buildStatusFilterSql(alias, normalizedFilter);
 }
 
 /**
@@ -268,8 +286,8 @@ function buildCdrReportSelectList(alias = "cs") {
     ${a}.direction,
     ${a}.total_duration AS duration,
     ${a}.billsec,
-    ${a}.cdr_status AS disposition,
-    ${a}.status,
+    ${a}.status AS disposition,
+    ${a}.cdr_status,
     ${a}.queue,
     COALESCE(u_agent.full_name, u_dst.full_name) AS agent_name,
     ${a}.agent AS agent_extension,
@@ -281,14 +299,7 @@ function buildCdrReportSelectList(alias = "cs") {
 
 function mapRowToCdrApiShape(row) {
   if (!row) return row;
-  const disposition =
-    row.disposition != null && row.disposition !== ""
-      ? row.disposition
-      : row.cdr_status != null
-        ? row.cdr_status
-        : row.status != null
-          ? String(row.status).toUpperCase()
-          : null;
+  const disposition = normalizeCallStatus(row.disposition ?? row.status);
 
   return {
     ...row,
@@ -304,12 +315,28 @@ function mapRowToCdrApiShape(row) {
           ? row.total_duration
           : null,
     disposition,
+    cdr_status: row.cdr_status ?? null,
     agent_extension: pickAgentExtensionForRow(row),
     agent_name: row.agent_name || null,
     agent_wait_sec:
       row.agent_wait_sec != null && row.agent_wait_sec !== ""
         ? Number(row.agent_wait_sec)
         : null,
+    talk_time_sec: (() => {
+      const wait =
+        row.agent_wait_sec != null && row.agent_wait_sec !== ""
+          ? Number(row.agent_wait_sec)
+          : null;
+      if (wait == null || Number.isNaN(wait)) return 0;
+      const total =
+        row.duration != null
+          ? Number(row.duration)
+          : row.total_duration != null
+            ? Number(row.total_duration)
+            : NaN;
+      if (!Number.isFinite(total)) return 0;
+      return Math.max(0, total - wait);
+    })(),
   };
 }
 
@@ -509,6 +536,139 @@ async function enrichCdrRowsWithAgentNames(rows, User, sequelize) {
   return enriched;
 }
 
+function buildAgentPerformanceFromClause(alias = "cs", options = {}) {
+  const a = alias;
+  return `
+    FROM ${VIEW_NAME} ${a}
+    LEFT JOIN Users u_agent
+      ON ${a}.agent IS NOT NULL
+      AND TRIM(${a}.agent) <> ''
+      AND (
+        u_agent.extension = CAST(${a}.agent AS UNSIGNED)
+        OR CAST(u_agent.extension AS CHAR) COLLATE utf8mb4_unicode_ci
+          = TRIM(${a}.agent) COLLATE utf8mb4_unicode_ci
+        OR u_agent.username = TRIM(${a}.agent)
+      )
+    LEFT JOIN Users u_dst
+      ON (${a}.agent IS NULL OR TRIM(${a}.agent) = '')
+      AND ${a}.called IS NOT NULL
+      AND TRIM(${a}.called) REGEXP '^[0-9]{3,6}$'
+      AND TRIM(${a}.called) NOT REGEXP '^0+$'
+      AND (
+        u_dst.extension = CAST(TRIM(${a}.called) AS UNSIGNED)
+        OR CAST(u_dst.extension AS CHAR) COLLATE utf8mb4_unicode_ci
+          = TRIM(${a}.called) COLLATE utf8mb4_unicode_ci
+      )${buildCdrQueueWaitJoin(a, options)}`;
+}
+
+function buildAgentPerformanceAggregateSelect(alias = "cs") {
+  const a = alias;
+  const schema = getSchema();
+  const durationCol = qualify(a, schema.durationColumn || "total_duration");
+  const agentWaitExpr = buildCdrAgentWaitSelect().replace(/\s+AS agent_wait_sec\s*$/, "");
+  const answeredExpr = `(LOWER(${a}.status) = 'answered' OR ${a}.cdr_status = 'ANSWERED')`;
+
+  return `
+    COALESCE(u_agent.id, u_dst.id) AS agent_id,
+    COALESCE(u_agent.full_name, u_dst.full_name) AS agent_name,
+    COUNT(*) AS total_calls,
+    SUM(CASE WHEN ${answeredExpr} THEN 1 ELSE 0 END) AS answered_calls,
+    SUM(
+      CASE
+        WHEN LOWER(${a}.status) IN ('lost', 'dropped') THEN 1
+        WHEN ${a}.cdr_status IS NOT NULL AND ${a}.cdr_status != 'ANSWERED' AND NOT (${answeredExpr}) THEN 1
+        ELSE 0
+      END
+    ) AS missed_calls,
+    AVG(CASE WHEN ${answeredExpr} THEN ${durationCol} END) AS avg_duration,
+    SUM(
+      CASE
+        WHEN ${answeredExpr} THEN
+          CASE
+            WHEN (${agentWaitExpr}) IS NOT NULL
+              THEN GREATEST(0, COALESCE(${durationCol}, 0) - (${agentWaitExpr}))
+            ELSE 0
+          END
+        ELSE 0
+      END
+    ) AS total_talk_time
+  `;
+}
+
+/**
+ * Aggregate agent performance metrics from call_summary for a date range.
+ * @param {import('sequelize').Sequelize} sequelize
+ * @param {{ startDate: string, endDate: string, agentUserId?: number|string|null }} options
+ * @returns {Promise<Array<object>>}
+ */
+async function queryAgentPerformanceAggregates(
+  sequelize,
+  { startDate, endDate, agentUserId = null }
+) {
+  await ensureCallSummaryReady(sequelize);
+
+  const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
+  const destFilter = buildCdrDestinationWhere("cs", "called");
+  const queueWaitOpts = { queueLogDateFilter: true };
+
+  const whereParts = [
+    dateFilter.sql,
+    destFilter.sql,
+    "COALESCE(u_agent.id, u_dst.id) IS NOT NULL",
+  ];
+
+  const replacements = {
+    ...dateFilter.replacements,
+    ...destFilter.replacements,
+    ...buildCdrQueueWaitReplacements(startDate, endDate),
+  };
+
+  if (agentUserId != null && agentUserId !== "" && agentUserId !== "all") {
+    whereParts.push("COALESCE(u_agent.id, u_dst.id) = :agentUserId");
+    replacements.agentUserId = agentUserId;
+  }
+
+  const rows = await sequelize.query(
+    `
+    SELECT ${buildAgentPerformanceAggregateSelect("cs")}
+    ${buildAgentPerformanceFromClause("cs", queueWaitOpts)}
+    WHERE ${whereParts.join(" AND ")}
+    GROUP BY COALESCE(u_agent.id, u_dst.id), COALESCE(u_agent.full_name, u_dst.full_name)
+    ORDER BY agent_name ASC
+    `,
+    {
+      replacements,
+      type: sequelize.QueryTypes.SELECT,
+    }
+  );
+
+  return (rows || []).map((row) => {
+    const totalCalls = Number(row.total_calls) || 0;
+    const answeredCalls = Number(row.answered_calls) || 0;
+    const missedCalls =
+      Number(row.missed_calls) ||
+      Math.max(0, totalCalls - answeredCalls);
+    const avgDuration = row.avg_duration != null ? Math.round(Number(row.avg_duration)) : 0;
+    const totalTalkTime = Number(row.total_talk_time) || 0;
+    const fcrRate =
+      totalCalls > 0
+        ? `${Math.round((answeredCalls / totalCalls) * 100)}%`
+        : "0%";
+
+    return {
+      id: row.agent_id,
+      agent_id: row.agent_id,
+      agent_name: row.agent_name || "Unknown Agent",
+      total_calls: totalCalls,
+      answered_calls: answeredCalls,
+      missed_calls: missedCalls,
+      avg_duration: avgDuration,
+      total_talk_time: totalTalkTime,
+      fcr_rate: fcrRate,
+    };
+  });
+}
+
 module.exports = {
   VIEW_NAME,
   loadCallSummaryColumns,
@@ -517,6 +677,8 @@ module.exports = {
   buildDateRangeWhere,
   buildDateRangeWhereBound,
   buildDispositionWhere,
+  normalizeCallStatus,
+  normalizeDispositionFilter,
   buildCdrDestinationWhere,
   buildCdrQueueWaitReplacements,
   buildCdrReportFromClause,
@@ -529,5 +691,8 @@ module.exports = {
   enrichCdrRowsWithAgentNames,
   buildSlaAggregateSelect,
   buildCallSummaryAggregateSelect,
+  buildAgentPerformanceFromClause,
+  buildAgentPerformanceAggregateSelect,
+  queryAgentPerformanceAggregates,
   resetCallSummarySchemaCache,
 };

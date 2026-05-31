@@ -10,7 +10,7 @@ const { streamVoiceNote } = require("../controllers/reports/reports.controller")
 const { authMiddleware } = require("../middleware/authMiddleware");
 
 /** Mounted at /api/voice-notes in server.js */
-router.get("/", getAllVoiceNotes);
+router.get("/", authMiddleware, getAllVoiceNotes);
 router.put("/:id/mark-played", authMiddleware, markVoiceNotePlayed);
 router.put("/:id", authMiddleware, updateVoiceNote);
 router.get("/:id/audio", streamVoiceNote);

@@ -217,6 +217,11 @@ app.use("/api", (req, res, next) => {
   });
 });
 
+const {
+  handoverInitiatorLockMiddleware,
+} = require("./middleware/handoverInitiatorLockMiddleware");
+app.use("/api", handoverInitiatorLockMiddleware);
+
 // API routes
 app.use("/api", routes);
 app.use("/api", ivrDtmfRoutes);

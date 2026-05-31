@@ -586,11 +586,42 @@ const getMessage = async (req, res) => {
       ], // Include all necessary fields
     });
 
+    const normalizeUserId = (id) =>
+      id == null ? "" : String(id).trim().toLowerCase();
+
+    const userIds = [
+      ...new Set(
+        messages.flatMap((msg) => [msg.senderId, msg.receiverId].filter(Boolean))
+      ),
+    ];
+
+    const users =
+      userIds.length > 0
+        ? await User.findAll({
+            where: { id: { [Op.in]: userIds } },
+            attributes: ["id", "full_name", "username"],
+          })
+        : [];
+
+    const nameByUserId = users.reduce((map, user) => {
+      map[normalizeUserId(user.id)] =
+        user.full_name || user.username || String(user.id);
+      return map;
+    }, {});
+
+    const displayName = (userId) => {
+      const key = normalizeUserId(userId);
+      if (!key) return "-";
+      return nameByUserId[key] || String(userId);
+    };
+
     // Format messages for frontend
     const formattedMessages = messages.map((msg) => ({
       id: msg.id,
       senderId: msg.senderId,
       receiverId: msg.receiverId,
+      senderName: displayName(msg.senderId),
+      receiverName: displayName(msg.receiverId),
       message: msg.message,
       isRead: msg.isRead,
       status: msg.status || "sent",

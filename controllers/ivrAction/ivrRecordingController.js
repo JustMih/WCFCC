@@ -57,6 +57,7 @@ SELECT
   vn.is_played,
   vn.duration_seconds,
   vn.transcription,
+  vn.status,
   vn.created_at
 FROM Voice_Notes vn
 LEFT JOIN Users u
