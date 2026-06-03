@@ -204,7 +204,7 @@ const getPublicDashboardData = async (req, res) => {
     });
     const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-    const enrichedLiveCalls = liveCalls.map((call) => {
+    enrichedLiveCalls = liveCalls.map((call) => {
       const resolved = resolveAgentForCall(call, agentsMap);
       return {
         ...call,
