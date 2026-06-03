@@ -47,16 +47,29 @@ const emitDashboardUpdate = (payload) => {
 /* ================= PUBLIC DASHBOARD ================= */
 const getPublicDashboardData = async (req, res) => {
   try {
-    /* ---------- AGENT STATUS ---------- */
-    const [onlineCount, offlineCount] = await Promise.all([
-      User.count({ where: { role: "agent", status: "online" } }),
-      User.count({
-        where: {
-          role: "agent",
-          [Op.or]: [{ status: "offline" }, { status: null }],
-        },
-      }),
-    ]);
+    /* ---------- AGENT STATUS (online + pause breakdown for wallboard) ---------- */
+    const [onlineCount, pauseCount, offlineCount, totalAgents] =
+      await Promise.all([
+        User.count({ where: { role: "agent", status: "online" } }),
+        User.count({
+          where: {
+            role: "agent",
+            status: { [Op.in]: ["pause", "force-pause"] },
+          },
+        }),
+        User.count({
+          where: {
+            role: "agent",
+            [Op.or]: [{ status: "offline" }, { status: null }],
+          },
+        }),
+        User.count({ where: { role: "agent" } }),
+      ]);
+
+    const onlinePercent =
+      totalAgents > 0 ? Math.round((onlineCount / totalAgents) * 100) : 0;
+    const pausePercent =
+      totalAgents > 0 ? Math.round((pauseCount / totalAgents) * 100) : 0;
 
     /* ---------- QUEUE STATUS ---------- */
     const queueStatus = QueueStatus
@@ -230,7 +243,14 @@ const monthlyCounts = await sequelize.query(
 
     /* ================= FINAL PAYLOAD ================= */
    const payload = {
-  agentStatus: { onlineCount, offlineCount },
+  agentStatus: {
+    onlineCount,
+    pauseCount,
+    offlineCount,
+    totalAgents,
+    onlinePercent,
+    pausePercent,
+  },
   liveCalls: enrichedLiveCalls,
   callStatusSummary: {
     active: liveBuckets.active,
