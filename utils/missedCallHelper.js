@@ -179,15 +179,24 @@ function isLostSessionRow(row, queueWaitByCallId) {
   return false;
 }
 
+/** Align with MySQL CURDATE() / call center (+03:00). */
 function getTodayBounds() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Dar_es_Salaam",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   return {
-    start: `${y}-${m}-${d} 00:00:00`,
-    end: `${y}-${m}-${d} 23:59:59`,
+    start: `${day} 00:00:00`,
+    end: `${day} 23:59:59`,
   };
+}
+
+/** Today's dropped sessions — same pipeline as dropped calls report. */
+async function getTodayDroppedCallsList(sequelize) {
+  const { start, end } = getTodayBounds();
+  return fetchDroppedCallsForRange(sequelize, start, end);
 }
 
 /**
@@ -1879,4 +1888,5 @@ module.exports = {
   countMissedCallsInRange,
   countIvrAnsweredExcludingQueueLost,
   getTodayLostCallsList,
+  getTodayDroppedCallsList,
 };
