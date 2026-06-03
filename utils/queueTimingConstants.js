@@ -1,11 +1,12 @@
 /**
- * Matches Asterisk Queue(...,300,queue-exit). CDR sums are often a few seconds
- * below 300; use a small grace so those calls count as lost and show as 5.0 min.
+ * Matches Asterisk Queue(...,300,queue-exit). CDR/queue_log sums are often
+ * 288–299s on a full timeout; classify those as lost and show 5.0 min.
  */
 const QUEUE_EXIT_TIMEOUT_SECONDS = 300;
-const LOST_CLASSIFY_GRACE_SECONDS = 6;
+/** Seconds below dialplan timeout still treated as full-queue (lost). */
+const LOST_CLASSIFY_GRACE_SECONDS = 12;
 
-/** Lost when wait >= this (300 − 6). Dropped when wait < this. */
+/** Lost when wait >= this (300 − 12 = 288). Dropped when wait < this. */
 const LOST_MIN_DURATION_SECONDS =
   QUEUE_EXIT_TIMEOUT_SECONDS - LOST_CLASSIFY_GRACE_SECONDS;
 
