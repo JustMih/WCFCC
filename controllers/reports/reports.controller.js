@@ -13,16 +13,17 @@ const {
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
 const {
   ensureCallSummaryReady,
+  mapRowsToCdrApiShape,
+  enrichCdrRowsWithAgentNames,
   buildDateRangeWhere,
   buildCdrDestinationWhere,
   buildDispositionWhere,
   buildCdrReportSelectList,
   buildCdrReportFromClause,
   buildCdrQueueWaitReplacements,
-  mapRowsToCdrApiShape,
-  enrichCdrRowsWithAgentNames,
   queryAgentPerformanceAggregates,
 } = require("../../utils/callSummaryReportHelper");
+const { queryCdrSessionsForReport } = require("../../utils/cdrSessionAggregateHelper");
 
 let offHoursReportController = {};
 let lostCallsReportController = {};
@@ -341,43 +342,56 @@ exports.getCDRReport = async (req, res) => {
   }
 
   try {
-    await ensureCallSummaryReady(sequelize);
+    const excludeDestS =
+      req.query.excludeDestS === "1" || req.query.excludeDestS === "true";
 
-    const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
-    const destFilter = buildCdrDestinationWhere("cs", "called");
-    const dispFilter = buildDispositionWhere(disposition, "cs");
-    const queueWaitOpts = { queueLogDateFilter: true };
+    let rows = await queryCdrSessionsForReport(sequelize, {
+      startDate,
+      endDate,
+      disposition,
+      excludeDestS,
+    });
 
-    const whereParts = [dateFilter.sql, destFilter.sql];
-    if (dispFilter) {
-      whereParts.push(dispFilter.sql);
-    }
-
-    const replacements = {
-      ...dateFilter.replacements,
-      ...destFilter.replacements,
-      ...(dispFilter?.replacements || {}),
-      ...buildCdrQueueWaitReplacements(startDate, endDate),
-    };
-
-    const rows = await sequelize.query(
-      `
-      SELECT ${buildCdrReportSelectList("cs")}
-      ${buildCdrReportFromClause("cs", queueWaitOpts)}
-      WHERE ${whereParts.join(" AND ")}
-      ORDER BY cs.call_start DESC
-      `,
-      {
-        replacements,
-        type: sequelize.QueryTypes.SELECT,
+    if (!rows.length) {
+      try {
+        await ensureCallSummaryReady(sequelize);
+        const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
+        const destFilter = buildCdrDestinationWhere("cs", "called");
+        const dispFilter = buildDispositionWhere(disposition, "cs");
+        const queueWaitOpts = { queueLogDateFilter: true };
+        const whereParts = [dateFilter.sql, destFilter.sql];
+        if (dispFilter) whereParts.push(dispFilter.sql);
+        const replacements = {
+          ...dateFilter.replacements,
+          ...destFilter.replacements,
+          ...(dispFilter?.replacements || {}),
+          ...buildCdrQueueWaitReplacements(startDate, endDate),
+        };
+        rows = await sequelize.query(
+          `
+          SELECT ${buildCdrReportSelectList("cs")}
+          ${buildCdrReportFromClause("cs", queueWaitOpts)}
+          WHERE ${whereParts.join(" AND ")}
+          ORDER BY cs.call_start DESC
+          `,
+          {
+            replacements,
+            type: sequelize.QueryTypes.SELECT,
+          }
+        );
+        rows = mapRowsToCdrApiShape(rows);
+      } catch (viewErr) {
+        console.warn("[getCDRReport] call_summary fallback failed:", viewErr.message);
       }
-    );
+    }
 
     if (!rows.length) {
       return res.status(404).json({ message: "No CDR records found" });
     }
 
-    const mapped = mapRowsToCdrApiShape(rows);
+    const mapped = rows[0]?.disposition
+      ? rows
+      : mapRowsToCdrApiShape(rows);
     const enriched = await enrichCdrRowsWithAgentNames(mapped, User, sequelize);
     res.json(enriched);
   } catch (error) {
