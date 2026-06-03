@@ -2,17 +2,44 @@ const sequelize = require("../../config/mysql_connection");
 const VoiceNote = require("../../models/voice_notes.model");
 const User = require("../../models/User");
 
-const PRIVILEGED_VOICE_NOTE_ROLES = new Set([
-  "super-admin",
-  "admin",
-  "supervisor",
-  "director",
-  "director-general",
-  "manager",
-]);
+const getAllVoiceNotes = async (req, res) => {
+  try {
+    const { agentId, unplayedOnly } = req.query;
+    const conditions = [];
+    const replacements = {};
 
-const VOICE_NOTE_SELECT = `
-SELECT
+    if (unplayedOnly === "true" || unplayedOnly === "1") {
+      conditions.push("(vn.is_played = 0 OR vn.is_played IS NULL)");
+    }
+
+    if (agentId) {
+      const user = await User.findByPk(agentId, {
+        attributes: ["extension", "id"],
+      });
+      if (user) {
+        // Match by user id OR extension (round-robin often sets only assigned_agent_id)
+        conditions.push(
+          "(vn.assigned_agent_id = :agentUserId OR vn.assigned_extension = :agentExtension)"
+        );
+        replacements.agentUserId = String(user.id);
+        replacements.agentExtension = user.extension
+          ? String(user.extension)
+          : "__no_extension__";
+      } else {
+        conditions.push("vn.assigned_agent_id = :agentUserId");
+        replacements.agentUserId = String(agentId);
+      }
+    } else if (req.query.extension) {
+      conditions.push("vn.assigned_extension = :agentExtension");
+      replacements.agentExtension = String(req.query.extension);
+    }
+
+    const whereSql =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const voiceNotes = await sequelize.query(
+      `
+SELECT 
   vn.id,
   vn.recording_path,
   CONCAT(
@@ -26,84 +53,18 @@ SELECT
   ) AS playable_path,
   vn.clid,
   vn.assigned_extension,
-  vn.assigned_agent_id,
-  COALESCE(u_agent.full_name, u_ext.full_name) AS assigned_agent_name,
+  u.full_name AS assigned_agent_name,
   vn.is_played,
   vn.duration_seconds,
   vn.transcription,
   vn.status,
   vn.created_at
 FROM Voice_Notes vn
-LEFT JOIN Users u_agent ON u_agent.id = vn.assigned_agent_id
-LEFT JOIN Users u_ext ON u_ext.extension = vn.assigned_extension
-`;
-
-function appendAgentScope(conditions, replacements, user) {
-  if (!user) return false;
-  conditions.push(
-    "(vn.assigned_agent_id = :agentUserId OR vn.assigned_extension = :agentExtension)"
-  );
-  replacements.agentUserId = String(user.id);
-  replacements.agentExtension = user.extension
-    ? String(user.extension)
-    : "__no_extension__";
-  return true;
-}
-
-const getAllVoiceNotes = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    const role = req.user?.role || "";
-    const queryAgentId = req.query.agentId
-      ? String(req.query.agentId).trim()
-      : "";
-    const queryExtension = req.query.extension
-      ? String(req.query.extension).trim()
-      : "";
-    const { unplayedOnly } = req.query;
-
-    const conditions = [];
-    const replacements = {};
-
-    if (unplayedOnly === "true" || unplayedOnly === "1") {
-      conditions.push("(vn.is_played = 0 OR vn.is_played IS NULL)");
-    }
-
-    const isPrivileged = PRIVILEGED_VOICE_NOTE_ROLES.has(role);
-
-    if (isPrivileged && !queryAgentId && !queryExtension) {
-      // Supervisors/admins: all voice notes when no filter requested
-    } else if (queryAgentId) {
-      const user = await User.findByPk(queryAgentId, {
-        attributes: ["extension", "id"],
-      });
-      if (user) {
-        appendAgentScope(conditions, replacements, user);
-      } else {
-        conditions.push("vn.assigned_agent_id = :agentUserId");
-        replacements.agentUserId = queryAgentId;
-      }
-    } else if (queryExtension) {
-      conditions.push("vn.assigned_extension = :agentExtension");
-      replacements.agentExtension = queryExtension;
-    } else if (userId) {
-      const user = await User.findByPk(userId, {
-        attributes: ["extension", "id"],
-      });
-      if (!appendAgentScope(conditions, replacements, user)) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-    } else {
-      return res.status(401).json({ message: "Authentication required" });
-    }
-
-    const whereSql =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    const voiceNotes = await sequelize.query(
-      `${VOICE_NOTE_SELECT}
+LEFT JOIN Users u
+  ON u.extension = vn.assigned_extension
 ${whereSql}
-ORDER BY vn.created_at DESC`,
+ORDER BY vn.created_at DESC
+      `,
       { replacements, type: sequelize.QueryTypes.SELECT }
     );
 
@@ -123,8 +84,19 @@ const updateVoiceNote = async (req, res) => {
       assigned_agent_id,
       is_played,
       duration_seconds,
-      transcription,
+      transcription
     } = req.body;
+   
+    // ✅ Debug: show incoming values
+    console.log("🔄 Updating Voice Note ID:", id);
+    console.log("📥 Request body values:", {
+      recording_path,
+      clid,
+      assigned_agent_id,
+      is_played,
+      duration_seconds,
+      transcription
+    });
 
     const [updatedRows] = await VoiceNote.update(
       {
@@ -133,28 +105,27 @@ const updateVoiceNote = async (req, res) => {
         assigned_agent_id,
         is_played,
         duration_seconds,
-        transcription,
+        transcription
       },
       {
-        where: { id },
+        where: { id }
       }
     );
 
+    console.log("✅ Rows updated:", updatedRows);
+
     if (updatedRows === 0) {
-      return res
-        .status(404)
-        .json({ message: "Voice note not found or unchanged." });
+      return res.status(404).json({ message: "Voice note not found or unchanged." });
     }
 
     const updatedVoiceNote = await VoiceNote.findByPk(id);
-    res
-      .status(200)
-      .json({ message: "Voice note updated.", voiceNote: updatedVoiceNote });
+    res.status(200).json({ message: "Voice note updated.", voiceNote: updatedVoiceNote });
   } catch (error) {
-    console.error("Error updating voice note:", error);
+    console.error("❌ Error updating voice note:", error);
     res.status(500).json({ error: "Failed to update voice note." });
   }
 };
+
 
 const markVoiceNotePlayed = async (req, res) => {
   try {
@@ -201,12 +172,7 @@ const markVoiceNotePlayed = async (req, res) => {
       return res.status(404).json({ error: "Voice note not found" });
     }
 
-    res.json({
-      success: true,
-      id: Number(id),
-      is_played: true,
-      played_by: playedBy,
-    });
+    res.json({ success: true, id: Number(id), is_played: true, played_by: playedBy });
   } catch (error) {
     console.error("Error marking voice note as played:", error);
     res.status(500).json({ error: "Failed to mark voice note as played" });

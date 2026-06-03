@@ -2,6 +2,78 @@
  * Utility functions for calculating assignment aging
  */
 
+const DEFAULT_WORK_TIMEZONE = "Africa/Dar_es_Salaam";
+
+/**
+ * Calendar date key YYYY-MM-DD in the given IANA timezone.
+ * @param {Date|string|number} date
+ * @param {string} timeZone
+ * @returns {string|null}
+ */
+function toCalendarDateKey(date, timeZone = DEFAULT_WORK_TIMEZONE) {
+  if (date == null || date === "") return null;
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  if (!y || !m || !day) return null;
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Weekday 0=Sun .. 6=Sat for a calendar date key (UTC noon avoids DST edge cases).
+ * @param {string} dateKey YYYY-MM-DD
+ * @returns {number}
+ */
+function weekdayFromDateKey(dateKey) {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).getUTCDay();
+}
+
+/**
+ * Add days to a calendar date key.
+ * @param {string} dateKey YYYY-MM-DD
+ * @param {number} days
+ * @returns {string}
+ */
+function addCalendarDays(dateKey, days) {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+/**
+ * @param {Iterable<string|{holiday_date?: string}>} holidays
+ * @param {string} timeZone
+ * @returns {Set<string>}
+ */
+function normalizeHolidaySet(holidays, timeZone = DEFAULT_WORK_TIMEZONE) {
+  const set = new Set();
+  for (const h of holidays || []) {
+    if (h == null) continue;
+    if (typeof h === "string") {
+      const trimmed = h.trim();
+      if (trimmed.length >= 10) set.add(trimmed.slice(0, 10));
+      else if (trimmed) set.add(trimmed);
+      continue;
+    }
+    const raw = h.holiday_date ?? h;
+    const key = toCalendarDateKey(raw, timeZone);
+    if (key) set.add(key);
+  }
+  return set;
+}
 
 /**
  * Calculate the number of calendar days between two dates
@@ -18,27 +90,35 @@ const calculateCalendarDays = (startDate, endDate = new Date()) => {
 };
 
 /**
- * Calculate the number of working days (Mon-Fri) between two dates, excluding weekends
- * @param {Date|string} startDate - The start date (inclusive)
- * @param {Date|string} endDate - The end date (inclusive, defaults to current date)
- * @param {string[]} holidays - Array of holiday dates in 'YYYY-MM-DD' format (optional)
- * @returns {number} Number of working days
+ * Calculate working days (Mon–Fri) between two dates in WCF timezone, excluding weekends and holidays.
+ * @param {Date|string} startDate - Start (inclusive)
+ * @param {Date|string} endDate - End (inclusive, defaults to now)
+ * @param {string[]|Set<string>|object[]} holidays - YYYY-MM-DD strings or { holiday_date }
+ * @param {string} timeZone - IANA timezone (default Africa/Dar_es_Salaam)
+ * @returns {number}
  */
-const calculateWorkingDays = (startDate, endDate = new Date(), holidays = []) => {
+const calculateWorkingDays = (
+  startDate,
+  endDate = new Date(),
+  holidays = [],
+  timeZone = DEFAULT_WORK_TIMEZONE
+) => {
+  const startKey = toCalendarDateKey(startDate, timeZone);
+  const endKey = toCalendarDateKey(endDate, timeZone);
+  if (!startKey || !endKey || endKey < startKey) return 0;
+
+  const holidaySet = normalizeHolidaySet(holidays, timeZone);
   let count = 0;
-  let current = new Date(startDate);
-  const end = new Date(endDate);
-  const holidaySet = new Set(
-    (holidays || []).map((h) => new Date(h).toDateString())
-  );
-  
-  while (current <= end) {
-    const day = current.getDay();
-    const isWeekend = day === 0 || day === 6; // Sunday = 0, Saturday = 6
-    const isHoliday = holidaySet.has(current.toDateString());
-    if (!isWeekend && !isHoliday) count++;
-    current.setDate(current.getDate() + 1);
+  let current = startKey;
+
+  while (current <= endKey) {
+    const wd = weekdayFromDateKey(current);
+    const isWeekend = wd === 0 || wd === 6;
+    if (!isWeekend && !holidaySet.has(current)) count++;
+    if (current === endKey) break;
+    current = addCalendarDays(current, 1);
   }
+
   return count;
 };
 
@@ -195,11 +275,16 @@ const formatAging = (aging) => {
 };
 
 module.exports = {
+  DEFAULT_WORK_TIMEZONE,
+  toCalendarDateKey,
+  weekdayFromDateKey,
+  addCalendarDays,
+  normalizeHolidaySet,
   calculateCalendarDays,
   calculateWorkingDays,
   calculateBusinessHours,
   calculateAssignmentAging,
   calculateAssignmentsAging,
   getAgingStatus,
-  formatAging
+  formatAging,
 }; 
