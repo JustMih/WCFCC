@@ -2,10 +2,11 @@
  * Ticket Workflow TAT report — template columns aligned to TAT sample.xlsx.
  */
 
+const { calculateWorkingDays } = require("./agingCalculator");
 const {
   TAT_TEMPLATE_COLUMNS,
   normalizeRoleForSlot,
-  getSlotForwardKey,
+  getSlotDateKey,
   getSlotTatKey,
   createEmptyTemplateRow,
 } = require("./tatTemplateConfig");
@@ -17,7 +18,59 @@ const WORKFLOW_PATH_LABELS = {
   MAJOR_DIRECTORATE: "Major Complaint - Directorate",
 };
 
-const MS_PER_DAY = 86400000;
+const CREATOR_ROLE_CHANNEL_MAP = {
+  agent: "Call",
+  supervisor: "Call",
+  attendee: "Walk-in",
+  reviewer: "Call",
+  admin: "Call",
+  "super-admin": "Call",
+  "focal-person": "In-System",
+  "claim-focal-person": "In-System",
+  "compliance-focal-person": "In-System",
+  "head-of-unit": "In-System",
+  director: "In-System",
+  manager: "In-System",
+  "director-general": "In-System",
+};
+
+function normalizeRatedValue(value) {
+  if (value == null || value === "") return "";
+  const v = String(value).trim();
+  const lower = v.toLowerCase();
+  if (lower === "minor") return "Minor";
+  if (lower === "major") return "Major";
+  return v;
+}
+
+function resolveRated(ticket) {
+  const fromType = normalizeRatedValue(ticket?.complaint_type);
+  if (fromType) return fromType;
+
+  const path = String(ticket?.workflow_path || "").toUpperCase();
+  if (path.startsWith("MINOR")) return "Minor";
+  if (path.startsWith("MAJOR")) return "Major";
+
+  const category = String(ticket?.category || "").trim();
+  if (category && category !== "Complaint") return "";
+
+  return "";
+}
+
+function resolveChannel(ticket) {
+  const fromDb =
+    ticket?.channel != null ? String(ticket.channel).trim() : "";
+  if (fromDb) return fromDb;
+
+  const role = String(ticket?.creator_role || "")
+    .trim()
+    .toLowerCase();
+  if (role && CREATOR_ROLE_CHANNEL_MAP[role]) {
+    return CREATOR_ROLE_CHANNEL_MAP[role];
+  }
+
+  return "";
+}
 
 function parseDate(value) {
   if (!value) return null;
@@ -31,9 +84,12 @@ function toIsoDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
-function durationToDays(ms) {
-  if (!ms || ms <= 0) return 0;
-  return Math.round(ms / MS_PER_DAY);
+function workingDaysBetween(start, end, holidays = []) {
+  const startDate = parseDate(start);
+  const endDate = parseDate(end);
+  if (!startDate || !endDate) return 0;
+  if (endDate < startDate) return 0;
+  return calculateWorkingDays(startDate, endDate, holidays);
 }
 
 function computeFiscalYear(dateValue) {
@@ -84,18 +140,20 @@ function isTicketResolved(ticket) {
   );
 }
 
-function computeStepDurationMs(stepStart, stepEnd) {
-  const start = parseDate(stepStart);
-  const end = parseDate(stepEnd);
-  if (!start || !end) return 0;
-  return Math.max(0, end.getTime() - start.getTime());
-}
-
 function isWorkflowForwardAssignment(assignment) {
   const action = String(assignment?.action || "Assigned").toLowerCase();
   if (action.includes("handover")) return false;
   if (action === "closed") return false;
   return true;
+}
+
+function getVisitIndex(slot, visitCounts) {
+  if (slot === "dir_head" || slot === "manager") {
+    const count = (visitCounts[slot] || 0) + 1;
+    visitCounts[slot] = count;
+    return count;
+  }
+  return 1;
 }
 
 function buildWorkflowSteps(ticket, assignments = []) {
@@ -130,8 +188,6 @@ function buildWorkflowSteps(ticket, assignments = []) {
   return rawSteps.map((step, idx) => {
     const nextStart =
       idx < rawSteps.length - 1 ? rawSteps[idx + 1].startedAt : ticketEnd;
-    const durationMs = computeStepDurationMs(step.startedAt, nextStart);
-
     return {
       stepNumber: idx + 1,
       person: step.person,
@@ -139,8 +195,7 @@ function buildWorkflowSteps(ticket, assignments = []) {
       rawRole: step.rawRole,
       action: step.action,
       startedAt: step.startedAt,
-      durationMs,
-      durationDays: durationToDays(durationMs),
+      nextStartedAt: nextStart,
     };
   });
 }
@@ -154,18 +209,26 @@ function buildTemplateRowFromSteps(ticket, steps) {
   const resolvedAt = getResolvedAt(ticket);
   const closingDate = resolvedAt || getTicketEndDate(ticket);
 
+  row.category = ticket.category || "";
+  row.rated = resolveRated(ticket);
+  row.channel = resolveChannel(ticket);
   row.created_date = toIsoDate(ticketStart);
   row.fin_year = computeFiscalYear(ticketStart);
+  row.closing_date = toIsoDate(closingDate);
 
   const firstAssignment = steps.find((s) => s.stepNumber > 1);
   if (firstAssignment?.startedAt) {
     row.creator_forward_date = toIsoDate(firstAssignment.startedAt);
     if (ticketStart) {
-      row.tat_creator = durationToDays(
-        computeStepDurationMs(ticketStart, firstAssignment.startedAt)
+      row.tat_ass_creator = workingDaysBetween(
+        ticketStart,
+        firstAssignment.startedAt,
+        holidays
       );
     }
   }
+
+  const visitCounts = { dir_head: 0, manager: 0 };
 
   for (const step of steps) {
     if (step.stepNumber === 1) continue;
@@ -173,20 +236,39 @@ function buildTemplateRowFromSteps(ticket, steps) {
     const slot = normalizeRoleForSlot(step.rawRole);
     if (!slot || slot === "creator") continue;
 
-    const forwardKey = getSlotForwardKey(slot);
-    const tatKey = getSlotTatKey(slot);
-    if (!forwardKey || !tatKey) continue;
+    const visitIndex = getVisitIndex(slot, visitCounts);
+    const dateKey = getSlotDateKey(slot, visitIndex);
+    const tatKey = getSlotTatKey(slot, visitIndex);
+    if (!dateKey || !tatKey) continue;
 
-    // Last visit wins when role repeats in forward/reverse flow.
-    row[forwardKey] = toIsoDate(step.startedAt);
-    row[tatKey] = step.durationDays;
+    row[dateKey] = toIsoDate(step.startedAt);
+    row[tatKey] = workingDaysBetween(
+      step.startedAt,
+      step.nextStartedAt,
+      holidays
+    );
   }
 
-  row.closing_date = toIsoDate(closingDate);
-  if (ticketStart && closingDate) {
-    row.tat_overall = durationToDays(
-      computeStepDurationMs(ticketStart, closingDate)
+  const attendeeDate = parseDate(row.attendee_date);
+  const createdDate = parseDate(row.created_date);
+  const closedDate = parseDate(row.closing_date);
+
+  if (createdDate && attendeeDate) {
+    row.tat_overall_assigning = workingDaysBetween(
+      createdDate,
+      attendeeDate,
+      holidays
     );
+  }
+  if (attendeeDate && closedDate) {
+    row.tat_overall_attending = workingDaysBetween(
+      attendeeDate,
+      closedDate,
+      holidays
+    );
+  }
+  if (createdDate && closedDate) {
+    row.tat_overall = workingDaysBetween(createdDate, closedDate, holidays);
   }
 
   return row;
@@ -201,6 +283,8 @@ function buildTatReportRow(ticket, assignments, serialIndex) {
   const steps = buildWorkflowSteps(ticket, assignments);
   const templateRow = buildTemplateRowFromSteps(ticket, steps);
   const resolvedAt = getResolvedAt(ticket);
+  const rated = resolveRated(ticket);
+  const channel = resolveChannel(ticket);
 
   return {
     serial: serialIndex + 1,
@@ -210,8 +294,6 @@ function buildTatReportRow(ticket, assignments, serialIndex) {
       ticket.ticket_id ||
       (ticket.id ? `TKT-${String(ticket.id).substring(0, 8)}` : "—"),
     subject: ticket.subject || "—",
-    category: ticket.category || "—",
-    complaint_type: ticket.complaint_type || "—",
     workflow_path: ticket.workflow_path || null,
     workflow_path_label: getWorkflowPathLabel(ticket.workflow_path),
     status: ticket.status || "—",
@@ -219,6 +301,10 @@ function buildTatReportRow(ticket, assignments, serialIndex) {
     resolved_at: resolvedAt ? resolvedAt.toISOString() : null,
     step_count: steps.length,
     ...templateRow,
+    category: ticket.category || templateRow.category || "",
+    rated,
+    channel,
+    complaint_type: rated || ticket.complaint_type || "",
   };
 }
 
@@ -234,7 +320,12 @@ function buildTatReportSummary(rows) {
         )
       : 0;
 
-  return { total, resolved, avgTotalTatDays, avgTotalTatMinutes: avgTotalTatDays * 24 * 60 };
+  return {
+    total,
+    resolved,
+    avgTotalTatDays,
+    avgTotalTatMinutes: avgTotalTatDays * 24 * 60,
+  };
 }
 
 function groupAssignmentsByTicketId(assignments) {
@@ -248,10 +339,11 @@ function groupAssignmentsByTicketId(assignments) {
   return map;
 }
 
-function buildTatReportPayload(tickets, assignments) {
+function buildTatReportPayload(tickets, assignments, options = {}) {
+  const holidays = options.holidays || [];
   const byTicket = groupAssignmentsByTicketId(assignments);
   const rows = (tickets || []).map((ticket, index) =>
-    buildTatReportRow(ticket, byTicket[ticket.id] || [], index)
+    buildTatReportRow(ticket, byTicket[ticket.id] || [], index, holidays)
   );
   return {
     summary: buildTatReportSummary(rows),
@@ -265,10 +357,12 @@ module.exports = {
   TAT_TEMPLATE_COLUMNS,
   buildWorkflowSteps,
   buildTemplateRowFromSteps,
-  durationToDays,
+  workingDaysBetween,
   computeFiscalYear,
   buildTatReportRow,
   buildTatReportSummary,
   buildTatReportPayload,
   groupAssignmentsByTicketId,
+  resolveRated,
+  resolveChannel,
 };

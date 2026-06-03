@@ -3,13 +3,15 @@
  * Usage: node scripts/verify-ticket-workflow-tat.js [startDate] [endDate]
  */
 const sequelize = require("../config/mysql_connection");
+const { buildHolidaySet } = require("../utils/offHoursHelper");
 const { buildTatReportPayload } = require("../utils/ticketWorkflowReportHelper");
 const {
   TAT_TEMPLATE_COLUMNS,
+  TAT_DIMENSION_COLUMNS,
   LEGACY_COLUMN_KEYS,
 } = require("../utils/tatTemplateConfig");
 
-const EXPECTED_COLUMN_COUNT = 16;
+const EXPECTED_COLUMN_COUNT = TAT_TEMPLATE_COLUMNS.length;
 
 function assertTemplateShape(payload) {
   const errors = [];
@@ -45,6 +47,14 @@ function assertTemplateShape(payload) {
         break;
       }
     }
+    for (const dim of TAT_DIMENSION_COLUMNS) {
+      if (row[dim.key] === undefined) {
+        errors.push(
+          `Row ${row.ticket_number || row.id} missing dimension: ${dim.key}`
+        );
+        break;
+      }
+    }
     for (const legacyKey of LEGACY_COLUMN_KEYS) {
       if (legacyKey in row) {
         errors.push(
@@ -67,7 +77,7 @@ async function main() {
 
   const tickets = await sequelize.query(
     `
-    SELECT t.*, u2.full_name AS creator_name
+    SELECT t.*, u2.full_name AS creator_name, u2.role AS creator_role
     FROM Tickets t
     LEFT JOIN Users u2 ON t.created_by = u2.id
     WHERE t.created_at BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
@@ -126,6 +136,19 @@ async function main() {
     console.log(`Template shape: OK (${EXPECTED_COLUMN_COUNT} columns)`);
   }
 
+  const withChannel = payload.rows.filter(
+    (r) => r.channel != null && String(r.channel).trim() !== ""
+  );
+  if (payload.rows.length > 0 && withChannel.length === 0) {
+    console.warn(
+      "Warning: no rows have channel populated (check Tickets.channel and creator_role join)"
+    );
+  } else {
+    console.log(
+      `Rows with channel: ${withChannel.length} / ${payload.rows.length}`
+    );
+  }
+
   const sample = payload.rows.slice(0, 2).map((r) => {
     const out = { ticket_number: r.ticket_number, status: r.status };
     for (const col of TAT_TEMPLATE_COLUMNS) {
@@ -134,6 +157,13 @@ async function main() {
     return out;
   });
   console.log("Sample rows:", JSON.stringify(sample, null, 2));
+
+  if (payload.rows[0]) {
+    console.log(
+      "Sample tat_overall (working days, excl. weekends/holidays):",
+      payload.rows[0].tat_overall
+    );
+  }
 
   await sequelize.close();
 }

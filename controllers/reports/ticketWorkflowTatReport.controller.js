@@ -1,5 +1,37 @@
 const sequelize = require("../../config/mysql_connection");
-const { buildTatReportPayload } = require("../../utils/ticketWorkflowReportHelper");
+const { buildHolidaySet } = require("../../utils/offHoursHelper");
+const {
+  buildTatReportPayload,
+  resolveRated,
+  resolveChannel,
+} = require("../../utils/ticketWorkflowReportHelper");
+
+async function fetchHolidayDateKeys() {
+  let holidayRows = [];
+  try {
+    const models = require("../../models");
+    if (models.holidays) {
+      holidayRows = await models.holidays.findAll({
+        attributes: ["holiday_date"],
+      });
+    }
+  } catch {
+    holidayRows = [];
+  }
+
+  if (!holidayRows.length) {
+    try {
+      holidayRows = await sequelize.query(
+        `SELECT holiday_date FROM holidays`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+    } catch {
+      holidayRows = [];
+    }
+  }
+
+  return [...buildHolidaySet(holidayRows)];
+}
 
 exports.getTicketWorkflowTatReport = async (req, res) => {
   const { startDate, endDate, status } = req.params;
@@ -14,7 +46,8 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
     let query = `
       SELECT
         t.*,
-        u2.full_name AS creator_name
+        u2.full_name AS creator_name,
+        u2.role AS creator_role
       FROM Tickets t
       LEFT JOIN Users u2 ON t.created_by = u2.id
       WHERE t.created_at BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
@@ -66,7 +99,24 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
       );
     }
 
-    const payload = buildTatReportPayload(tickets, assignments);
+    const holidays = await fetchHolidayDateKeys();
+    const payload = buildTatReportPayload(tickets, assignments, { holidays });
+
+    // Ensure dimension columns are always present on each row (guards stale module cache).
+    payload.rows = payload.rows.map((row, index) => {
+      const ticket = tickets[index];
+      if (!ticket) return row;
+      const rated = resolveRated(ticket);
+      const channel = resolveChannel(ticket);
+      return {
+        ...row,
+        category: ticket.category || row.category || "",
+        rated,
+        channel,
+        complaint_type: rated || ticket.complaint_type || row.complaint_type || "",
+      };
+    });
+
     res.json(payload);
   } catch (error) {
     console.error("Error fetching ticket workflow TAT report:", error);

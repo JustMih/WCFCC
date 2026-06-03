@@ -2,16 +2,43 @@ const sequelize = require("../../config/mysql_connection");
 const VoiceNote = require("../../models/voice_notes.model");
 const User = require("../../models/User");
 
-const PRIVILEGED_VOICE_NOTE_ROLES = new Set([
-  "super-admin",
-  "admin",
-  "supervisor",
-  "director",
-  "director-general",
-  "manager",
-]);
+const getAllVoiceNotes = async (req, res) => {
+  try {
+    const { agentId, unplayedOnly } = req.query;
+    const conditions = [];
+    const replacements = {};
 
-const VOICE_NOTE_SELECT = `
+    if (unplayedOnly === "true" || unplayedOnly === "1") {
+      conditions.push("(vn.is_played = 0 OR vn.is_played IS NULL)");
+    }
+
+    if (agentId) {
+      const user = await User.findByPk(agentId, {
+        attributes: ["extension", "id"],
+      });
+      if (user) {
+        // Match by user id OR extension (round-robin often sets only assigned_agent_id)
+        conditions.push(
+          "(vn.assigned_agent_id = :agentUserId OR vn.assigned_extension = :agentExtension)"
+        );
+        replacements.agentUserId = String(user.id);
+        replacements.agentExtension = user.extension
+          ? String(user.extension)
+          : "__no_extension__";
+      } else {
+        conditions.push("vn.assigned_agent_id = :agentUserId");
+        replacements.agentUserId = String(agentId);
+      }
+    } else if (req.query.extension) {
+      conditions.push("vn.assigned_extension = :agentExtension");
+      replacements.agentExtension = String(req.query.extension);
+    }
+
+    const whereSql =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const voiceNotes = await sequelize.query(
+      `
 SELECT 
   vn.id,
   vn.recording_path,
@@ -26,79 +53,18 @@ SELECT
   ) AS playable_path,
   vn.clid,
   vn.assigned_extension,
-  vn.assigned_agent_id,
-  COALESCE(u_agent.full_name, u_ext.full_name) AS assigned_agent_name,
+  u.full_name AS assigned_agent_name,
   vn.is_played,
   vn.duration_seconds,
   vn.transcription,
   vn.status,
   vn.created_at
 FROM Voice_Notes vn
-LEFT JOIN Users u_agent ON u_agent.id = vn.assigned_agent_id
-LEFT JOIN Users u_ext ON u_ext.extension = vn.assigned_extension
-`;
-
-const getAllVoiceNotes = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    const role = req.user?.role || "";
-    const queryAgentId = req.query.agentId
-      ? String(req.query.agentId).trim()
-      : "";
-    const queryExtension = req.query.extension
-      ? String(req.query.extension).trim()
-      : "";
-
-    const isPrivileged = PRIVILEGED_VOICE_NOTE_ROLES.has(role);
-    let whereSql = "";
-    const replacements = {};
-
-    if (isPrivileged && !queryAgentId && !queryExtension) {
-      // Supervisors/admins: all voice notes when no filter requested
-      whereSql = "";
-    } else {
-      const scopeUserId = isPrivileged && queryAgentId ? queryAgentId : userId;
-
-      if (!scopeUserId && !queryExtension) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      let userExtension = null;
-      if (scopeUserId) {
-        const user = await User.findByPk(scopeUserId, {
-          attributes: ["extension"],
-          raw: true,
-        });
-        userExtension =
-          user?.extension != null ? String(user.extension).trim() : null;
-      }
-
-      const scopeExtension = queryExtension || userExtension;
-      const conditions = [];
-
-      if (scopeUserId) {
-        conditions.push("vn.assigned_agent_id = :scopeUserId");
-        replacements.scopeUserId = scopeUserId;
-      }
-
-      if (scopeExtension) {
-        conditions.push(
-          "(vn.assigned_agent_id IS NULL AND TRIM(CAST(vn.assigned_extension AS CHAR)) = :scopeExtension)"
-        );
-        replacements.scopeExtension = scopeExtension;
-      }
-
-      if (!conditions.length) {
-        return res.status(400).json({ message: "Unable to scope voice notes" });
-      }
-
-      whereSql = `WHERE (${conditions.join(" OR ")})`;
-    }
-
-    const voiceNotes = await sequelize.query(
-      `${VOICE_NOTE_SELECT}
+LEFT JOIN Users u
+  ON u.extension = vn.assigned_extension
 ${whereSql}
-ORDER BY vn.created_at DESC`,
+ORDER BY vn.created_at DESC
+      `,
       { replacements, type: sequelize.QueryTypes.SELECT }
     );
 
