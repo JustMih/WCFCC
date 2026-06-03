@@ -131,8 +131,15 @@ function normalizeRoleForSlot(role) {
     .replace(/_/g, "-");
   if (!r || r === "creator") return "creator";
   if (r === "agent") return "creator";
-  if (r === "reviewer" || r === "coordinator") return "coord";
-  if (r === "head-of-unit" || r === "head of unit" || r === "director") {
+  if (r === "reviewer" || r === "coordinator" || r === "supervisor") {
+    return "coord";
+  }
+  if (
+    r === "head-of-unit" ||
+    r === "head of unit" ||
+    r === "director" ||
+    r === "headofunit"
+  ) {
     return "dir_head";
   }
   if (r === "manager") return "manager";
@@ -145,7 +152,7 @@ function normalizeRoleForSlot(role) {
     return "focal";
   }
   if (r === "attendee") return "attendee";
-  if (r === "director-general" || r === "director general") {
+  if (r === "director-general" || r === "director general" || r === "dg") {
     return "director_general";
   }
   return null;

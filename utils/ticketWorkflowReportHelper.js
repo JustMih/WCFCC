@@ -34,6 +34,113 @@ const CREATOR_ROLE_CHANNEL_MAP = {
   "director-general": "In-System",
 };
 
+/** Stored ticket.channel values → display label */
+const CHANNEL_VALUE_ALIASES = {
+  agent: "Call",
+  call: "Call",
+  "call center": "Call",
+  "walk-in": "Walk-in",
+  "walk in": "Walk-in",
+  walkin: "Walk-in",
+  "in-system": "In-System",
+  "in system": "In-System",
+  insystem: "In-System",
+};
+
+const IN_SYSTEM_SLOTS = new Set([
+  "focal",
+  "manager",
+  "dir_head",
+  "director_general",
+  "coord",
+]);
+
+function normalizeRoleKey(role) {
+  return String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+}
+
+function channelFromRole(role) {
+  const key = normalizeRoleKey(role);
+  if (!key) return "";
+  return CREATOR_ROLE_CHANNEL_MAP[key] || "";
+}
+
+function normalizeChannelLabel(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+
+  const key = trimmed.toLowerCase();
+  if (CHANNEL_VALUE_ALIASES[key]) {
+    return CHANNEL_VALUE_ALIASES[key];
+  }
+
+  const fromRole = channelFromRole(key);
+  if (fromRole) return fromRole;
+
+  return trimmed;
+}
+
+function channelFromWorkflowSteps(steps = []) {
+  for (const step of steps) {
+    const slot = normalizeRoleForSlot(step?.rawRole || step?.role);
+    if (slot === "attendee") return "Walk-in";
+    if (slot === "creator" || slot === "coord") return "Call";
+    if (slot && IN_SYSTEM_SLOTS.has(slot)) return "In-System";
+  }
+  return "";
+}
+
+function channelFromAssignments(assignments = []) {
+  const sorted = [...(assignments || [])]
+    .filter(isWorkflowForwardAssignment)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  for (const assignment of sorted) {
+    const role =
+      assignment.assigned_to_role ||
+      assignment.workflow_current_role ||
+      assignment.assigned_user_role;
+    const fromRole = channelFromRole(role);
+    if (fromRole) return fromRole;
+
+    const slot = normalizeRoleForSlot(role);
+    if (slot === "attendee") return "Walk-in";
+    if (slot === "creator" || slot === "coord") return "Call";
+    if (slot && IN_SYSTEM_SLOTS.has(slot)) return "In-System";
+  }
+
+  return "";
+}
+
+function resolveChannel(ticket, options = {}) {
+  const { assignments = [], steps = [] } = options;
+
+  const fromDb = normalizeChannelLabel(ticket?.channel);
+  if (fromDb) return fromDb;
+
+  const roleCandidates = [
+    ticket?.creator_role,
+    ticket?.assigned_to_role,
+    ticket?.created_by_role,
+  ];
+
+  for (const role of roleCandidates) {
+    const fromRole = channelFromRole(role);
+    if (fromRole) return fromRole;
+  }
+
+  const fromSteps = channelFromWorkflowSteps(steps);
+  if (fromSteps) return fromSteps;
+
+  const fromAssignments = channelFromAssignments(assignments);
+  if (fromAssignments) return fromAssignments;
+
+  return "";
+}
+
 function normalizeRatedValue(value) {
   if (value == null || value === "") return "";
   const v = String(value).trim();
@@ -53,21 +160,6 @@ function resolveRated(ticket) {
 
   const category = String(ticket?.category || "").trim();
   if (category && category !== "Complaint") return "";
-
-  return "";
-}
-
-function resolveChannel(ticket) {
-  const fromDb =
-    ticket?.channel != null ? String(ticket.channel).trim() : "";
-  if (fromDb) return fromDb;
-
-  const role = String(ticket?.creator_role || "")
-    .trim()
-    .toLowerCase();
-  if (role && CREATOR_ROLE_CHANNEL_MAP[role]) {
-    return CREATOR_ROLE_CHANNEL_MAP[role];
-  }
 
   return "";
 }
@@ -178,8 +270,16 @@ function buildWorkflowSteps(ticket, assignments = []) {
     },
     ...sorted.map((a) => ({
       person: a.assigned_to_name || a.assigned_to_id || "Unknown",
-      role: a.assigned_to_role || a.workflow_current_role || "N/A",
-      rawRole: a.assigned_to_role || a.workflow_current_role || "N/A",
+      role:
+        a.assigned_to_role ||
+        a.workflow_current_role ||
+        a.assigned_user_role ||
+        "N/A",
+      rawRole:
+        a.assigned_to_role ||
+        a.workflow_current_role ||
+        a.assigned_user_role ||
+        "N/A",
       action: a.action || "Assigned",
       startedAt: parseDate(a.created_at),
     })),
@@ -200,7 +300,8 @@ function buildWorkflowSteps(ticket, assignments = []) {
   });
 }
 
-function buildTemplateRowFromSteps(ticket, steps) {
+function buildTemplateRowFromSteps(ticket, steps, holidays = []) {
+  const holidayDates = Array.isArray(holidays) ? holidays : [];
   const row = createEmptyTemplateRow();
   const ticketStart =
     parseDate(ticket.created_at) ||
@@ -211,7 +312,6 @@ function buildTemplateRowFromSteps(ticket, steps) {
 
   row.category = ticket.category || "";
   row.rated = resolveRated(ticket);
-  row.channel = resolveChannel(ticket);
   row.created_date = toIsoDate(ticketStart);
   row.fin_year = computeFiscalYear(ticketStart);
   row.closing_date = toIsoDate(closingDate);
@@ -223,7 +323,7 @@ function buildTemplateRowFromSteps(ticket, steps) {
       row.tat_ass_creator = workingDaysBetween(
         ticketStart,
         firstAssignment.startedAt,
-        holidays
+        holidayDates
       );
     }
   }
@@ -245,7 +345,7 @@ function buildTemplateRowFromSteps(ticket, steps) {
     row[tatKey] = workingDaysBetween(
       step.startedAt,
       step.nextStartedAt,
-      holidays
+      holidayDates
     );
   }
 
@@ -257,18 +357,18 @@ function buildTemplateRowFromSteps(ticket, steps) {
     row.tat_overall_assigning = workingDaysBetween(
       createdDate,
       attendeeDate,
-      holidays
+      holidayDates
     );
   }
   if (attendeeDate && closedDate) {
     row.tat_overall_attending = workingDaysBetween(
       attendeeDate,
       closedDate,
-      holidays
+      holidayDates
     );
   }
   if (createdDate && closedDate) {
-    row.tat_overall = workingDaysBetween(createdDate, closedDate, holidays);
+    row.tat_overall = workingDaysBetween(createdDate, closedDate, holidayDates);
   }
 
   return row;
@@ -279,12 +379,13 @@ function getWorkflowPathLabel(pathKey) {
   return WORKFLOW_PATH_LABELS[pathKey] || String(pathKey).replace(/_/g, " ");
 }
 
-function buildTatReportRow(ticket, assignments, serialIndex) {
+function buildTatReportRow(ticket, assignments, serialIndex, holidays = []) {
   const steps = buildWorkflowSteps(ticket, assignments);
-  const templateRow = buildTemplateRowFromSteps(ticket, steps);
+  const channel = resolveChannel(ticket, { assignments, steps });
+  const templateRow = buildTemplateRowFromSteps(ticket, steps, holidays);
+  templateRow.channel = channel;
   const resolvedAt = getResolvedAt(ticket);
   const rated = resolveRated(ticket);
-  const channel = resolveChannel(ticket);
 
   return {
     serial: serialIndex + 1,

@@ -98,7 +98,7 @@ async function main() {
   if (ticketIds.length) {
     assignments = await sequelize.query(
       `
-      SELECT ta.*, u.full_name AS assigned_to_name
+      SELECT ta.*, u.full_name AS assigned_to_name, u.role AS assigned_user_role
       FROM Ticket_assignments ta
       LEFT JOIN Users u ON u.id = ta.assigned_to_id
       WHERE ta.ticket_id IN (:ticketIds)

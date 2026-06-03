@@ -2,9 +2,13 @@ const sequelize = require("../../config/mysql_connection");
 const { buildHolidaySet } = require("../../utils/offHoursHelper");
 const {
   buildTatReportPayload,
+  groupAssignmentsByTicketId,
   resolveRated,
   resolveChannel,
+  TAT_TEMPLATE_COLUMNS,
 } = require("../../utils/ticketWorkflowReportHelper");
+
+const MAX_TAT_TICKETS = 3000;
 
 async function fetchHolidayDateKeys() {
   let holidayRows = [];
@@ -73,8 +77,14 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
     if (!tickets.length) {
       return res.json({
         summary: { total: 0, resolved: 0, avgTotalTatDays: 0, avgTotalTatMinutes: 0 },
-        templateColumns: [],
+        templateColumns: TAT_TEMPLATE_COLUMNS,
         rows: [],
+      });
+    }
+
+    if (tickets.length > MAX_TAT_TICKETS) {
+      return res.status(400).json({
+        error: `Too many tickets (${tickets.length}) for this date range. Narrow the range to at most ${MAX_TAT_TICKETS} tickets.`,
       });
     }
 
@@ -86,7 +96,8 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
         `
         SELECT
           ta.*,
-          u.full_name AS assigned_to_name
+          u.full_name AS assigned_to_name,
+          u.role AS assigned_user_role
         FROM Ticket_assignments ta
         LEFT JOIN Users u ON u.id = ta.assigned_to_id
         WHERE ta.ticket_id IN (:ticketIds)
@@ -101,13 +112,17 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
 
     const holidays = await fetchHolidayDateKeys();
     const payload = buildTatReportPayload(tickets, assignments, { holidays });
+    const assignmentsByTicket = groupAssignmentsByTicketId(assignments);
 
     // Ensure dimension columns are always present on each row (guards stale module cache).
     payload.rows = payload.rows.map((row, index) => {
       const ticket = tickets[index];
       if (!ticket) return row;
+      const ticketAssignments = assignmentsByTicket[ticket.id] || [];
       const rated = resolveRated(ticket);
-      const channel = resolveChannel(ticket);
+      const channel =
+        row.channel ||
+        resolveChannel(ticket, { assignments: ticketAssignments });
       return {
         ...row,
         category: ticket.category || row.category || "",
