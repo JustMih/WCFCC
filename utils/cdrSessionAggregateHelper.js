@@ -6,13 +6,16 @@ const { QueryTypes } = require("sequelize");
 const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
 const { extractExtensionFromChannel } = require("./agentExtensionHelper");
 
-const LOST_MIN_DURATION_SECONDS = 5 * 60;
+const {
+  LOST_MIN_DURATION_SECONDS,
+  normalizeQueueWaitSeconds,
+  queueWaitToMinutes,
+} = require("./queueTimingConstants");
 
 function deriveSessionStatus(row) {
   if (Number(row.has_agent_answer) > 0) return "answered";
-  const wait = Math.max(
-    Number(row.queue_wait_sec) || 0,
-    Number(row.total_duration) || 0
+  const wait = normalizeQueueWaitSeconds(
+    Math.max(Number(row.queue_wait_sec) || 0, Number(row.total_duration) || 0)
   );
   if (wait >= LOST_MIN_DURATION_SECONDS) return "lost";
   if (wait > 0) return "dropped";
@@ -146,7 +149,9 @@ async function queryCdrSessionsForReport(
       direction: "INBOUND",
       total_duration: Number(row.total_duration) || 0,
       duration: Number(row.total_duration) || 0,
-      queue_wait_sec: Number(row.queue_wait_sec) || 0,
+      queue_wait_sec: normalizeQueueWaitSeconds(
+        Math.max(Number(row.queue_wait_sec) || 0, Number(row.total_duration) || 0)
+      ),
       billsec: Number(row.billsec) || 0,
       status,
       disposition: status,
@@ -168,4 +173,5 @@ module.exports = {
   LOST_MIN_DURATION_SECONDS,
   deriveSessionStatus,
   queryCdrSessionsForReport,
+  queueWaitToMinutes,
 };

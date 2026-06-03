@@ -19,26 +19,16 @@ function isCustomerCaller(raw) {
   return /^0\d{9}$/.test(phone);
 }
 
-/**
- * Lost = caller waited in queue for this long or longer (5+ minutes).
- * Dropped = hung up before this threshold (under 5 minutes).
- */
-const LOST_MIN_DURATION_SECONDS = 5 * 60;
-
-function hasKnownQueueWait(waitSeconds) {
-  const w = Number(waitSeconds);
-  return Number.isFinite(w) && w > 0;
-}
-
-function isLostWaitSeconds(waitSeconds) {
-  return hasKnownQueueWait(waitSeconds) && waitSeconds >= LOST_MIN_DURATION_SECONDS;
-}
-
-function isDroppedWaitSeconds(waitSeconds) {
-  return (
-    hasKnownQueueWait(waitSeconds) && waitSeconds < LOST_MIN_DURATION_SECONDS
-  );
-}
+const {
+  QUEUE_EXIT_TIMEOUT_SECONDS,
+  LOST_CLASSIFY_GRACE_SECONDS,
+  LOST_MIN_DURATION_SECONDS,
+  hasKnownQueueWait,
+  normalizeQueueWaitSeconds,
+  isLostWaitSeconds,
+  isDroppedWaitSeconds,
+  queueWaitToMinutes,
+} = require("./queueTimingConstants");
 
 /**
  * Parse queue wait from queue_log.
@@ -83,7 +73,7 @@ function effectiveQueueWaitSeconds(sessionRow, queueWaitByCallId, celWaitBySessi
   );
   const csWait = Number(sessionRow.call_summary_duration) || 0;
   const best = Math.max(qlWait, celWait, cdrWait, csWait);
-  return best > 0 ? best : null;
+  return best > 0 ? normalizeQueueWaitSeconds(best) : null;
 }
 
 function mergeWaitWithCallSummary(waitSeconds, callSummaryDuration) {
@@ -1080,12 +1070,6 @@ async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
   return dedupeIncomingLostCdrs(droppedOnly).length;
 }
 
-function queueWaitToMinutes(waitSeconds) {
-  const w = Number(waitSeconds);
-  if (!Number.isFinite(w) || w <= 0) return 0;
-  return Math.round((w / 60) * 100) / 100;
-}
-
 /**
  * Enrich abandon/lost session rows for Comprehensive Reports (CDR + queue + agent).
  */
@@ -1638,10 +1622,14 @@ async function getLostCallsDiagnostics(sequelize) {
 
 module.exports = {
   DEDUP_WINDOW_SECONDS,
+  QUEUE_EXIT_TIMEOUT_SECONDS,
+  LOST_CLASSIFY_GRACE_SECONDS,
   LOST_MIN_DURATION_SECONDS,
   hasKnownQueueWait,
+  normalizeQueueWaitSeconds,
   isLostWaitSeconds,
   isDroppedWaitSeconds,
+  queueWaitToMinutes,
   parseQueueLogWaitSeconds,
   effectiveQueueWaitSeconds,
   fetchQueueLogWaitMap,

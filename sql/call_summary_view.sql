@@ -65,7 +65,7 @@ SELECT
         THEN COALESCE(c.duration, 0)
         ELSE 0
       END
-    ) >= 300 THEN 'lost'
+    ) >= 294 THEN 'lost'
     ELSE 'dropped'
   END AS status,
   SUBSTRING_INDEX(
