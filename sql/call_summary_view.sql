@@ -42,7 +42,6 @@ SELECT
     WHEN SUM(
       CASE
         WHEN c.lastapp IN ('Queue', 'AppQueue')
-          AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
         THEN COALESCE(c.duration, 0)
         ELSE 0
       END
@@ -61,7 +60,6 @@ SELECT
     WHEN SUM(
       CASE
         WHEN c.lastapp IN ('Queue', 'AppQueue')
-          AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
         THEN COALESCE(c.duration, 0)
         ELSE 0
       END

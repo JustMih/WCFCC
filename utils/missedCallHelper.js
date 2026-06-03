@@ -980,9 +980,14 @@ async function fetchQueueAbandonSessionsRaw(
   const { QueryTypes } = require("sequelize");
   const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
   const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
-  const lastappFilter = queueOnly
-    ? "AND c.lastapp IN ('Queue', 'AppQueue')"
-    : "";
+  /** Asterisk often writes queue timeout/exit as ANSWERED, not NO ANSWER. */
+  const queueDispositionFilter = queueOnly
+    ? `AND c.lastapp IN ('Queue', 'AppQueue')
+       AND (
+         c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
+         OR c.disposition = 'ANSWERED'
+       )`
+    : `AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')`;
 
   let rows = [];
   let queueWaitByCallId = new Map();
@@ -1009,8 +1014,7 @@ async function fetchQueueAbandonSessionsRaw(
         MAX(COALESCE(c.billsec, 0)) AS max_billsec
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :startDateTime AND :endDateTime
-        AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
-        ${lastappFilter}
+        ${queueDispositionFilter}
         AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
       GROUP BY ${sessionIdExpr}
       ORDER BY call_time DESC
