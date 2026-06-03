@@ -13,24 +13,34 @@ const {
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
 const {
   ensureCallSummaryReady,
+  mapRowsToCdrApiShape,
+  enrichCdrRowsWithAgentNames,
   buildDateRangeWhere,
   buildCdrDestinationWhere,
   buildDispositionWhere,
   buildCdrReportSelectList,
   buildCdrReportFromClause,
   buildCdrQueueWaitReplacements,
-  mapRowsToCdrApiShape,
-  enrichCdrRowsWithAgentNames,
   queryAgentPerformanceAggregates,
 } = require("../../utils/callSummaryReportHelper");
+const { queryCdrSessionsForReport } = require("../../utils/cdrSessionAggregateHelper");
 
 let offHoursReportController = {};
+let lostCallsReportController = {};
 let slaReportController = {};
 try {
   offHoursReportController = require("./offHoursReport.controller");
 } catch (err) {
   console.warn(
     "[reports.controller] offHoursReport.controller not loaded:",
+    err.message
+  );
+}
+try {
+  lostCallsReportController = require("./lostCallsReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] lostCallsReport.controller not loaded:",
     err.message
   );
 }
@@ -191,6 +201,12 @@ exports.testIVRTable = async (req, res) => {
  
 exports.getIVRInteractions = async (req, res) => {
   try {
+    const { startDate, endDate } = req.params;
+    const dateFilter =
+      startDate && endDate
+        ? `WHERE m.createdAt BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`
+        : "";
+
     const query = `
       SELECT
         m.id,
@@ -212,11 +228,13 @@ exports.getIVRInteractions = async (req, res) => {
         ON a.id = m.action_id
       LEFT JOIN IVRVoices v
         ON v.id = m.ivr_voice_id
+      ${dateFilter}
       ORDER BY m.createdAt DESC
-      LIMIT 1000
+      LIMIT 5000
     `;
 
     const rows = await sequelize.query(query, {
+      replacements: startDate && endDate ? { startDate, endDate } : {},
       type: sequelize.QueryTypes.SELECT,
     });
 
@@ -324,43 +342,56 @@ exports.getCDRReport = async (req, res) => {
   }
 
   try {
-    await ensureCallSummaryReady(sequelize);
+    const excludeDestS =
+      req.query.excludeDestS === "1" || req.query.excludeDestS === "true";
 
-    const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
-    const destFilter = buildCdrDestinationWhere("cs", "called");
-    const dispFilter = buildDispositionWhere(disposition, "cs");
-    const queueWaitOpts = { queueLogDateFilter: true };
+    let rows = await queryCdrSessionsForReport(sequelize, {
+      startDate,
+      endDate,
+      disposition,
+      excludeDestS,
+    });
 
-    const whereParts = [dateFilter.sql, destFilter.sql];
-    if (dispFilter) {
-      whereParts.push(dispFilter.sql);
-    }
-
-    const replacements = {
-      ...dateFilter.replacements,
-      ...destFilter.replacements,
-      ...(dispFilter?.replacements || {}),
-      ...buildCdrQueueWaitReplacements(startDate, endDate),
-    };
-
-    const rows = await sequelize.query(
-      `
-      SELECT ${buildCdrReportSelectList("cs")}
-      ${buildCdrReportFromClause("cs", queueWaitOpts)}
-      WHERE ${whereParts.join(" AND ")}
-      ORDER BY cs.call_start DESC
-      `,
-      {
-        replacements,
-        type: sequelize.QueryTypes.SELECT,
+    if (!rows.length) {
+      try {
+        await ensureCallSummaryReady(sequelize);
+        const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
+        const destFilter = buildCdrDestinationWhere("cs", "called");
+        const dispFilter = buildDispositionWhere(disposition, "cs");
+        const queueWaitOpts = { queueLogDateFilter: true };
+        const whereParts = [dateFilter.sql, destFilter.sql];
+        if (dispFilter) whereParts.push(dispFilter.sql);
+        const replacements = {
+          ...dateFilter.replacements,
+          ...destFilter.replacements,
+          ...(dispFilter?.replacements || {}),
+          ...buildCdrQueueWaitReplacements(startDate, endDate),
+        };
+        rows = await sequelize.query(
+          `
+          SELECT ${buildCdrReportSelectList("cs")}
+          ${buildCdrReportFromClause("cs", queueWaitOpts)}
+          WHERE ${whereParts.join(" AND ")}
+          ORDER BY cs.call_start DESC
+          `,
+          {
+            replacements,
+            type: sequelize.QueryTypes.SELECT,
+          }
+        );
+        rows = mapRowsToCdrApiShape(rows);
+      } catch (viewErr) {
+        console.warn("[getCDRReport] call_summary fallback failed:", viewErr.message);
       }
-    );
+    }
 
     if (!rows.length) {
       return res.status(404).json({ message: "No CDR records found" });
     }
 
-    const mapped = mapRowsToCdrApiShape(rows);
+    const mapped = rows[0]?.disposition
+      ? rows
+      : mapRowsToCdrApiShape(rows);
     const enriched = await enrichCdrRowsWithAgentNames(mapped, User, sequelize);
     res.json(enriched);
   } catch (error) {
@@ -693,6 +724,17 @@ if (typeof offHoursReportController.getOffHoursReport === "function") {
     res.status(503).json({
       error:
         "Off-hours report is not available. Deploy offHoursReport.controller.js and utils/offHoursReportHelper.js.",
+    });
+  };
+}
+
+if (typeof lostCallsReportController.getLostCallsReport === "function") {
+  exports.getLostCallsReport = lostCallsReportController.getLostCallsReport;
+} else {
+  exports.getLostCallsReport = async (req, res) => {
+    res.status(503).json({
+      error:
+        "Lost calls report is not available. Deploy lostCallsReport.controller.js and latest missedCallHelper.js.",
     });
   };
 }

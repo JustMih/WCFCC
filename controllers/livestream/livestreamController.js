@@ -19,6 +19,12 @@ const {
   buildAgentsNameMap,
   resolveAgentForCall,
 } = require("../../utils/agentExtensionHelper");
+const { isLostWaitSeconds } = require("../../utils/missedCallHelper");
+const {
+  loadSupervisorExtensionSet,
+  applyCelRowToCall,
+  filterCallsForDisplay,
+} = require("../../utils/liveCallCelHelper");
 
 /* ============================== SOCKET STATE ============================== */
 let ioInstance = null;
@@ -95,6 +101,7 @@ const getAllLiveCalls = async (req, res) => {
     });
 
     const calls = {};
+    const supervisorExts = await loadSupervisorExtensionSet(User);
 
     /* ================= BUILD CALL OBJECTS ================= */
     for (const row of events) {
@@ -124,57 +131,7 @@ const getAllLiveCalls = async (req, res) => {
 
       const c = calls[key];
 
-      switch (row.eventtype) {
-        case "CHAN_START":
-          c.call_start ??= row.eventtime;
-          c.queue_entry_time ??= row.eventtime;
-          c.status = "calling";
-          break;
-
-        case "ANSWER":
-          c.call_answered ??= row.eventtime;
-          break;
-
-        case "BRIDGE_ENTER":
-          c.status = "active";
-
-          {
-            const bridgeChan = row.channame || row.channel;
-            const ext =
-              extractExtensionFromChannel(bridgeChan) ||
-              extractExtensionFromChannel(row.peer);
-            if (ext) {
-              c.agent_extension = c.agent_extension || ext;
-              if (
-                bridgeChan &&
-                bridgeChan.includes("PJSIP/") &&
-                bridgeChan.includes(`/${ext}-`)
-              ) {
-                c.agent_channel = bridgeChan;
-                c.spyCallId = bridgeChan;
-              }
-            } else if (bridgeChan && !c.spyCallId) {
-              c.spyCallId = bridgeChan;
-            }
-          }
-          break;
-
-        case "HANGUP":
-          c.call_end = row.eventtime;
-          if (!c.call_answered && c.queue_entry_time) c.status = "lost";
-          else if (!c.call_answered) c.status = "dropped";
-          else c.status = "ended";
-          break;
-
-        case "APP_START":
-          if (row.appname === "Queue") {
-            c.queue_entry_time = row.eventtime;
-          }
-          if (row.appname === "VoiceMail") {
-            c.voicemail_path = `/recorded/voicemails/${key}.wav`;
-          }
-          break;
-      }
+      applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds });
 
      // Durations
         if (c.call_start && c.call_end) {
@@ -241,11 +198,13 @@ const getAllLiveCalls = async (req, res) => {
     });
 
     /* ================= SORT ================= */
-    const result = Object.values(calls).sort((a, b) => {
-      if (a.status === "active" && b.status !== "active") return -1;
-      if (b.status === "active" && a.status !== "active") return 1;
-      return new Date(b.call_start || 0) - new Date(a.call_start || 0);
-    });
+    const result = filterCallsForDisplay(Object.values(calls), supervisorExts).sort(
+      (a, b) => {
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (b.status === "active" && a.status !== "active") return 1;
+        return new Date(b.call_start || 0) - new Date(a.call_start || 0);
+      }
+    );
 
     /* ✅ UPDATE LIVE CALL CACHE */
     liveCallsCache = result;

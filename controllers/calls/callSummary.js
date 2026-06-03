@@ -1,6 +1,13 @@
 const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
 const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
+const {
+  ensureLostAbandonsInMissedCalls,
+  countTodayMissedCalls,
+  countQueueDroppedInRange,
+  countIvrAnsweredExcludingQueueLost,
+  countMissedCallsInRange,
+} = require("../../utils/missedCallHelper");
 
 function buildRangeWhereClause(excludeDestS) {
   let sql = "WHERE call_start BETWEEN :startDate AND :endDate";
@@ -240,27 +247,76 @@ const getCallSummary = async (req, res) => {
       getCountsForRange(yearStart, yearEnd, countOptions),
     ]);
 
+    await ensureLostAbandonsInMissedCalls(sequelize);
+
+    let lostToday = currentDay.lost;
+    let droppedToday = currentDay.dropped;
+    let ivrToday = currentDay.ivr;
+    let ivrMonth = currentMonth.ivr;
+    let ivrYear = currentYear.ivr;
+    let lostMonth = currentMonth.lost;
+    let droppedMonth = currentMonth.dropped;
+    let lostYear = currentYear.lost;
+    let droppedYear = currentYear.dropped;
+
+    try {
+      [
+        lostToday,
+        droppedToday,
+        ivrToday,
+        ivrMonth,
+        ivrYear,
+        lostMonth,
+        droppedMonth,
+        lostYear,
+        droppedYear,
+      ] = await Promise.all([
+        countTodayMissedCalls(sequelize),
+        countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+        countIvrAnsweredExcludingQueueLost(sequelize, dayStart, dayEnd),
+        countIvrAnsweredExcludingQueueLost(sequelize, monthStart, monthEnd),
+        countIvrAnsweredExcludingQueueLost(sequelize, yearStart, yearEnd),
+        countMissedCallsInRange(sequelize, monthStart, monthEnd),
+        countQueueDroppedInRange(sequelize, monthStart, monthEnd),
+        countMissedCallsInRange(sequelize, yearStart, yearEnd),
+        countQueueDroppedInRange(sequelize, yearStart, yearEnd),
+      ]);
+    } catch (lostDropErr) {
+      console.error(
+        "Lost/dropped/IVR counts failed (using call_summary fallback):",
+        lostDropErr?.message || lostDropErr
+      );
+    }
+
+    /** Total must equal answered + ivr + lost + dropped (same sources as breakdown). */
+    const dayAnswered = currentDay.answered;
+    const dayIvr = ivrToday;
+    const monthAnswered = currentMonth.answered;
+    const monthIvr = ivrMonth;
+    const yearAnswered = currentYear.answered;
+    const yearIvr = ivrYear;
+
     const response = {
       currentDay: {
-        totalCalls: currentDay.totalCalls,
-        answered: currentDay.answered,
-        ivr: currentDay.ivr,
-        dropped: currentDay.dropped,
-        lost: currentDay.lost,
+        answered: dayAnswered,
+        ivr: dayIvr,
+        dropped: droppedToday,
+        lost: lostToday,
+        totalCalls: dayAnswered + dayIvr + lostToday + droppedToday,
       },
       currentMonth: {
-        totalCalls: currentMonth.totalCalls,
-        answered: currentMonth.answered,
-        ivr: currentMonth.ivr,
-        dropped: currentMonth.dropped,
-        lost: currentMonth.lost,
+        answered: monthAnswered,
+        ivr: monthIvr,
+        dropped: droppedMonth,
+        lost: lostMonth,
+        totalCalls: monthAnswered + monthIvr + lostMonth + droppedMonth,
       },
       currentYear: {
-        totalCalls: currentYear.totalCalls,
-        answered: currentYear.answered,
-        ivr: currentYear.ivr,
-        dropped: currentYear.dropped,
-        lost: currentYear.lost,
+        answered: yearAnswered,
+        ivr: yearIvr,
+        dropped: droppedYear,
+        lost: lostYear,
+        totalCalls: yearAnswered + yearIvr + lostYear + droppedYear,
       },
       timestamp: new Date().toISOString(),
     };

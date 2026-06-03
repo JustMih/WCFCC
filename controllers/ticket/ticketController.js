@@ -77,6 +77,16 @@ function getWorkingDays(startDate, endDate, holidays = []) {
   return count;
 }
 
+/** Set true for 2-min SLA testing; false for production working-days SLA */
+const ESCALATION_TEST_MODE = true;
+const ESCALATION_TEST_SLA_MINUTES = 2;
+
+function getElapsedMinutes(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  return Math.floor((end - start) / (1000 * 60));
+}
+
 // Utility: Capitalize first letter of each word
 /**
  * Capitalizes the first letter of each word in a string.
@@ -169,8 +179,9 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   const currentRole = (lastAssignment.assigned_to_role || "").toLowerCase();
   const complaintType = (ticket.complaint_type || "").toLowerCase();
 
-  // Determine SLA days for this role
+  // Determine SLA for this role (minutes in test mode, working days in production)
   let slaDays = 0;
+  let slaMinutes = ESCALATION_TEST_SLA_MINUTES;
   // if (ticket.category === "Inquiry") {
   //   slaDays = 3; // Inquiries: 3 days
   // } else if (ticket.category === "Complaint") {
@@ -180,8 +191,11 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     return false; // Not applicable
   }
 
-  // Calculate working days since assigned to this role
-  const workingDays = getWorkingDays(assignedAt, new Date(), holidays);
+  const now = new Date();
+  const workingDays = ESCALATION_TEST_MODE
+    ? getElapsedMinutes(assignedAt, now)
+    : getWorkingDays(assignedAt, now, holidays);
+  const slaLimit = ESCALATION_TEST_MODE ? slaMinutes : slaDays;
 
   // Debug log for escalation decision
   console.log("Escalation debug:", {
@@ -190,33 +204,55 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     complaint_type: ticket.complaint_type,
     currentRole,
     assignedAt,
-    slaDays,
-    workingDays,
-    breached: workingDays > slaDays,
+    testMode: ESCALATION_TEST_MODE,
+    slaLimit,
+    slaUnit: ESCALATION_TEST_MODE ? "minutes" : "working days",
+    elapsed: workingDays,
+    breached: workingDays > slaLimit,
   });
 
   // Check if breached
-  const breached = workingDays > slaDays;
+  const breached = workingDays > slaLimit;
   if (!breached) return false;
 
-  // Determine if ticket is for directorate or unit based on section
-  // Check both section and unit_section fields to determine ticket type
+  // Determine if ticket is for directorate or unit based on section / responsible unit
   const sectionLower = (ticket.section || "").toLowerCase();
   const unitSectionLower = (ticket.unit_section || "").toLowerCase();
-  
-  // More accurate detection: check if section contains "directorate" or equals "unit"
-  const isTicketDirectorate = sectionLower.includes("directorate") || unitSectionLower.includes("directorate");
-  const isTicketUnit = sectionLower === "unit" || unitSectionLower.includes("unit");
+  const subSectionLower = (ticket.sub_section || "").toLowerCase();
+  const responsibleUnitLower = (ticket.responsible_unit_name || "").toLowerCase();
+  const sectionNorm = (ticket.section || "").toLowerCase().trim();
+  const isGenericUnitSection = sectionNorm === "unit" || sectionNorm === "units";
 
-  // Check if current role is one that needs special escalation handling
-  // Entry-level roles: attendee, agent, super-admin, focal-person, supervisor, reviewer
-  const isEntryLevelRole = ["attendee", "agent", "super-admin", "focal-person", "supervisor", "reviewer"].includes(currentRole);
+  const isTicketUnit =
+    isGenericUnitSection ||
+    sectionLower === "unit" ||
+    unitSectionLower.includes("unit") ||
+    (subSectionLower.includes("unit") && !subSectionLower.includes("directorate")) ||
+    (responsibleUnitLower.includes("unit") && !responsibleUnitLower.includes("directorate"));
+
+  const isTicketDirectorate =
+    !isTicketUnit &&
+    (sectionLower.includes("directorate") ||
+      unitSectionLower.includes("directorate") ||
+      responsibleUnitLower.includes("directorate"));
+
+  // Entry-level roles (reviewer has its own path → director-general)
+  const isEntryLevelRole = ["attendee", "agent", "super-admin", "focal-person", "supervisor"].includes(currentRole);
 
   // Determine escalation path based on ticket type and current role
   let nextRole;
   
-  if (isEntryLevelRole) {
-    // For entry-level roles (attendee, agent, super-admin, focal-person, supervisor, reviewer)
+  if (currentRole === "reviewer") {
+    // Reviewer SLA breach → Director General (not manager/head-of-unit)
+    nextRole = "director-general";
+  } else if (currentRole === "head-of-unit") {
+    // Head of unit (e.g. after forward from reviewer) → Director General on SLA breach
+    nextRole = "director-general";
+  } else if (currentRole === "director") {
+    // Director (e.g. after forward from reviewer) → Director General on SLA breach
+    nextRole = "director-general";
+  } else if (isEntryLevelRole) {
+    // For entry-level roles (attendee, agent, super-admin, focal-person, supervisor)
     // Same entry-level roles for both Unit and Directorate
     if (isTicketDirectorate) {
       // Directorate path: entry-level → manager → director → director-general
@@ -260,17 +296,27 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     }
   }
 
-  // Find next user by role and section/sub_section matching ticket details
+  // Find next user by role and section field on User model
   let sectionValue;
   let sectionField; // 'unit_section' or 'sub_section' on User model
 
-  if (isTicketDirectorate) {
-    // For directorate: role is manager (then director, director-general). Match by sub_section = ticket's sub_section.
-    sectionValue = ticket.sub_section;
-    sectionField = "sub_section";
+  if (nextRole === "director-general") {
+    // DG is org-wide — no section filter (matches workflowService behaviour)
+    sectionValue = null;
+    sectionField = null;
+  } else if (isTicketDirectorate) {
+    // Directorate managers/directors use unit_section = directorate name (not generic "Units")
+    sectionValue = responsibleUnitLower.includes("directorate")
+      ? ticket.responsible_unit_name
+      : sectionLower.includes("directorate")
+        ? ticket.section
+        : ticket.responsible_unit_name || ticket.section;
+    sectionField = "unit_section";
   } else if (isTicketUnit) {
-    // For unit: match by unit_section = ticket's sub_section
-    sectionValue = ticket.sub_section;
+    // Unit path: prefer specific unit name over generic "Unit"/"Units" section label
+    sectionValue = isGenericUnitSection
+      ? ticket.sub_section || ticket.responsible_unit_name
+      : ticket.sub_section || ticket.responsible_unit_name || ticket.section;
     sectionField = "unit_section";
   } else {
     // Cannot determine section value
@@ -278,11 +324,37 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     return false;
   }
 
-  // Find user by role and section field (unit_section or sub_section)
-  const userWhere = { role: nextRole };
-  if (sectionValue && sectionField) {
-    userWhere[sectionField] = sectionValue;
-  }
+  const findUserByRoleAndSection = async (role, field, value) => {
+    if (!value) {
+      return User.findOne({ where: { role } });
+    }
+    const normalized = String(value).toLowerCase().trim();
+
+    let user = await User.findOne({
+      where: {
+        role,
+        [Op.and]: Sequelize.where(
+          Sequelize.fn("LOWER", Sequelize.col(field)),
+          normalized
+        ),
+      },
+    });
+
+    // Fallback: partial match (e.g. ticket "ICT Unit" vs user "ict unit")
+    if (!user) {
+      user = await User.findOne({
+        where: {
+          role,
+          [Op.and]: Sequelize.where(
+            Sequelize.fn("LOWER", Sequelize.col(field)),
+            { [Op.like]: `%${normalized}%` }
+          ),
+        },
+      });
+    }
+
+    return user;
+  };
 
   /**
    * Map ticket context to manager designation for Directorate escalations to `manager`.
@@ -300,13 +372,27 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   };
 
   let nextUser = null;
-  if (isTicketDirectorate && nextRole === "manager") {
+  if (nextRole === "director-general") {
+    nextUser = await User.findOne({
+      where: { role: "director-general", isActive: true },
+    });
+    if (!nextUser) {
+      nextUser = await User.findOne({ where: { role: "director-general" } });
+    }
+  } else if (isTicketDirectorate && nextRole === "manager") {
     const managerDesignation = getManagerDesignationForSubSection(
-      sectionValue || ticket.sub_section
+      ticket.sub_section || sectionValue
     );
     if (managerDesignation) {
+      const directorateName = (
+        responsibleUnitLower.includes("directorate")
+          ? ticket.responsible_unit_name
+          : sectionLower.includes("directorate")
+            ? ticket.section
+            : ticket.responsible_unit_name || ticket.section || ""
+      ).trim();
       const designationWhere = {
-        ...userWhere,
+        role: "manager",
         designation: managerDesignation,
       };
 
@@ -319,16 +405,31 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
         nextRole,
         managerDesignation,
         designationWhere,
+        directorateName,
       });
 
-      nextUser = await User.findOne({ where: designationWhere });
+      if (directorateName) {
+        nextUser = await User.findOne({
+          where: {
+            ...designationWhere,
+            [Op.and]: Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("unit_section")),
+              directorateName.toLowerCase()
+            ),
+          },
+        });
+      }
+      if (!nextUser) {
+        nextUser = await User.findOne({ where: designationWhere });
+      }
       if (!nextUser) {
         console.log(
-          "DEBUG: Designation-based manager not found, falling back to sub_section lookup",
+          "DEBUG: Designation-based manager not found, falling back to directorate unit_section lookup",
           {
             ticketId: ticket.id,
             managerDesignation,
-            originalWhere: userWhere,
+            sectionField,
+            sectionValue,
           }
         );
       }
@@ -344,14 +445,18 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
     }
   }
 
-  if (!nextUser) {
-    nextUser = await User.findOne({ where: userWhere });
+  if (!nextUser && nextRole !== "director-general") {
+    nextUser = await findUserByRoleAndSection(nextRole, sectionField, sectionValue);
   }
 
   // If no user found, cannot escalate
   if (!nextUser) {
+    const lookupDetail =
+      nextRole === "director-general"
+        ? "no active director-general user in the system"
+        : `${sectionField} '${sectionValue}'`;
     console.error(
-      `Escalation failed: No user found for role '${nextRole}' with ${sectionField} '${sectionValue}'. Cannot escalate ticket ${ticket.id}.`
+      `Escalation failed: No user found for role '${nextRole}' with ${lookupDetail}. Cannot escalate ticket ${ticket.id}.`
     );
     return false;
   }
@@ -370,14 +475,18 @@ async function escalateAndUpdateTicketOnSlaBreach(ticket, holidays = []) {
   // Find system user for assigned_by_id
   const systemUser = await User.findOne({ where: { username: "system" } });
 
-  // Record escalation in assignment history
+  // Record escalation in assignment history (assigned_by = previous holder, not system — so reverse works)
   await TicketAssignment.create({
     ticket_id: ticket.id,
-    assigned_by_id: systemUser ? systemUser.id : (ticket.assigned_to_id || nextUser.id), // Fallback to nextUser.id if both are null
+    assigned_by_id:
+      lastAssignment.assigned_to_id ||
+      (systemUser ? systemUser.id : ticket.assigned_to_id || nextUser.id),
     assigned_to_id: nextUser.id,
     assigned_to_role: nextRole,
     action: "Escalated",
-    reason: `SLA breached for role '${currentRole}' after ${workingDays} working days (SLA: ${slaDays} days). Escalated automatically to ${nextRole}.`,
+    reason: ESCALATION_TEST_MODE
+      ? `SLA breached for role '${currentRole}' after ${workingDays} minutes (SLA: ${slaMinutes} minutes). Escalated automatically to ${nextRole}.`
+      : `SLA breached for role '${currentRole}' after ${workingDays} working days (SLA: ${slaDays} days). Escalated automatically to ${nextRole}.`,
     created_at: new Date(),
   });
 
@@ -846,6 +955,12 @@ const createTicket = async (req, res) => {
     console.log("Dependents field received:", req.body.dependents);
     console.log("Is New Registration received:", req.body.is_new_registration, "Type:", typeof req.body.is_new_registration);
 
+    let attachmentPath = null;
+    if (req.file) {
+      attachmentPath = `ticket_attachments/${req.file.filename}`;
+      console.log("✅ Creator attachment uploaded:", attachmentPath);
+    }
+
     const {
       firstName: rawFirstName,
       middleName: rawMiddleName,
@@ -902,6 +1017,12 @@ const createTicket = async (req, res) => {
     } = req.body;
 
     const notificationReportId = req.body.notification_report_id ?? null;
+
+    const closeOnCreate =
+      shouldClose === true ||
+      shouldClose === "true" ||
+      shouldClose === 1 ||
+      shouldClose === "1";
 
     // Debug: Log raw representative_name from request
     console.log("🔍 RAW DATA FROM REQUEST BODY:");
@@ -981,23 +1102,26 @@ const createTicket = async (req, res) => {
     }
 
     // Get the function name to use as subject if subject is not provided
-    let finalSubject = subject;
+    let finalSubject =
+      subject && String(subject).trim() ? String(subject).trim() : null;
+    const functionIdForLookup = functionId || responsible_unit_id;
     console.log("Initial finalSubject:", finalSubject);
 
-    if (!finalSubject && functionId) {
+    if (!finalSubject && functionIdForLookup) {
       console.log(
         "Subject not provided, trying to get from functionId:",
-        functionId
+        functionIdForLookup
       );
       try {
-        const functionData = await FunctionData.findOne({
-          where: { id: functionId },
+        const functionDataRow = await FunctionData.findOne({
+          where: { id: functionIdForLookup },
           include: [{ model: Function, as: "function" }],
         });
-        console.log("FunctionData found:", functionData);
-        if (functionData && functionData.function) {
-          finalSubject = functionData.function.name;
-          console.log("Using function name as subject:", finalSubject);
+        console.log("FunctionData found:", functionDataRow);
+        if (functionDataRow) {
+          finalSubject =
+            functionDataRow.name || functionDataRow.function?.name || null;
+          console.log("Using function data name as subject:", finalSubject);
         }
       } catch (error) {
         console.error("Error fetching function name:", error);
@@ -1014,7 +1138,7 @@ const createTicket = async (req, res) => {
     let assignedUser = null;
 
     // If ticket is closed on creation, set creator as assigned user and skip assignment logic
-    if (shouldClose) {
+    if (closeOnCreate) {
       console.log("✅ Ticket is closed on creation - Setting creator as assigned user");
       const creatorUser = await User.findOne({
         where: { id: userId },
@@ -1045,7 +1169,7 @@ const createTicket = async (req, res) => {
     console.log("  - category:", category);
     console.log("  - shouldClose:", shouldClose);
     console.log("  - isInquiry:", category === "Inquiry");
-    console.log("  - willRunAssignmentLogic:", !shouldClose && category === "Inquiry");
+    console.log("  - willRunAssignmentLogic:", !closeOnCreate && category === "Inquiry");
     
     // Check multiple possible field names including employerAllocatedStaffUsername
     // CRITICAL: Check ALL possible field names to ensure we capture allocated user
@@ -1072,12 +1196,12 @@ const createTicket = async (req, res) => {
     console.log("  - allocatedUserUsername === '':", allocatedUserUsername === '');
     console.log("  - allocatedUserUsername trimmed:", allocatedUserUsername ? allocatedUserUsername.trim() : "N/A");
     console.log("  - allocatedUserUsername trimmed length:", allocatedUserUsername ? allocatedUserUsername.trim().length : 0);
-    console.log("  - Will proceed to Inquiry assignment?", !shouldClose && category === "Inquiry" && allocatedUserUsername && allocatedUserUsername.trim() !== "");
+    console.log("  - Will proceed to Inquiry assignment?", !closeOnCreate && category === "Inquiry" && allocatedUserUsername && allocatedUserUsername.trim() !== "");
     console.log("🔵 ========== ALLOCATED USER DEBUG - END ==========");
 
     // ESSP: assign to employer allocated staff when username is provided
     if (
-      !shouldClose &&
+      !closeOnCreate &&
       !assignedUser &&
       req.externalSource === "ESSP" &&
       employerAllocatedStaffUsername &&
@@ -1100,7 +1224,7 @@ const createTicket = async (req, res) => {
     }
 
     // Only run assignment logic if ticket is NOT closed on creation
-    if (!assignedUser && !shouldClose && category === "Inquiry") {
+    if (!assignedUser && !closeOnCreate && category === "Inquiry") {
       console.log("🔵 ========== INQUIRY ASSIGNMENT LOGIC STARTED ==========");
       console.log("🔵 CRITICAL: For Inquiry tickets, allocated user ALWAYS takes priority over checklist user, even if claim exists");
       console.log("🔵 STEP 1 CHECK - Allocated User Username:");
@@ -1345,7 +1469,7 @@ const createTicket = async (req, res) => {
       }
     } else if (
       !assignedUser &&
-      !shouldClose &&
+      !closeOnCreate &&
       ["Complaint", "Suggestion", "Compliment"].includes(category)
     ) {
       // Assign to reviewer
@@ -1402,7 +1526,7 @@ const createTicket = async (req, res) => {
       console.log("Using section/sub-section from fallback:", finalSectionName, "/", finalSubSectionName);
     }
 
-    const initialStatus = shouldClose ? "Closed" : status || "Open";
+    const initialStatus = closeOnCreate ? "Closed" : status || "Open";
     const resolvedComplaintType =
       bodyComplaintType ||
       (category === "Complaint" ? "Minor" : null);
@@ -1523,6 +1647,7 @@ const createTicket = async (req, res) => {
       employer_registration_number: employerRegistrationNumber || null,
       // Add new registration flag if provided (convert to boolean explicitly)
       is_new_registration: is_new_registration === true || is_new_registration === 'true' || is_new_registration === 1 || is_new_registration === '1',
+      attachment_path: attachmentPath,
     };
 
     console.log("Final dependents value to be saved:", ticketData.dependents);
@@ -1542,7 +1667,7 @@ const createTicket = async (req, res) => {
     );
     console.log("=====================================");
 
-    if (shouldClose) {
+    if (closeOnCreate) {
       ticketData.resolution_details =
         resolution_details || description || "Ticket resolved during creation";
       ticketData.resolution_type = resolution_type || "Resolved";
@@ -1601,7 +1726,7 @@ const createTicket = async (req, res) => {
     // No need for separate Dependent records
 
     // --- Create Ticket Assignment Record ---
-    if (!shouldClose) {
+    if (!closeOnCreate) {
       // For tickets that are NOT closed on creation, create "Assigned" action
       // await AssignedOfficer.create({
       //   ticket_id: newTicket.id,
@@ -1619,6 +1744,7 @@ const createTicket = async (req, res) => {
         assigned_to_role: assignedUser.role,
         action: "Assigned",
         reason: description,
+        attachment_path: attachmentPath,
         created_at: new Date(),
       });
     } else {
@@ -1632,6 +1758,7 @@ const createTicket = async (req, res) => {
         assigned_to_role: closingUser.role,
         action: "Closed",
         reason: resolution_details || "Ticket closed by agent",
+        attachment_path: attachmentPath,
         created_at: new Date(),
       });
     }
@@ -1650,12 +1777,12 @@ const createTicket = async (req, res) => {
     console.log("- employerPhone:", employerPhone);
     console.log("- requesterPhoneNumber:", requesterPhoneNumber);
     console.log("- shouldClose value:", shouldClose);
-    console.log("- !shouldClose value:", !shouldClose);
+    console.log("- !closeOnCreate value:", !closeOnCreate);
 
     // Only send SMS if ticket is NOT closed at creation
     // Include all requester types: Employee, Employer, Pensioners, Stakeholders, Representative, Spouse, Parent, Child, Sibling
     if (
-      !shouldClose &&
+      !closeOnCreate &&
       (requester === "Employee" || requester === "Employer" || requester === "Pensioners" || requester === "Stakeholders" || requester === "Representative" || requester === "Spouse" || requester === "Parent" || requester === "Child" || requester === "Sibling") &&
       isValidTzPhone(smsRecipient)
     ) {
@@ -1697,13 +1824,13 @@ const createTicket = async (req, res) => {
         .catch((smsError) => {
           console.error("Error sending SMS:", smsError.message);
         });
-    } else if (!shouldClose) {
+    } else if (!closeOnCreate) {
       console.log("Not sending SMS, invalid phone:", smsRecipient);
     }
 
     // --- Email Notification to Assignee ---
     let emailWarning = "";
-    if (assignedUser.email && !shouldClose) {
+    if (assignedUser.email && !closeOnCreate) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const bodyHtml = `<p>Dear ${assignedUser.full_name},</p><p>A new ${category} ticket has been assigned to you.</p>`;
       const detailsHtml = `
@@ -1721,7 +1848,7 @@ const createTicket = async (req, res) => {
       sendEmailNonBlocking({ to: ticketEmailTo(assignedUser.email), subject: emailSubject, htmlBody: emailHtmlBody, attachments: attachments });
     }
     // --- Create Notification for Assignee (only if ticket is not closed) ---
-    if (!shouldClose) {
+    if (!closeOnCreate) {
     await Notification.create({
       ticket_id: newTicket.id,
       sender_id: userId,
@@ -1751,7 +1878,7 @@ const createTicket = async (req, res) => {
             <li><strong>Assigned To:</strong> ${assignedUser.full_name} (${assignedUser.role})</li>
             <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
             <li><strong>Channel:</strong> ${newTicket.channel}</li>
-            <li><strong>Status:</strong> ${shouldClose ? "Closed" : "Open"}</li>
+            <li><strong>Status:</strong> ${closeOnCreate ? "Closed" : "Open"}</li>
           </ul>`;
         const supervisorEmailHtmlBody = renderEmailCard(supervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
         
@@ -1796,7 +1923,7 @@ const createTicket = async (req, res) => {
                 <li><strong>Section/Unit:</strong> ${newTicket.section}</li>
                 <li><strong>Sub-section:</strong> ${newTicket.sub_section}</li>
                 <li><strong>Channel:</strong> ${newTicket.channel}</li>
-                <li><strong>Status:</strong> ${shouldClose ? "Closed" : "Open"}</li>
+                <li><strong>Status:</strong> ${closeOnCreate ? "Closed" : "Open"}</li>
               </ul>`;
             const supervisorEmailHtmlBody = renderEmailCard(inquirySupervisorEmailSubject, supervisorBodyHtml, supervisorDetailsHtml);
             
@@ -1819,7 +1946,7 @@ const createTicket = async (req, res) => {
     }
 
     // --- Email to Creator (Agent) when ticket is created ---
-    if (userId && !shouldClose) {
+    if (userId && !closeOnCreate) {
       const creatorUser = await User.findOne({
         where: { id: userId },
         attributes: ["id", "full_name", "email"],
@@ -1857,7 +1984,7 @@ const createTicket = async (req, res) => {
     }
 
     // --- Email to Head of Unit if Closed on Creation (background) ---
-    if (shouldClose) {
+    if (closeOnCreate) {
       // Find head-of-unit or director for the ticket's section/unit
       let headOfUnit = await User.findOne({
         where: {
@@ -2123,8 +2250,8 @@ const createTicket = async (req, res) => {
       : "Unassigned";
 
     const successMessage = `Ticket created successfully${
-      shouldClose ? " and closed" : ""
-    }${emailWarning}${shouldClose ? "" : ` and assigned to ${assignedToLabel}`}`;
+      closeOnCreate ? " and closed" : ""
+    }${emailWarning}${closeOnCreate ? "" : ` and assigned to ${assignedToLabel}`}`;
 
     if (req.externalSource === "ESSP") {
       return res.status(201).json({
@@ -2150,7 +2277,7 @@ const createTicket = async (req, res) => {
         : null,
     });
     // --- Send email to assignee in background ---
-    if (assignedUser.email && !shouldClose) {
+    if (assignedUser.email && !closeOnCreate) {
       const emailSubject = `New ${category} Ticket Assigned: ${finalSubject} (ID: ${newTicket.ticket_id})`;
       const bodyHtml2 = `<p>Dear ${assignedUser.full_name},</p><p>A new ${category} ticket has been assigned to you.</p>`;
       const detailsHtml2 = `
@@ -2177,7 +2304,7 @@ const createTicket = async (req, res) => {
       });
     }
     // --- Email to Supervisor if Closed on Creation (background) ---
-    if (shouldClose) {
+    if (closeOnCreate) {
       // Find head-of-unit or director for the ticket's section/unit
       let headOfUnit = await User.findOne({
         where: {
@@ -5173,7 +5300,7 @@ const getTicketAssignments = async (req, res) => {
         });
         
         const assignedByUser = await User.findByPk(assignment.assigned_by_id, {
-          attributes: ["id", "full_name"]
+          attributes: ["id", "full_name", "role"]
         });
         
         return {
@@ -5188,6 +5315,9 @@ const getTicketAssignments = async (req, res) => {
       assigned_to_id: a.assigned_to_id,
       assigned_to_name: a.assignedTo ? a.assignedTo.full_name : "Unknown User",
       assigned_to_role: a.assignedTo ? a.assignedTo.role : null,
+      assigned_by_id: a.assigned_by_id,
+      assigned_by_name: a.assignedBy ? a.assignedBy.full_name : "Unknown User",
+      assigned_by_role: a.assignedBy ? a.assignedBy.role : null,
       reason: a.reason,
       action: a.action,
       created_at: a.created_at,
@@ -6333,28 +6463,61 @@ const reverseTicket = async (req, res) => {
         console.log(`🔍 DEBUG: currentUserAssignment exists but NOT using its reason - will use reason from frontend`);
       }
     } else if (assignments.length >= 1) {
-      // Normal reverse (like attendee): return to the user who assigned this ticket to the current user.
-      // IMPORTANT: Skip "self-assignments" where assigned_by_id === assigned_to_id (these would bounce back to self).
-      // IMPORTANT: Also skip "Rated" actions where reviewer assigned to themselves (assigned_to_id === assigned_by_id)
-      // This ensures we don't use reviewer's rating assignment as the previous assignment
-      const senderAssignment = assignments.find(a =>
-        a.assigned_to_id === userId &&
-        a.assigned_by_id &&
-        a.assigned_by_id !== userId &&
-        a.action !== "Rated" // Skip rating actions where reviewer assigned to themselves
+      // Normal reverse: return to whoever had the ticket before the current user received it.
+      const systemUser = await User.findOne({ where: { username: "system" } });
+      const systemUserId = systemUser?.id;
+
+      const receiveIdx = assignments.findIndex(
+        (a) => a.assigned_to_id === userId && a.action !== "Rated"
       );
 
-      if (senderAssignment) {
-        const senderUser = await User.findByPk(senderAssignment.assigned_by_id);
-        if (senderUser) {
-          // IMPORTANT: Only use senderAssignment to find the previous user
-          // Do NOT use senderAssignment.reason - always use reason from frontend
-          prevAssignment = { assigned_to_id: senderUser.id, assigned_to_role: senderUser.role };
-          targetUserId = senderUser.id;
-          targetUserRole = senderUser.role;
-          console.log(`DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`);
-          console.log(`🔍 DEBUG: senderAssignment exists but NOT using its reason - will use reason from frontend`);
-          console.log(`🔍 DEBUG: senderAssignment action: "${senderAssignment.action}", assigned_by_id: ${senderAssignment.assigned_by_id}, assigned_to_id: ${senderAssignment.assigned_to_id}`);
+      if (receiveIdx !== -1) {
+        const received = assignments[receiveIdx];
+
+        // Auto-escalation used "system" as assigner — reverse to previous holder, not system
+        if (
+          received.action === "Escalated" &&
+          systemUserId &&
+          received.assigned_by_id === systemUserId
+        ) {
+          for (let i = receiveIdx + 1; i < assignments.length; i++) {
+            const prior = assignments[i];
+            if (
+              prior.assigned_to_id &&
+              prior.assigned_to_id !== userId &&
+              prior.action !== "Rated"
+            ) {
+              const priorUser = await User.findByPk(prior.assigned_to_id);
+              if (priorUser) {
+                prevAssignment = {
+                  assigned_to_id: priorUser.id,
+                  assigned_to_role: priorUser.role,
+                };
+                targetUserId = priorUser.id;
+                targetUserRole = priorUser.role;
+                console.log(
+                  `DEBUG: Reversing after auto-escalation - returning to previous holder: ${priorUser.full_name} (${priorUser.role})`
+                );
+                break;
+              }
+            }
+          }
+        } else if (received.assigned_by_id && received.assigned_by_id !== userId) {
+          const senderUser = await User.findByPk(received.assigned_by_id);
+          if (senderUser) {
+            prevAssignment = {
+              assigned_to_id: senderUser.id,
+              assigned_to_role: senderUser.role,
+            };
+            targetUserId = senderUser.id;
+            targetUserRole = senderUser.role;
+            console.log(
+              `DEBUG: Reversing ticket (normal) - returning to assigner: ${targetUserId} (${targetUserRole})`
+            );
+            console.log(
+              `🔍 DEBUG: received action: "${received.action}", assigned_by_id: ${received.assigned_by_id}, assigned_to_id: ${received.assigned_to_id}`
+            );
+          }
         }
       }
 

@@ -2,6 +2,11 @@
 
 const sequelize = require("../config/mysql_connection");
 const moment = require("moment");
+const {
+  isLostWaitSeconds,
+  isDroppedWaitSeconds,
+  parseQueueLogWaitSeconds,
+} = require("../utils/missedCallHelper");
 
 /**
  * Queue stats for supervisor dashboard (replaces amiServer :5075 route).
@@ -51,6 +56,8 @@ async function getQueueCallStats(req, res) {
       }
       if (ev === "ABANDON" || ev === "EXITWITHTIMEOUT" || ev === "COMPLETEAGENT") {
         c.leftAt = c.leftAt || row.time;
+        const logWait = parseQueueLogWaitSeconds(row);
+        if (logWait != null) c.queueWaitSeconds = logWait;
       }
     }
 
@@ -62,16 +69,20 @@ async function getQueueCallStats(req, res) {
     for (const call of Object.values(calls)) {
       const joined = new Date(call.joinedAt);
       const left = call.leftAt ? new Date(call.leftAt) : null;
-      const waitSeconds = left ? (left - joined) / 1000 : null;
+      const elapsedWait = left ? (left - joined) / 1000 : null;
+      const waitSeconds =
+        call.queueWaitSeconds != null
+          ? Math.max(call.queueWaitSeconds, elapsedWait || 0)
+          : elapsedWait;
 
       if (!call.leftAt && !call.answered) {
         inQueue.push(call);
       } else if (call.answered) {
         answered.push({ ...call, waitSeconds });
       } else if (left) {
-        if (waitSeconds != null && waitSeconds < 30) {
+        if (waitSeconds != null && isDroppedWaitSeconds(waitSeconds)) {
           dropped.push({ ...call, waitSeconds });
-        } else {
+        } else if (waitSeconds != null && isLostWaitSeconds(waitSeconds)) {
           lost.push({ ...call, waitSeconds });
         }
       }

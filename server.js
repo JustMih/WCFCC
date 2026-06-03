@@ -66,9 +66,14 @@ const alertsRoutes = require("./routes/alertsRoutes");
 const { getQueueCallStats } = require("./controllers/queueStatsController");
 
 
-// const baseAudioPath = process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+const {
+  getRecordedStaticDirectory,
+} = require("./utils/recordedCallAudio");
+
 const baseAudioPath =
-  process.env.audio_recorded_path || "/opt/wcf_call_center_backend";
+  process.env.audio_recorded_path || "/home/wcf/WCFCC";
+const recordedCallsDir = getRecordedStaticDirectory();
+console.log("[recordings] serving wav files from:", recordedCallsDir);
 
 require("./cron/escalationJob");
 require("./cron/dailyLogoutJob");
@@ -139,7 +144,7 @@ app.get("/api/voice-notes/:id/audio", streamVoiceNote);
 // Static folders for voice and recorded audio
 app.use(
   "/voice",
-  express.static(`${baseAudioPath}voice`, {
+  express.static(path.join(baseAudioPath, "voice"), {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".wav")) {
         res.set("Content-Type", "audio/wav");
@@ -147,7 +152,16 @@ app.use(
     },
   })
 );
-app.use("/recordings", express.static(`${baseAudioPath}recorded`));
+app.use(
+  "/recordings",
+  express.static(recordedCallsDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".wav")) {
+        res.set("Content-Type", "audio/wav");
+      }
+    },
+  })
+);
 
 /* ------------------------------ API ROUTES ------------------------------ */
 // Static ticket attachment files
@@ -174,10 +188,18 @@ app.use(
 
 // Health check (always available)
 app.get("/api/health", (req, res) => {
+  let missedCallInsertSafe = false;
+  try {
+    const MissedCall = require("./models/missedcall");
+    missedCallInsertSafe = MissedCall.create.__usesInsertIgnore === true;
+  } catch (_) {
+    missedCallInsertSafe = false;
+  }
   res.json({
     ok: true,
     dbReady: DB_READY,
     allowNoDb: ALLOW_NO_DB,
+    missedCallInsertSafe,
     time: new Date().toISOString(),
   });
 });

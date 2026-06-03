@@ -395,15 +395,79 @@ function buildCdrRoutingIndex(cdrEnriched) {
   return index;
 }
 
-function enrichMissedCallRecord(record) {
+/** Index CDR legs by linkedid/uniqueid and caller for missed-call enrichment */
+function buildMissedCallCdrIndex(cdrRows) {
+  const byLinked = new Map();
+  const byCaller = new Map();
+
+  for (const leg of cdrRows || []) {
+    const linkKeys = new Set();
+    if (leg.linkedid) linkKeys.add(String(leg.linkedid).trim());
+    if (leg.uniqueid) linkKeys.add(String(leg.uniqueid).trim());
+    for (const key of linkKeys) {
+      if (!key) continue;
+      if (!byLinked.has(key)) byLinked.set(key, []);
+      byLinked.get(key).push(leg);
+    }
+
+    const caller = parseCallerPhone(leg.clid, leg.src);
+    if (caller) {
+      if (!byCaller.has(caller)) byCaller.set(caller, []);
+      byCaller.get(caller).push(leg);
+    }
+  }
+
+  return { byLinked, byCaller };
+}
+
+function findCdrLegsForMissedCall(missed, cdrIndex) {
+  if (!cdrIndex) return [];
+
+  const { byLinked, byCaller } = cdrIndex;
+  const lid = missed.linkedid ? String(missed.linkedid).trim() : "";
+  if (lid && byLinked.has(lid)) {
+    return byLinked.get(lid);
+  }
+
+  const caller =
+    parseCallerPhone(missed.caller, null) || normalizePhone(missed.caller);
+  if (!caller || !missed.time) return [];
+
+  const missedTs = new Date(missed.time).getTime();
+  if (Number.isNaN(missedTs)) return [];
+
+  return (byCaller.get(caller) || []).filter((leg) => {
+    const legTs = new Date(leg.cdrstarttime).getTime();
+    return !Number.isNaN(legTs) && Math.abs(legTs - missedTs) <= 45 * 60 * 1000;
+  });
+}
+
+function pickPrimaryCdrLeg(legs) {
+  if (!legs.length) return null;
+  return legs.reduce((best, leg) =>
+    scoreCdrLeg(leg) > scoreCdrLeg(best) ? leg : best
+  );
+}
+
+function formatCallDestination(leg) {
+  if (!leg) return "—";
+  if (leg.dst && String(leg.dst).trim()) return String(leg.dst).trim();
+  if (leg.did && String(leg.did).trim()) return String(leg.did).trim();
+  const ext = extractExtensionFromChannel(leg.dstchannel);
+  if (ext) return ext;
+  return "—";
+}
+
+function enrichMissedCallRecord(record, emergencyByPhone, cdrIndex) {
   const caller_phone =
     parseCallerPhone(record.caller, null) || normalizePhone(record.caller);
   const callback_status = record.status || "pending";
 
-  return {
+  const base = {
     ...record,
     caller_phone,
     caller_display: caller_phone || record.caller || "—",
+    call_source: caller_phone || record.caller || "—",
     callback_status,
     callback_agent_extension:
       record.called_back_by || record.callback_agent_extension || null,
@@ -411,6 +475,42 @@ function enrichMissedCallRecord(record) {
     callback_time: record.called_back_at || record.callback_time || null,
     callback_duration: record.billsec ?? record.callback_duration ?? null,
     record_source: "missed-calls",
+    call_destination: "—",
+    destination: "—",
+    routed_to: null,
+    routed_to_label: "—",
+    emergency_number: "—",
+    emergency_number_label: "—",
+    is_emergency_route: false,
+  };
+
+  if (!emergencyByPhone || !cdrIndex) return base;
+
+  const legs = findCdrLegsForMissedCall(record, cdrIndex);
+  if (!legs.length) return base;
+
+  const routed = resolveRoutedToFromSession(legs, emergencyByPhone);
+  const primary = pickPrimaryCdrLeg(legs);
+  const destination = formatCallDestination(primary);
+
+  return {
+    ...base,
+    call_destination: destination,
+    destination,
+    cdr_dst: primary?.dst ?? null,
+    cdr_did: primary?.did ?? null,
+    cdr_src: primary?.src ?? null,
+    cdr_clid: primary?.clid ?? null,
+    cdr_dcontext: primary?.dcontext ?? null,
+    routed_to: routed.routed_to,
+    routed_to_label: routed.routed_to_label,
+    emergency_match: routed.emergency_match,
+    emergency_number:
+      routed.emergency_match?.phone_number || routed.routed_to || "—",
+    emergency_number_label: routed.routed_to_label,
+    is_emergency_route:
+      Boolean(routed.emergency_match) ||
+      (primary && isEmergencyDialContext(primary)),
   };
 }
 
@@ -476,6 +576,7 @@ module.exports = {
   enrichCdrRecord,
   enrichVoiceNoteRecord,
   enrichMissedCallRecord,
+  buildMissedCallCdrIndex,
   syncMissedCallCallbacksInRange,
   dedupeCdrLegs,
   buildCdrRoutingIndex,

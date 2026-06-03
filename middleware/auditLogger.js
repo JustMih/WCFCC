@@ -3,6 +3,7 @@ const {
   inferMessage,
   logAuditEvent,
   sanitizeAuditValue,
+  sanitizeRequestBody,
 } = require("../utils/auditLogger");
 
 function getRequestIp(req) {
@@ -167,7 +168,14 @@ function buildMetadata(req, responseBody, context = {}) {
   };
 
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
-    metadata.body = sanitizeAuditValue(req.body || {});
+    metadata.body = sanitizeRequestBody(req.body || {});
+    if (req.file) {
+      metadata.upload = {
+        originalname: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+      };
+    }
   }
 
   const responseSummary = buildResponseSummary(responseBody);

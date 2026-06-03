@@ -4,12 +4,19 @@ const { Op } = require('sequelize');
 const { escalateAndUpdateTicketOnSlaBreach } = require('../controllers/ticket/ticketController');
 const holidays = require('./holidays'); // Import holidays
 
-// Run every day at 1:00 AM
-cron.schedule('0 1 * * *', async () => {
-  console.log('Running daily SLA escalation check...');
+// Match ticketController.js: every minute when testing 2-min SLA, daily at 1 AM in production
+const ESCALATION_TEST_MODE = true;
+const escalationCron = ESCALATION_TEST_MODE ? '* * * * *' : '0 1 * * *';
+
+cron.schedule(escalationCron, async () => {
+  console.log(
+    ESCALATION_TEST_MODE
+      ? 'Running SLA escalation check (test mode: 2-min SLA, every minute)...'
+      : 'Running daily SLA escalation check...'
+  );
   try {
     const tickets = await Ticket.findAll({
-      where: { status: { [Op.in]: ['Open', 'Assigned', 'In Progress'] } }
+      where: { status: { [Op.in]: ['Open', 'Assigned', 'In Progress', 'Forwarded'] } }
     });
     console.log(`Found ${tickets.length} tickets to process.`);
     for (const ticket of tickets) {
@@ -32,7 +39,7 @@ if (require.main === module) {
         console.log('Running SLA escalation check immediately for testing...');
         try {
           const tickets = await Ticket.findAll({
-            where: { status: { [Op.in]: ['Open', 'Assigned', 'In Progress'] } }
+            where: { status: { [Op.in]: ['Open', 'Assigned', 'In Progress', 'Forwarded'] } }
           });
           console.log(`Found ${tickets.length} tickets to process.`);
           for (const ticket of tickets) {

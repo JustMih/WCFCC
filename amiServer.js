@@ -107,14 +107,18 @@ if (ami) ami.on('managerevent', async (event) => {
         queueCalls[event.uniqueid].leftAt = now;
         console.log(`⚠️ [Abandon] ${queueCalls[event.uniqueid].caller} left after waiting too long`);
 
+        const waitSec = Math.max(0, Math.floor(Number(event.waittime) || 0));
         await logToQueueLog({
           time: now,
           callid: event.uniqueid,
           queuename: event.queue || queueCalls[event.uniqueid].queue,
           agent: null,
           event: 'ABANDON',
-          data1: `waited ${event.waittime || 0}s`,
-          data2: '', data3: '', data4: '', data5: ''
+          data1: `waited ${waitSec}s`,
+          data2: '',
+          data3: String(waitSec),
+          data4: '',
+          data5: ''
         });
       }
       break;
@@ -275,9 +279,11 @@ app.get('/api/queue-call-stats', (req, res) => {
     } else if (call.answered) {
       answered.push({ ...call, waitSeconds });
     } else if (!call.answered && left) {
-      if (waitSeconds < 30) {
+      const { isLostWaitSeconds, isDroppedWaitSeconds } =
+        require("./utils/missedCallHelper");
+      if (waitSeconds != null && isDroppedWaitSeconds(waitSeconds)) {
         dropped.push({ ...call, waitSeconds });
-      } else {
+      } else if (waitSeconds != null && isLostWaitSeconds(waitSeconds)) {
         lost.push({ ...call, waitSeconds });
       }
     }
