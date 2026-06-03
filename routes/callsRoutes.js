@@ -5,6 +5,7 @@ const {
   getAgentCdrStats,
   dailyAgentCallStatus,
   getLostCallsToday,
+  getDroppedCallsToday,
   getLostCallsDiagnosticsHandler,
   getReceivedCalls,
   getLostCalls,
@@ -19,6 +20,7 @@ router.get("/sla-metrics", getSlaMetrics);
 router.get("/agent-calls/:agentId", getAgentCdrStats);
 router.get("/agent-calls-today/:agentId", dailyAgentCallStatus);
 router.get("/lost-calls-today", getLostCallsToday);
+router.get("/dropped-calls-today", getDroppedCallsToday);
 router.get("/lost-calls-diagnostics", getLostCallsDiagnosticsHandler);
 router.get("/received-calls", getReceivedCalls);
 router.get("/lost-calls", getLostCalls);

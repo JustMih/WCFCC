@@ -29,6 +29,7 @@ const {
   loadSupervisorExtensionSet,
   applyCelRowToCall,
   filterCallsForDisplay,
+  summarizeLiveCallBuckets,
 } = require("../../utils/liveCallCelHelper");
 
 /* ================= SOCKET.IO ================= */
@@ -110,11 +111,7 @@ const getPublicDashboardData = async (req, res) => {
     }
 
     const allCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
-    const liveCalls = allCalls.filter((c) => !c.call_end);
-    const activeCalls = liveCalls.filter((c) => c.status === "active");
-    const inQueueCalls = liveCalls.filter(
-      (c) => c.queue_entry_time && !c.call_answered
-    ).length;
+    let liveCalls = allCalls.filter((c) => !c.call_end);
 
     const liveCallIds = liveCalls
       .map((c) => String(c.linkedid || ""))
@@ -138,7 +135,10 @@ const getPublicDashboardData = async (req, res) => {
           const ext = extractExtensionFromQueueAgent(row.agent);
           if (ext && !call.agent_extension) {
             call.agent_extension = ext;
-            if (!call.call_answered) call.status = "active";
+          }
+          if (ext) {
+            call.call_answered = call.call_answered || new Date();
+            call.status = "active";
           }
         }
       } catch (qlErr) {
@@ -165,7 +165,8 @@ const getPublicDashboardData = async (req, res) => {
       };
     });
 
-  
+    const liveBuckets = summarizeLiveCallBuckets(enrichedLiveCalls);
+
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
     ====================================================== */
@@ -232,9 +233,9 @@ const monthlyCounts = await sequelize.query(
   agentStatus: { onlineCount, offlineCount },
   liveCalls: enrichedLiveCalls,
   callStatusSummary: {
-    active: activeCalls.length,
-    inQueue: inQueueCalls,
-    answered: activeCalls.length,
+    active: liveBuckets.active,
+    inQueue: liveBuckets.inQueue,
+    answered: liveBuckets.active,
     dropped: Number(droppedCount || 0),
     lost: Number(lostCount || 0),
   },

@@ -75,7 +75,6 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
       break;
 
     case "ANSWER": {
-      c.call_answered ??= row.eventtime;
       const ansChan = row.channame || row.channel || "";
       const ext =
         extractExtensionFromChannel(ansChan) ||
@@ -85,6 +84,7 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
         !isSupervisorExtension(ext, supervisorExts) &&
         /PJSIP\/|SIP\//i.test(String(ansChan))
       ) {
+        c.call_answered ??= row.eventtime;
         c.agent_extension = c.agent_extension || ext;
         c.status = "active";
         if (String(ansChan).includes(`/${ext}-`)) {
@@ -100,15 +100,14 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
         break;
       }
 
-      c.call_answered ??= row.eventtime;
-      c.status = "active";
-
       const bridgeChan = row.channame || row.channel;
       const ext =
         extractExtensionFromChannel(bridgeChan) ||
         extractExtensionFromChannel(row.peer);
 
       if (ext && !isSupervisorExtension(ext, supervisorExts)) {
+        c.call_answered ??= row.eventtime;
+        c.status = "active";
         c.agent_extension = c.agent_extension || ext;
         if (
           bridgeChan &&
@@ -150,6 +149,7 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
     case "APP_START":
       if (row.appname === "Queue" || row.appname === "AppQueue") {
         c.queue_entry_time = row.eventtime;
+        if (!c.call_answered) c.status = "calling";
       }
       if (String(row.appname || "").toLowerCase() === "chanspy") {
         c.supervisor_spy_active = true;
@@ -192,6 +192,18 @@ function filterCallsForDisplay(calls, supervisorExts) {
   );
 }
 
+/** Counts for wallboard — must match status on each live call row. */
+function summarizeLiveCallBuckets(liveCalls) {
+  const live = (Array.isArray(liveCalls) ? liveCalls : []).filter(
+    (c) => !c.call_end
+  );
+  return {
+    active: live.filter((c) => c.status === "active").length,
+    inQueue: live.filter((c) => c.status === "calling").length,
+    total: live.length,
+  };
+}
+
 module.exports = {
   SUPERVISOR_ROLES,
   loadSupervisorExtensionSet,
@@ -201,4 +213,5 @@ module.exports = {
   isSupervisorOnlySpyCall,
   applyCelRowToCall,
   filterCallsForDisplay,
+  summarizeLiveCallBuckets,
 };

@@ -8,6 +8,7 @@ const {
   callerMatchKey,
   dedupeLostCalls,
   getTodayLostCallsList,
+  getTodayDroppedCallsList,
   getLostCallsDiagnostics,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
@@ -194,6 +195,17 @@ const getLostCallsToday = async (req, res) => {
   } catch (err) {
     console.error("Error retrieving lost calls:", err.message);
     res.status(500).send("Internal Server Error");
+  }
+};
+
+/** Today's dropped calls — same rows as Dropped Calls Report for today. */
+const getDroppedCallsToday = async (req, res) => {
+  try {
+    const rows = await getTodayDroppedCallsList(sequelize);
+    res.json(rows);
+  } catch (err) {
+    console.error("Error retrieving dropped calls today:", err.message);
+    res.status(500).json({ error: "Failed to fetch dropped calls" });
   }
 };
 
@@ -574,6 +586,7 @@ module.exports = {
   getAgentCdrStats,
   dailyAgentCallStatus: getAgentCdrStatsToday,
   getLostCallsToday,
+  getDroppedCallsToday,
   getLostCallsDiagnosticsHandler,
   getReceivedCalls,
   getLostCalls,
