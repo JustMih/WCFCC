@@ -8,6 +8,10 @@ const CEL = require("../../models/CEL")(
   require("sequelize").DataTypes
 );
 const QueueStatus = db.QueueStatus;
+const QueueLog = require("../../models/QueueLog")(
+  sequelize,
+  require("sequelize").DataTypes
+);
 const {
   countTodayMissedCalls,
   countQueueDroppedInRange,
@@ -19,6 +23,7 @@ const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelpe
 const {
   buildAgentsNameMap,
   resolveAgentForCall,
+  extractExtensionFromQueueAgent,
 } = require("../../utils/agentExtensionHelper");
 const {
   loadSupervisorExtensionSet,
@@ -71,14 +76,15 @@ const getPublicDashboardData = async (req, res) => {
           "ANSWER",
           "HANGUP",
           "APP_START",
+          "APP_END",
           "BRIDGE_ENTER",
         ],
         eventtime: {
-          [Op.gte]: moment().utcOffset("+03:00").subtract(20, "minutes").toDate(),
+          [Op.gte]: moment().utcOffset("+03:00").subtract(30, "minutes").toDate(),
         },
       },
       order: [["eventtime", "ASC"]],
-      limit: 1000,
+      limit: 2000,
     });
 
     const calls = {};
@@ -106,27 +112,58 @@ const getPublicDashboardData = async (req, res) => {
     const allCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
     const liveCalls = allCalls.filter((c) => !c.call_end);
     const activeCalls = liveCalls.filter((c) => c.status === "active");
-   
-  const inQueueCalls = liveCalls.filter(
-  c => c.queue_entry_time && !c.call_answered
-).length;
+    const inQueueCalls = liveCalls.filter(
+      (c) => c.queue_entry_time && !c.call_answered
+    ).length;
 
+    const liveCallIds = liveCalls
+      .map((c) => String(c.linkedid || ""))
+      .filter(Boolean);
+    if (liveCallIds.length > 0 && QueueLog) {
+      try {
+        const agentConnects = await QueueLog.findAll({
+          where: {
+            callid: { [Op.in]: liveCallIds },
+            event: { [Op.in]: ["CONNECT", "AGENTCONNECT"] },
+            agent: { [Op.ne]: null },
+          },
+          order: [["time", "DESC"]],
+          attributes: ["callid", "agent"],
+        });
+        for (const row of agentConnects) {
+          const call = liveCalls.find(
+            (c) => String(c.linkedid) === String(row.callid)
+          );
+          if (!call) continue;
+          const ext = extractExtensionFromQueueAgent(row.agent);
+          if (ext && !call.agent_extension) {
+            call.agent_extension = ext;
+            if (!call.call_answered) call.status = "active";
+          }
+        }
+      } catch (qlErr) {
+        console.warn(
+          "[publicDashboard] queue_log agent lookup skipped:",
+          qlErr?.message || qlErr
+        );
+      }
+    }
 
-const extensionCandidates = [];
-      activeCalls.forEach((c) => {
-        if (c.agent_extension) extensionCandidates.push(c.agent_extension);
-        if (c.caller) extensionCandidates.push(c.caller);
-      });
-      const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
+    const extensionCandidates = [];
+    liveCalls.forEach((c) => {
+      if (c.agent_extension) extensionCandidates.push(c.agent_extension);
+      if (c.caller) extensionCandidates.push(c.caller);
+    });
+    const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-      const enrichedActiveCalls = activeCalls.map((call) => {
-        const resolved = resolveAgentForCall(call, agentsMap);
-        return {
-          ...call,
-          agent_extension: resolved.agent_extension,
-          agent_name: resolved.agent_name,
-        };
-      });
+    const enrichedLiveCalls = liveCalls.map((call) => {
+      const resolved = resolveAgentForCall(call, agentsMap);
+      return {
+        ...call,
+        agent_extension: resolved.agent_extension,
+        agent_name: resolved.agent_name,
+      };
+    });
 
   
     /* =====================================================
@@ -193,7 +230,7 @@ const monthlyCounts = await sequelize.query(
     /* ================= FINAL PAYLOAD ================= */
    const payload = {
   agentStatus: { onlineCount, offlineCount },
-  liveCalls: enrichedActiveCalls,
+  liveCalls: enrichedLiveCalls,
   callStatusSummary: {
     active: activeCalls.length,
     inQueue: inQueueCalls,

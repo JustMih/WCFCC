@@ -74,9 +74,25 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
       c.status = "calling";
       break;
 
-    case "ANSWER":
+    case "ANSWER": {
       c.call_answered ??= row.eventtime;
+      const ansChan = row.channame || row.channel || "";
+      const ext =
+        extractExtensionFromChannel(ansChan) ||
+        extractExtensionFromChannel(row.peer);
+      if (
+        ext &&
+        !isSupervisorExtension(ext, supervisorExts) &&
+        /PJSIP\/|SIP\//i.test(String(ansChan))
+      ) {
+        c.agent_extension = c.agent_extension || ext;
+        c.status = "active";
+        if (String(ansChan).includes(`/${ext}-`)) {
+          c.agent_channel = ansChan;
+        }
+      }
       break;
+    }
 
     case "BRIDGE_ENTER": {
       if (isSupervisorSpyBridge(row, supervisorExts)) {
