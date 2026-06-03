@@ -23,6 +23,12 @@ const {
   listActiveHandoverParticipants,
   listActiveHandoversByActor,
 } = require("../../services/handoverService");
+const {
+  canAllowPause,
+  getAgentAvailabilityMetrics,
+  PAUSE_BLOCKED_MESSAGE,
+} = require("../../utils/agentAvailabilityHelper");
+const { isTodayPublicHoliday } = require("../../utils/holidayCheckHelper");
 
 const createUser = async (req, res) => {
   try {
@@ -964,13 +970,29 @@ const getAgentOnline = async (req, res) => {
 
     const onlineAgents = agents.filter((a) => a.status === "online");
     const agentCount = onlineAgents.length;
+    const pauseCount = agents.length - agentCount;
+    const isHoliday = await isTodayPublicHoliday();
+    const availability = getAgentAvailabilityMetrics(
+      agentCount,
+      pauseCount,
+      isHoliday
+    );
     const agentsWithMetrics = agents.map(attachPauseMetricsToAgent);
 
     console.log(
-      `Found ${agents.length} active agents (${agentCount} online, ${agents.length - agentCount} paused)`
+      `Found ${agents.length} active agents (${agentCount} online, ${pauseCount} paused)`
     );
 
-    res.status(200).json({ agents: agentsWithMetrics, agentCount });
+    res.status(200).json({
+      agents: agentsWithMetrics,
+      agentCount,
+      pauseCount: availability.pauseCount,
+      totalActive: availability.totalActive,
+      onlinePercent: availability.onlinePercent,
+      pausePercent: availability.pausePercent,
+      isHoliday: availability.isHoliday,
+      canPause: availability.canPause,
+    });
   } catch (error) {
     console.error("Error fetching online agents:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -1790,6 +1812,33 @@ const updateUserStatus = async (req, res) => {
     const built = buildStatusUpdateFields(req.body);
     if (built.error) {
       return res.status(400).json({ message: built.error });
+    }
+
+    if (status === "pause") {
+      const user = await User.findByPk(userId, {
+        attributes: ["id", "role", "status"],
+      });
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (user.role !== "agent") {
+        return res.status(400).json({ message: "Only agents can pause" });
+      }
+      if (user.status !== "online") {
+        return res.status(400).json({
+          message: "You must be online (ready) before going on break",
+        });
+      }
+
+      const [onlineCount, pauseCount, isHoliday] = await Promise.all([
+        User.count({ where: { role: "agent", status: "online" } }),
+        User.count({ where: { role: "agent", status: "pause" } }),
+        isTodayPublicHoliday(),
+      ]);
+
+      if (!canAllowPause(onlineCount, pauseCount, isHoliday)) {
+        return res.status(403).json({ message: PAUSE_BLOCKED_MESSAGE });
+      }
     }
 
     if (status === "online") {

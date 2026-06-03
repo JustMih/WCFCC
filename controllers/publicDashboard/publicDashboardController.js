@@ -13,6 +13,9 @@ const QueueLog = require("../../models/QueueLog")(
   require("sequelize").DataTypes
 );
 const {
+  getAgentAvailabilityMetrics,
+} = require("../../utils/agentAvailabilityHelper");
+const {
   countTodayMissedCalls,
   countQueueDroppedInRange,
   getTodayLostCallsList,
@@ -47,8 +50,9 @@ const emitDashboardUpdate = (payload) => {
 const getPublicDashboardData = async (req, res) => {
   try {
     /* ---------- AGENT STATUS ---------- */
-    const [onlineCount, offlineCount] = await Promise.all([
+    const [onlineCount, pauseCount, offlineCount] = await Promise.all([
       User.count({ where: { role: "agent", status: "online" } }),
+      User.count({ where: { role: "agent", status: "pause" } }),
       User.count({
         where: {
           role: "agent",
@@ -56,6 +60,7 @@ const getPublicDashboardData = async (req, res) => {
         },
       }),
     ]);
+    const availability = getAgentAvailabilityMetrics(onlineCount, pauseCount);
 
     /* ---------- QUEUE STATUS ---------- */
     const queueStatus = QueueStatus
@@ -229,7 +234,14 @@ const monthlyCounts = await sequelize.query(
 
     /* ================= FINAL PAYLOAD ================= */
    const payload = {
-  agentStatus: { onlineCount, offlineCount },
+  agentStatus: {
+    onlineCount,
+    pauseCount,
+    offlineCount,
+    totalActive: availability.totalActive,
+    onlinePercent: availability.onlinePercent,
+    pausePercent: availability.pausePercent,
+  },
   liveCalls: enrichedLiveCalls,
   callStatusSummary: {
     active: activeCalls.length,

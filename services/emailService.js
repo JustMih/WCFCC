@@ -4,6 +4,18 @@ const fs = require('fs');
 
 const SIP_DOMAIN = process.env.SIP_DOMAIN || 'contactcenter.wcf.go.tz';
 
+/** Contact center portal URL for all email CTAs (always https). */
+const getContactCenterPortalUrl = () => {
+  const raw =
+    process.env.PORTAL_URL ||
+    process.env.CONTACT_CENTER_URL ||
+    'https://contactcenter.wcf.go.tz';
+  const withProtocol = /^https?:\/\//i.test(String(raw).trim())
+    ? String(raw).trim()
+    : `https://${String(raw).trim()}`;
+  return `${withProtocol.replace(/\/+$/, '')}/`;
+};
+
 /**
  * Render a standardized email card with consistent styling
  * @param {string} subject - Email subject (used as header)
@@ -12,7 +24,7 @@ const SIP_DOMAIN = process.env.SIP_DOMAIN || 'contactcenter.wcf.go.tz';
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = `${SIP_DOMAIN}/`;
+  const portalUrl = getContactCenterPortalUrl();
   
   return `<!doctype html>
     <html>
@@ -226,6 +238,7 @@ const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
 };
 
 const sendForwardNotification = async (supervisorEmail, ticketId, unitName, justification) => {
+  const portalUrl = getContactCenterPortalUrl();
   const subject = `Ticket Forwarded to ${unitName}`;
   const htmlBody = `
     <!DOCTYPE html>
@@ -364,7 +377,7 @@ const sendForwardNotification = async (supervisorEmail, ticketId, unitName, just
             You can access the ticket management dashboard to take appropriate action.
           </p>
           
-          <a href="#" class="cta-button">Access Dashboard</a>
+          <a href="${portalUrl}" class="cta-button" target="_blank" rel="noopener">Access Dashboard</a>
         </div>
         
         <div class="footer">
@@ -381,6 +394,7 @@ const sendForwardNotification = async (supervisorEmail, ticketId, unitName, just
 };
 
 const sendRatingNotification = async (userEmail, ticketId, rating, justification) => {
+  const portalUrl = getContactCenterPortalUrl();
   const subject = `Ticket Rated as ${rating}`;
   const htmlBody = `
     <!DOCTYPE html>
@@ -538,7 +552,7 @@ const sendRatingNotification = async (userEmail, ticketId, rating, justification
             The coordinator has reviewed and rated your ticket based on the provided information.
           </p>
           
-          <a href="#" class="cta-button">View Ticket Details</a>
+          <a href="${portalUrl}" class="cta-button" target="_blank" rel="noopener">View Ticket Details</a>
         </div>
         
         <div class="footer">
@@ -559,5 +573,6 @@ module.exports = {
   sendEmailNonBlocking,
   sendForwardNotification,
   sendRatingNotification,
-  renderEmailCard
+  renderEmailCard,
+  getContactCenterPortalUrl,
 }; 
