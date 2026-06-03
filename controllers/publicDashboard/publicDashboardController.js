@@ -47,9 +47,49 @@ const emitDashboardUpdate = (payload) => {
   ioInstance.emit("public_dashboard_update", payload);
 };
 
+/** Fresh lost/dropped totals for today (same logic as reports). */
+async function fetchTodayLostDroppedCounts() {
+  const { start: dayStart, end: dayEnd } = getTodayBounds();
+  let lost = 0;
+  let dropped = 0;
+  try {
+    [lost, dropped] = await Promise.all([
+      countTodayMissedCalls(sequelize),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+    ]);
+  } catch (err) {
+    console.error(
+      "[publicDashboard] lost/dropped counts failed:",
+      err?.message || err
+    );
+  }
+  return {
+    lost: Number(lost || 0),
+    dropped: Number(dropped || 0),
+    dayStart,
+    dayEnd,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/* ================= LOST / DROPPED STATS (lightweight poll) ================= */
+const getPublicDashboardCallStats = async (req, res) => {
+  try {
+    res.json(await fetchTodayLostDroppedCounts());
+  } catch (err) {
+    console.error("dashboard-call-stats:", err);
+    res.status(500).json({ error: "Failed to fetch call stats" });
+  }
+};
+
 /* ================= PUBLIC DASHBOARD ================= */
 const getPublicDashboardData = async (req, res) => {
   try {
+    /* ---------- LOST / DROPPED FIRST (always fresh even if CEL fails) ---------- */
+    const todayStats = await fetchTodayLostDroppedCounts();
+    const lostCount = todayStats.lost;
+    const droppedCount = todayStats.dropped;
+
     /* ---------- AGENT STATUS ---------- */
     const [onlineCount, pauseCount, offlineCount] = await Promise.all([
       User.count({ where: { role: "agent", status: "online" } }),
@@ -75,6 +115,9 @@ const getPublicDashboardData = async (req, res) => {
     /* =====================================================
        CEL LIVE CALL TRACKING (DASHBOARD)
     ====================================================== */
+    let enrichedLiveCalls = [];
+    let liveBuckets = { active: 0, inQueue: 0, total: 0 };
+    try {
     const events = await CEL.findAll({
       where: {
         eventtype: [
@@ -161,7 +204,7 @@ const getPublicDashboardData = async (req, res) => {
     });
     const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-    const enrichedLiveCalls = liveCalls.map((call) => {
+    enrichedLiveCalls = liveCalls.map((call) => {
       const resolved = resolveAgentForCall(call, agentsMap);
       return {
         ...call,
@@ -170,7 +213,13 @@ const getPublicDashboardData = async (req, res) => {
       };
     });
 
-    const liveBuckets = summarizeLiveCallBuckets(enrichedLiveCalls);
+    liveBuckets = summarizeLiveCallBuckets(enrichedLiveCalls);
+    } catch (celErr) {
+      console.error(
+        "[publicDashboard] live calls (CEL) failed:",
+        celErr?.message || celErr
+      );
+    }
 
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
@@ -212,21 +261,6 @@ const monthlyCounts = await sequelize.query(
 );
 
 
-    const { start: dayStart, end: dayEnd } = getTodayBounds();
-    let lostCount = 0;
-    let droppedCount = 0;
-    try {
-      [lostCount, droppedCount] = await Promise.all([
-        countTodayMissedCalls(sequelize),
-        countQueueDroppedInRange(sequelize, dayStart, dayEnd),
-      ]);
-    } catch (lostDropErr) {
-      console.error(
-        "Lost/dropped counts failed (dashboard continues):",
-        lostDropErr?.message || lostDropErr
-      );
-    }
-
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -262,7 +296,11 @@ const monthlyCounts = await sequelize.query(
     totalRows,
   },
   queueStatus,
-  timestamp: new Date().toISOString(),
+  timestamp: todayStats.timestamp,
+  callStatsDay: {
+    start: todayStats.dayStart,
+    end: todayStats.dayEnd,
+  },
 };
 
 
@@ -300,6 +338,7 @@ const startPeriodicUpdates = () => {
 /* ================= EXPORTS ================= */
 module.exports = {
   getPublicDashboardData,
+  getPublicDashboardCallStats,
   getLostCallsToday,
   setSocketInstance,
   startPeriodicUpdates,
