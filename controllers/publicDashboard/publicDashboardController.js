@@ -13,6 +13,9 @@ const QueueLog = require("../../models/QueueLog")(
   require("sequelize").DataTypes
 );
 const {
+  getAgentAvailabilityMetrics,
+} = require("../../utils/agentAvailabilityHelper");
+const {
   countTodayMissedCalls,
   countQueueDroppedInRange,
   getTodayLostCallsList,
@@ -47,29 +50,18 @@ const emitDashboardUpdate = (payload) => {
 /* ================= PUBLIC DASHBOARD ================= */
 const getPublicDashboardData = async (req, res) => {
   try {
-    /* ---------- AGENT STATUS (online + pause breakdown for wallboard) ---------- */
-    const [onlineCount, pauseCount, offlineCount, totalAgents] =
-      await Promise.all([
-        User.count({ where: { role: "agent", status: "online" } }),
-        User.count({
-          where: {
-            role: "agent",
-            status: { [Op.in]: ["pause", "force-pause"] },
-          },
-        }),
-        User.count({
-          where: {
-            role: "agent",
-            [Op.or]: [{ status: "offline" }, { status: null }],
-          },
-        }),
-        User.count({ where: { role: "agent" } }),
-      ]);
-
-    const onlinePercent =
-      totalAgents > 0 ? Math.round((onlineCount / totalAgents) * 100) : 0;
-    const pausePercent =
-      totalAgents > 0 ? Math.round((pauseCount / totalAgents) * 100) : 0;
+    /* ---------- AGENT STATUS ---------- */
+    const [onlineCount, pauseCount, offlineCount] = await Promise.all([
+      User.count({ where: { role: "agent", status: "online" } }),
+      User.count({ where: { role: "agent", status: "pause" } }),
+      User.count({
+        where: {
+          role: "agent",
+          [Op.or]: [{ status: "offline" }, { status: null }],
+        },
+      }),
+    ]);
+    const availability = getAgentAvailabilityMetrics(onlineCount, pauseCount);
 
     /* ---------- QUEUE STATUS ---------- */
     const queueStatus = QueueStatus
@@ -247,9 +239,9 @@ const monthlyCounts = await sequelize.query(
     onlineCount,
     pauseCount,
     offlineCount,
-    totalAgents,
-    onlinePercent,
-    pausePercent,
+    totalActive: availability.totalActive,
+    onlinePercent: availability.onlinePercent,
+    pausePercent: availability.pausePercent,
   },
   liveCalls: enrichedLiveCalls,
   callStatusSummary: {

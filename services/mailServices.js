@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { getContactCenterPortalUrl } = require('./emailService');
 
 // Configure your SMTP transporter
 const transporter = nodemailer.createTransport({
@@ -24,7 +25,8 @@ const sendTicketEmail = async (ticket, recipientEmail) => {
       Category: ${ticket.category}
       Description: ${ticket.description}
 
-      Please log into the system to review and take action.
+      Please log into the system to review and take action:
+      ${getContactCenterPortalUrl()}
 
       Regards,
       TTCL Support Desk

@@ -10,7 +10,12 @@ const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
 const { Op, Sequelize } = require("sequelize");
 const { sendQuickSms } = require("../../services/smsService");
-const { sendEmail, sendEmailNonBlocking, renderEmailCard } = require("../../services/emailService");
+const {
+  sendEmail,
+  sendEmailNonBlocking,
+  renderEmailCard,
+  getContactCenterPortalUrl,
+} = require("../../services/emailService");
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
 const TicketAssignment = require("../../models/TicketAssignment");
@@ -6303,7 +6308,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
   try {
     // Notify all reviewers and supervisors
     const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-    const portalUrl = `https://contactcenter.wcf.go.tz/`;
+    const portalUrl = getContactCenterPortalUrl();
     const notifyDetailsHtml = `
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
