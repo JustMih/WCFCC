@@ -7,6 +7,7 @@ const {
   countQueueDroppedInRange,
   countIvrAnsweredExcludingQueueLost,
   countMissedCallsInRange,
+  getTodayBounds,
 } = require("../../utils/missedCallHelper");
 
 function buildRangeWhereClause(excludeDestS) {
@@ -219,21 +220,11 @@ async function getCountsForAgentByDirection(
  */
 const getCallSummary = async (req, res) => {
   try {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-
-    // Current day: 00:00:00 -> 23:59:59
-    const dayStart = `${y}-${m}-${d} 00:00:00`;
-    const dayEnd = `${y}-${m}-${d} 23:59:59`;
-
-    // Current month: first day 00:00:00 -> last day 23:59:59
+    const { start: dayStart, end: dayEnd } = getTodayBounds();
+    const [y, m] = dayStart.slice(0, 10).split("-");
     const monthStart = `${y}-${m}-01 00:00:00`;
-    const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+    const lastDay = new Date(Number(y), Number(m), 0).getDate();
     const monthEnd = `${y}-${m}-${String(lastDay).padStart(2, "0")} 23:59:59`;
-
-    // Current year
     const yearStart = `${y}-01-01 00:00:00`;
     const yearEnd = `${y}-12-31 23:59:59`;
 

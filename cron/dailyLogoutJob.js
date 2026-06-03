@@ -1,24 +1,25 @@
 const cron = require("node-cron");
-const { User, AgentStatus } = require("../models");
+const {
+  getDailyLogoutCronExpression,
+  getDailyLogoutTimeLabel,
+  runDailyAgentLogout,
+} = require("../utils/dailyLogoutHelper");
 
-// Run every day at 2:00 PM (14:00) server local time – must match DAILY_LOGOUT_TIME in .env
-cron.schedule("0 14 * * *", async () => {
-  console.log("Running daily logout job (2 PM) – agents only...");
-  try {
-    const [userCount] = await User.update(
-      { status: "offline" },
-      { where: { role: "agent" } }
-    );
-    console.log(`Daily logout: set ${userCount} agent user(s) to offline.`);
+const cronExpr = getDailyLogoutCronExpression();
+const timeLabel = getDailyLogoutTimeLabel();
 
-    const now = new Date();
-    const [agentStatusCount] = await AgentStatus.update(
-      { status: "offline", logoutTime: now },
-      { where: { status: "online" } }
-    );
-    console.log(`Daily logout: set ${agentStatusCount} agent status(es) to offline.`);
-    console.log("Daily logout job complete.");
-  } catch (err) {
-    console.error("Error in daily logout job:", err);
-  }
-});
+cron.schedule(
+  cronExpr,
+  async () => {
+    try {
+      await runDailyAgentLogout();
+    } catch (err) {
+      console.error("[DailyLogout] Job failed:", err);
+    }
+  },
+  { timezone: "Africa/Dar_es_Salaam" }
+);
+
+console.log(
+  `[DailyLogout] Cron scheduled: ${cronExpr} (Africa/Dar_es_Salaam, target ${timeLabel})`
+);
