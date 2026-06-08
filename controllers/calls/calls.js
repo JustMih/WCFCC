@@ -8,6 +8,7 @@ const {
   callerMatchKey,
   dedupeLostCalls,
   getTodayLostCallsList,
+  getTodayDroppedCallsList,
   getLostCallsDiagnostics,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
@@ -15,6 +16,9 @@ const {
   buildSlaMetricsFromRow,
   SLA_AGGREGATE_SELECT,
 } = require("../../utils/slaMetricsHelper");
+const { normalizeExtensionCandidate } = require("../../utils/agentExtensionHelper");
+const { getCountsForAgentByDirection } = require("./callSummary");
+const User = require("../../models/User");
 
 // Controller to get data for different time frames (Total, Monthly, Weekly, Daily)
 const getCdrCounts = async (req, res) => {
@@ -105,52 +109,74 @@ const getAgentCdrStats = async (req, res) => {
   }
 };
 
-// New: Only today's calls for agent
+// Today's call stats for a single agent (call_summary view, optional S/I/T exclusion)
 const getAgentCdrStatsToday = async (req, res) => {
-  const agentId = req.params.agentId;
-  const dstPattern = `PJSIP/${agentId}%`;
+  let agentExtension = normalizeExtensionCandidate(req.params.agentId);
+  const options = {
+    excludeDestS:
+      req.query.excludeDestS === "1" || req.query.excludeDestS === "true",
+    agentAliases: [],
+  };
+
+  const userId = req.query.userId;
+  if (userId) {
+    const user = await User.findByPk(userId, {
+      attributes: ["extension", "username"],
+      raw: true,
+    });
+    if (user?.extension != null) {
+      agentExtension =
+        agentExtension || normalizeExtensionCandidate(user.extension);
+    }
+    if (user?.username) {
+      options.agentAliases.push(String(user.username).trim());
+    }
+  }
+
+  const rawAgentId = String(req.params.agentId || "").trim();
+  if (!agentExtension && rawAgentId) {
+    options.agentAliases.push(rawAgentId);
+    agentExtension = rawAgentId;
+  } else if (rawAgentId && !options.agentAliases.includes(rawAgentId)) {
+    options.agentAliases.push(rawAgentId);
+  }
+
+  if (!agentExtension) {
+    return res.status(400).json({ error: "Invalid agent extension" });
+  }
+
+  options.agentAliases = [
+    ...new Set(options.agentAliases.filter(Boolean)),
+  ];
 
   try {
-    // Inbound: agent was destination, only today's calls
-    const inboundCalls = await sequelize.query(
-      `
-      SELECT 
-        COUNT(*) AS total,
-        SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) < :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) >= :lostMinDuration THEN 1 ELSE 0 END) AS lost
-      FROM cdr
-      WHERE dstchannel LIKE :dstPattern
-        AND DATE(cdrstarttime) = CURDATE()
-    `,
-      {
-        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const dayStart = `${y}-${m}-${d} 00:00:00`;
+    const dayEnd = `${y}-${m}-${d} 23:59:59`;
 
-    // Outbound: agent was source, only today's calls
-    const outboundCalls = await sequelize.query(
-      `
-      SELECT 
-        COUNT(*) AS total,
-        SUM(CASE WHEN disposition = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) < :lostMinDuration THEN 1 ELSE 0 END) AS dropped,
-        SUM(CASE WHEN disposition != 'ANSWERED' AND COALESCE(duration, 0) >= :lostMinDuration THEN 1 ELSE 0 END) AS lost
-      FROM cdr
-      WHERE channel LIKE :dstPattern
-        AND DATE(cdrstarttime) = CURDATE()
-    `,
-      {
-        replacements: { dstPattern, lostMinDuration: LOST_MIN_DURATION_SECONDS },
-        type: sequelize.QueryTypes.SELECT,
+    if (options.agentAliases.length === 0) {
+      const extInt = parseInt(agentExtension, 10);
+      if (!Number.isNaN(extInt)) {
+        const user = await User.findOne({
+          where: { extension: extInt },
+          attributes: ["username"],
+          raw: true,
+        });
+        if (user?.username) {
+          options.agentAliases.push(String(user.username).trim());
+        }
       }
-    );
+    }
 
-    res.json({
-      inbound: inboundCalls[0],
-      outbound: outboundCalls[0],
-    });
+    const [inbound, outbound] = await Promise.all([
+      getCountsForAgentByDirection(dayStart, dayEnd, "INBOUND", agentExtension, options),
+      getCountsForAgentByDirection(dayStart, dayEnd, "OUTBOUND", agentExtension, options),
+    ]);
+
+    res.json({ inbound, outbound });
   } catch (err) {
     console.error("Error fetching agent call stats (today):", err.message);
     res.status(500).send("Internal Server Error");
@@ -169,6 +195,17 @@ const getLostCallsToday = async (req, res) => {
   } catch (err) {
     console.error("Error retrieving lost calls:", err.message);
     res.status(500).send("Internal Server Error");
+  }
+};
+
+/** Today's dropped calls — same rows as Dropped Calls Report for today. */
+const getDroppedCallsToday = async (req, res) => {
+  try {
+    const rows = await getTodayDroppedCallsList(sequelize);
+    res.json(rows);
+  } catch (err) {
+    console.error("Error retrieving dropped calls today:", err.message);
+    res.status(500).json({ error: "Failed to fetch dropped calls" });
   }
 };
 
@@ -549,6 +586,7 @@ module.exports = {
   getAgentCdrStats,
   dailyAgentCallStatus: getAgentCdrStatsToday,
   getLostCallsToday,
+  getDroppedCallsToday,
   getLostCallsDiagnosticsHandler,
   getReceivedCalls,
   getLostCalls,

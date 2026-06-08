@@ -19,26 +19,16 @@ function isCustomerCaller(raw) {
   return /^0\d{9}$/.test(phone);
 }
 
-/**
- * Lost = caller waited in queue for this long or longer (5+ minutes).
- * Dropped = hung up before this threshold (under 5 minutes).
- */
-const LOST_MIN_DURATION_SECONDS = 5 * 60;
-
-function hasKnownQueueWait(waitSeconds) {
-  const w = Number(waitSeconds);
-  return Number.isFinite(w) && w > 0;
-}
-
-function isLostWaitSeconds(waitSeconds) {
-  return hasKnownQueueWait(waitSeconds) && waitSeconds >= LOST_MIN_DURATION_SECONDS;
-}
-
-function isDroppedWaitSeconds(waitSeconds) {
-  return (
-    hasKnownQueueWait(waitSeconds) && waitSeconds < LOST_MIN_DURATION_SECONDS
-  );
-}
+const {
+  QUEUE_EXIT_TIMEOUT_SECONDS,
+  LOST_CLASSIFY_GRACE_SECONDS,
+  LOST_MIN_DURATION_SECONDS,
+  hasKnownQueueWait,
+  normalizeQueueWaitSeconds,
+  isLostWaitSeconds,
+  isDroppedWaitSeconds,
+  queueWaitToMinutes,
+} = require("./queueTimingConstants");
 
 /**
  * Parse queue wait from queue_log.
@@ -83,7 +73,7 @@ function effectiveQueueWaitSeconds(sessionRow, queueWaitByCallId, celWaitBySessi
   );
   const csWait = Number(sessionRow.call_summary_duration) || 0;
   const best = Math.max(qlWait, celWait, cdrWait, csWait);
-  return best > 0 ? best : null;
+  return best > 0 ? normalizeQueueWaitSeconds(best) : null;
 }
 
 function mergeWaitWithCallSummary(waitSeconds, callSummaryDuration) {
@@ -189,15 +179,24 @@ function isLostSessionRow(row, queueWaitByCallId) {
   return false;
 }
 
+/** Align with MySQL CURDATE() / call center (+03:00). */
 function getTodayBounds() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Dar_es_Salaam",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   return {
-    start: `${y}-${m}-${d} 00:00:00`,
-    end: `${y}-${m}-${d} 23:59:59`,
+    start: `${day} 00:00:00`,
+    end: `${day} 23:59:59`,
   };
+}
+
+/** Today's dropped sessions — same pipeline as dropped calls report. */
+async function getTodayDroppedCallsList(sequelize) {
+  const { start, end } = getTodayBounds();
+  return fetchDroppedCallsForRange(sequelize, start, end);
 }
 
 /**
@@ -409,9 +408,50 @@ async function fetchQueueLogSpanLostSessions(
     .filter((r) => r.caller !== "UNKNOWN");
 }
 
+function lostEntrySessionId(entry) {
+  const sid = entry?.session_id;
+  return sid != null && String(sid).trim() !== "" ? String(sid).trim() : "";
+}
+
+/** Map queue_log callid / CDR uniqueid → linkedid session key. */
+function canonicalSessionId(rawId, uniqueidToSession) {
+  const id = rawId != null ? String(rawId).trim() : "";
+  if (!id) return "";
+  const mapped = uniqueidToSession?.get(id);
+  return mapped ? String(mapped).trim() : id;
+}
+
+function callTimeDedupeBucket(callTime) {
+  const t = new Date(callTime);
+  if (Number.isNaN(t.getTime())) return String(callTime || "");
+  return String(Math.floor(t.getTime() / 1000));
+}
+
+function lostEntryCallerTimeKey(entry) {
+  const caller = normalizeCaller(entry?.caller);
+  const bucket = callTimeDedupeBucket(entry?.call_time);
+  if (caller === "UNKNOWN" || !bucket) return "";
+  return `${caller}:${bucket}`;
+}
+
+function isLostSessionAlreadyTracked(keys, sessionId, callerTimeKey) {
+  if (callerTimeKey && keys.has(`ct:${callerTimeKey}`)) return true;
+  const sid = sessionId != null ? String(sessionId).trim() : "";
+  return sid !== "" && keys.has(`session:${sid}`);
+}
+
+/** One row per abandon: same caller + same second beats mismatched session ids. */
+function abandonSessionDedupeKey(row) {
+  const callerTime = lostEntryCallerTimeKey(row);
+  if (callerTime) return `ct:${callerTime}`;
+  const sid = String(row.session_id || "").trim();
+  if (sid) return `sid:${sid}`;
+  return `row:${normalizeCaller(row.caller)}:${row.call_time}`;
+}
+
 /**
  * Authoritative lost list: queue_log span (>=5m) + CDR + MissedCalls rows.
- * Same caller can appear multiple times (each row / each session).
+ * One entry per call session (uniqueid/linkedid); same caller may call again later.
  */
 async function buildLostEntriesForRange(
   sequelize,
@@ -423,12 +463,6 @@ async function buildLostEntriesForRange(
   const entries = [];
   const keys = new Set();
 
-  const add = (key, entry) => {
-    if (!key || keys.has(key)) return;
-    keys.add(key);
-    entries.push(entry);
-  };
-
   const [spanLost, cdrLost, queueLogMeta] = await Promise.all([
     fetchQueueLogSpanLostSessions(sequelize, startDateTime, endDateTime),
     fetchQueueAbandonSessionsRaw(sequelize, startDateTime, endDateTime, true, {
@@ -438,6 +472,20 @@ async function buildLostEntriesForRange(
   ]);
 
   const waitMap = queueLogMeta.waitByCallId;
+  const uniqueidToSession = queueLogMeta.uniqueidToSession || new Map();
+
+  const add = (key, entry) => {
+    const rawSid = lostEntrySessionId(entry);
+    const sid = canonicalSessionId(rawSid, uniqueidToSession);
+    if (sid) entry.session_id = sid;
+    const ctKey = lostEntryCallerTimeKey(entry);
+    if (isLostSessionAlreadyTracked(keys, sid, ctKey)) return;
+    if (key && keys.has(key)) return;
+    if (key) keys.add(key);
+    if (sid) keys.add(`session:${sid}`);
+    if (ctKey) keys.add(`ct:${ctKey}`);
+    entries.push(entry);
+  };
 
   for (const row of spanLost) {
     if (!isCustomerCaller(row.caller)) continue;
@@ -445,7 +493,7 @@ async function buildLostEntriesForRange(
       caller: row.caller,
       call_time: row.call_time,
       session_id: row.session_id,
-      wait_seconds: row.wait_seconds,
+      wait_seconds: normalizeQueueWaitSeconds(row.wait_seconds),
       source: "queue_log_span",
     });
   }
@@ -458,7 +506,7 @@ async function buildLostEntriesForRange(
       caller: normalizeCaller(row.caller),
       call_time: row.call_time,
       session_id: row.session_id,
-      wait_seconds: row.wait_seconds,
+      wait_seconds: normalizeQueueWaitSeconds(row.wait_seconds),
       source: "cdr",
     });
   }
@@ -470,13 +518,17 @@ async function buildLostEntriesForRange(
   );
   for (const row of csLongSessions) {
     if (!isCustomerCaller(row.caller)) continue;
-    const sid = String(row.session_id || "");
-    if (sid && (keys.has(`span:${sid}`) || keys.has(`cdr:${sid}`))) continue;
+    const sid = canonicalSessionId(row.session_id, uniqueidToSession);
+    const ctKey = lostEntryCallerTimeKey({
+      caller: row.caller,
+      call_time: row.call_time,
+    });
+    if (isLostSessionAlreadyTracked(keys, sid, ctKey)) continue;
     add(`cs:${sid}`, {
       caller: normalizeCaller(row.caller),
       call_time: row.call_time,
       session_id: sid,
-      wait_seconds: Number(row.total_duration),
+      wait_seconds: normalizeQueueWaitSeconds(Number(row.total_duration)),
       source: "call_summary",
     });
   }
@@ -510,8 +562,12 @@ async function buildLostEntriesForRange(
       if (!isCustomerCaller(row.caller)) continue;
       if (row.agentId != null && String(row.agentId).trim() !== "") continue;
       const caller = normalizeCaller(row.caller);
-      const lid = row.linkedid ? String(row.linkedid) : "";
-      if (lid && (keys.has(`span:${lid}`) || keys.has(`cdr:${lid}`))) {
+      const lid = canonicalSessionId(row.linkedid, uniqueidToSession);
+      const ctKey = lostEntryCallerTimeKey({
+        caller,
+        call_time: row.time,
+      });
+      if (isLostSessionAlreadyTracked(keys, lid, ctKey)) {
         continue;
       }
       const waitSec =
@@ -522,7 +578,7 @@ async function buildLostEntriesForRange(
         call_time: row.time,
         session_id: row.linkedid || null,
         missed_id: row.id,
-        wait_seconds: waitSec,
+        wait_seconds: normalizeQueueWaitSeconds(waitSec),
         source: "missed_calls",
       });
     }
@@ -667,8 +723,29 @@ function dedupeLostCalls(rows, timeField = "call_time") {
 }
 
 /**
+ * One row per call session — never merge two different calls from the same caller.
+ */
+function dedupeAbandonSessionsBySessionId(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+
+  const seen = new Set();
+  const kept = [];
+
+  for (const row of rows) {
+    const key = abandonSessionDedupeKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(row);
+  }
+
+  return kept.sort(
+    (a, b) => new Date(b.call_time) - new Date(a.call_time)
+  );
+}
+
+/**
  * One row per call session (linkedid/uniqueid).
- * Same caller may appear many times — each >= 5 min abandon is a separate lost call.
+ * @deprecated Prefer dedupeAbandonSessionsBySessionId for reports.
  */
 function dedupeIncomingLostCdrs(cdrs) {
   if (!Array.isArray(cdrs) || cdrs.length === 0) return [];
@@ -703,6 +780,155 @@ function dedupeIncomingLostCdrs(cdrs) {
   }
 
   return kept.sort((a, b) => new Date(b.call_time) - new Date(a.call_time));
+}
+
+/** Session ids classified as lost (exclude from dropped). */
+async function buildLostSessionIdSet(
+  sequelize,
+  startDateTime,
+  endDateTime
+) {
+  const [lostEntries, queueLogMeta] = await Promise.all([
+    buildLostEntriesForRange(sequelize, startDateTime, endDateTime),
+    fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
+  ]);
+  const uniqueidToSession = queueLogMeta.uniqueidToSession || new Map();
+
+  const ids = new Set();
+  const uniqueLost = dedupeAbandonSessionsBySessionId(
+    filterLostEntriesForList(lostEntries)
+  );
+  for (const e of uniqueLost) {
+    const sid = canonicalSessionId(lostEntrySessionId(e), uniqueidToSession);
+    if (sid) ids.add(sid);
+    const ctKey = lostEntryCallerTimeKey(e);
+    if (ctKey) ids.add(`ct:${ctKey}`);
+  }
+  return ids;
+}
+
+function isExcludedFromDropped(row, lostSessionIds) {
+  if (!isCustomerCaller(row.caller)) return true;
+  const sid = String(row.session_id || "").trim();
+  if (sid && lostSessionIds.has(sid)) return true;
+  const ctKey = lostEntryCallerTimeKey(row);
+  if (ctKey && lostSessionIds.has(`ct:${ctKey}`)) return true;
+  return false;
+}
+
+/**
+ * Dropped = queue abandon under 5 min, OR not lost when wait is unknown (CDR often has 0s).
+ */
+function isDroppedAbandonSession(row, lostSessionIds) {
+  if (isExcludedFromDropped(row, lostSessionIds)) return false;
+  const raw = row.wait_seconds;
+  if (hasKnownQueueWait(raw)) {
+    const norm = normalizeQueueWaitSeconds(raw);
+    if (isLostWaitSeconds(norm)) return false;
+    return isDroppedWaitSeconds(norm);
+  }
+  return true;
+}
+
+function filterDroppedAbandonSessions(allAbandons, lostSessionIds) {
+  return allAbandons.filter((row) =>
+    isDroppedAbandonSession(row, lostSessionIds)
+  );
+}
+
+/** Sessions call_summary marks as dropped (aligns with CDR report totals). */
+async function fetchCallSummaryDroppedSessions(
+  sequelize,
+  startDateTime,
+  endDateTime
+) {
+  try {
+    const rows = await sequelize.query(
+      `
+      SELECT
+        uniqueid AS session_id,
+        caller,
+        call_start AS call_time,
+        COALESCE(total_duration, 0) AS total_duration
+      FROM call_summary
+      WHERE call_start BETWEEN :start AND :end
+        AND LOWER(status) = 'dropped'
+      ORDER BY call_start DESC
+      LIMIT 2000
+      `,
+      {
+        replacements: { start: startDateTime, end: endDateTime },
+        type: QueryTypes.SELECT,
+      }
+    );
+    return rows.filter((r) => isCustomerCaller(r.caller));
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (!/call_summary|doesn't exist|unknown table/i.test(msg)) throw err;
+    return [];
+  }
+}
+
+/** All dropped sessions for dashboard count + dropped calls report. */
+async function buildDroppedSessionsForRange(
+  sequelize,
+  startDateTime,
+  endDateTime
+) {
+  const [allAbandons, lostSessionIds, csDropped, queueLogMeta] =
+    await Promise.all([
+      fetchQueueAbandonSessionsRaw(
+        sequelize,
+        startDateTime,
+        endDateTime,
+        null,
+        { queueOnly: true }
+      ),
+      buildLostSessionIdSet(sequelize, startDateTime, endDateTime),
+      fetchCallSummaryDroppedSessions(
+        sequelize,
+        startDateTime,
+        endDateTime
+      ),
+      fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
+    ]);
+
+  const uniqueidToSession = queueLogMeta.uniqueidToSession || new Map();
+  const fromAbandons = filterDroppedAbandonSessions(
+    allAbandons,
+    lostSessionIds
+  );
+
+  const fromSummary = csDropped
+    .filter((row) => {
+      const mapped = {
+        session_id: canonicalSessionId(row.session_id, uniqueidToSession),
+        caller: row.caller,
+        call_time: row.call_time,
+        wait_seconds:
+          Number(row.total_duration) > 0 &&
+          Number(row.total_duration) < LOST_MIN_DURATION_SECONDS
+            ? Number(row.total_duration)
+            : null,
+      };
+      return isDroppedAbandonSession(mapped, lostSessionIds);
+    })
+    .map((row) => ({
+      session_id: canonicalSessionId(row.session_id, uniqueidToSession),
+      caller: normalizeCaller(row.caller),
+      call_time: row.call_time,
+      wait_seconds:
+        Number(row.total_duration) > 0 &&
+        Number(row.total_duration) < LOST_MIN_DURATION_SECONDS
+          ? Number(row.total_duration)
+          : null,
+      source: "call_summary",
+    }));
+
+  return dedupeAbandonSessionsBySessionId([
+    ...fromAbandons,
+    ...fromSummary,
+  ]);
 }
 
 /** Sessions where an agent extension answered (exclude from lost/dropped). */
@@ -754,9 +980,14 @@ async function fetchQueueAbandonSessionsRaw(
   const { QueryTypes } = require("sequelize");
   const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
   const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
-  const lastappFilter = queueOnly
-    ? "AND c.lastapp IN ('Queue', 'AppQueue')"
-    : "";
+  /** Asterisk often writes queue timeout/exit as ANSWERED, not NO ANSWER. */
+  const queueDispositionFilter = queueOnly
+    ? `AND c.lastapp IN ('Queue', 'AppQueue')
+       AND (
+         c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
+         OR c.disposition = 'ANSWERED'
+       )`
+    : `AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')`;
 
   let rows = [];
   let queueWaitByCallId = new Map();
@@ -783,8 +1014,7 @@ async function fetchQueueAbandonSessionsRaw(
         MAX(COALESCE(c.billsec, 0)) AS max_billsec
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :startDateTime AND :endDateTime
-        AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
-        ${lastappFilter}
+        ${queueDispositionFilter}
         AND (c.clid IS NOT NULL OR c.src IS NOT NULL)
       GROUP BY ${sessionIdExpr}
       ORDER BY call_time DESC
@@ -1045,51 +1275,27 @@ async function fetchMissedCallsTodayRaw(sequelize) {
 }
 
 /**
- * Dropped = queue abandons with known wait under 5 minutes.
- * Excludes every session/caller classified as lost (>= 5 min) from the same pipeline.
+ * Dropped = queue abandons under 5 min + call_summary dropped (one row per session).
  */
 async function countQueueDroppedInRange(sequelize, startDateTime, endDateTime) {
-  const [allAbandons, lostEntries, queueLogMeta, csLongSessions] =
-    await Promise.all([
-      fetchQueueAbandonSessionsRaw(sequelize, startDateTime, endDateTime, null, {
-        queueOnly: false,
-      }),
-      buildLostEntriesForRange(sequelize, startDateTime, endDateTime),
-      fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
-      fetchCallSummaryLongWaitSessions(sequelize, startDateTime, endDateTime),
-    ]);
-
-  const waitMap = queueLogMeta.waitByCallId;
-  const lostSessionIds = new Set();
-  for (const e of lostEntries) {
-    if (e.session_id) lostSessionIds.add(String(e.session_id));
-  }
-  for (const row of csLongSessions) {
-    if (row.session_id) lostSessionIds.add(String(row.session_id));
-  }
-
-  const droppedOnly = allAbandons.filter((row) => {
-    if (!isCustomerCaller(row.caller)) return false;
-    const sid = String(row.session_id || "");
-    if (sid && lostSessionIds.has(sid)) return false;
-    if (isLostSessionRow(row, waitMap)) return false;
-    if (isLostWaitSeconds(row.wait_seconds)) return false;
-    return isDroppedWaitSeconds(row.wait_seconds);
-  });
-
-  return dedupeIncomingLostCdrs(droppedOnly).length;
-}
-
-function queueWaitToMinutes(waitSeconds) {
-  const w = Number(waitSeconds);
-  if (!Number.isFinite(w) || w <= 0) return 0;
-  return Math.round((w / 60) * 100) / 100;
+  const sessions = await buildDroppedSessionsForRange(
+    sequelize,
+    startDateTime,
+    endDateTime
+  );
+  return sessions.length;
 }
 
 /**
- * Dropped call rows for reports: queue abandon with known wait under 5 minutes.
+ * Enrich abandon/lost session rows for Comprehensive Reports (CDR + queue + agent).
  */
-async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) {
+async function enrichAbandonReportRows(
+  sequelize,
+  startDateTime,
+  endDateTime,
+  deduped,
+  statusLabel
+) {
   const User = require("../models/User");
   const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
   const {
@@ -1097,36 +1303,17 @@ async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) 
     buildAgentsNameMap,
   } = require("./agentExtensionHelper");
 
-  const [allAbandons, lostEntries, queueLogMeta] = await Promise.all([
-    fetchQueueAbandonSessionsRaw(sequelize, startDateTime, endDateTime, null, {
-      queueOnly: false,
-    }),
-    buildLostEntriesForRange(sequelize, startDateTime, endDateTime),
-    fetchQueueLogWaitMap(sequelize, startDateTime, endDateTime),
-  ]);
-
-  const waitMap = queueLogMeta.waitByCallId;
-  const lostSessionIds = new Set();
-  for (const e of lostEntries) {
-    if (e.session_id) lostSessionIds.add(String(e.session_id));
-  }
-
-  const droppedOnly = allAbandons.filter((row) => {
-    if (!isCustomerCaller(row.caller)) return false;
-    const sid = String(row.session_id || "");
-    if (sid && lostSessionIds.has(sid)) return false;
-    if (isLostSessionRow(row, waitMap)) return false;
-    if (isLostWaitSeconds(row.wait_seconds)) return false;
-    return isDroppedWaitSeconds(row.wait_seconds);
-  });
-
-  const deduped = dedupeIncomingLostCdrs(droppedOnly);
-  if (deduped.length === 0) return [];
+  if (!deduped.length) return [];
 
   const sessionIds = [
     ...new Set(deduped.map((r) => String(r.session_id || "")).filter(Boolean)),
   ];
   const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+  const queueLogMeta = await fetchQueueLogWaitMap(
+    sequelize,
+    startDateTime,
+    endDateTime
+  );
 
   const queueRows = await sequelize.query(
     `
@@ -1186,10 +1373,28 @@ async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) 
         ) AS destination,
         SUBSTRING_INDEX(
           GROUP_CONCAT(
+            CASE
+              WHEN c.lastapp IN ('Queue', 'AppQueue')
+                AND c.disposition IN ('NO ANSWER', 'BUSY', 'FAILED')
+                AND (
+                  c.dstchannel LIKE 'PJSIP/%'
+                  OR c.dstchannel LIKE 'SIP/%'
+                )
+              THEN NULLIF(TRIM(c.dstchannel), '')
+              ELSE NULL
+            END
+            ORDER BY c.cdrstarttime DESC SEPARATOR '||'
+          ),
+          '||',
+          1
+        ) AS dstchannel,
+        SUBSTRING_INDEX(
+          GROUP_CONCAT(
             NULLIF(TRIM(c.dstchannel), '') ORDER BY c.cdrstarttime DESC SEPARATOR '||'
           ),
-          '||', 1
-        ) AS dstchannel
+          '||',
+          1
+        ) AS fallback_dstchannel
       FROM cdr c
       WHERE c.cdrstarttime BETWEEN :start AND :end
         AND ${sessionIdExpr} IN (:sessionIds)
@@ -1224,7 +1429,9 @@ async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) 
       const destination =
         queueName || (cdr.destination && String(cdr.destination).trim()) || "—";
       const agent_extension =
-        extractExtensionFromChannel(cdr.dstchannel) || null;
+        extractExtensionFromChannel(cdr.dstchannel) ||
+        extractExtensionFromChannel(cdr.fallback_dstchannel) ||
+        null;
       const agent_name =
         agent_extension && agentsMap[agent_extension]
           ? agentsMap[agent_extension]
@@ -1234,7 +1441,7 @@ async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) 
       return {
         id: sid || `${normalizeCaller(row.caller)}-${row.call_time}`,
         session_id: sid,
-        status: "DROPPED",
+        status: statusLabel,
         disposition: cdr.disposition || "NO ANSWER",
         caller: normalizeCaller(row.caller),
         destination,
@@ -1246,6 +1453,53 @@ async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) 
       };
     })
     .sort((a, b) => new Date(b.call_time) - new Date(a.call_time));
+}
+
+/** Dropped call rows for reports (same pipeline as dashboard dropped count). */
+async function fetchDroppedCallsForRange(sequelize, startDateTime, endDateTime) {
+  const deduped = await buildDroppedSessionsForRange(
+    sequelize,
+    startDateTime,
+    endDateTime
+  );
+  return enrichAbandonReportRows(
+    sequelize,
+    startDateTime,
+    endDateTime,
+    deduped,
+    "DROPPED"
+  );
+}
+
+/**
+ * Lost call rows for reports: queue abandon with wait >= 5 minutes (same pipeline as dashboard).
+ */
+async function fetchLostCallsForRange(sequelize, startDateTime, endDateTime) {
+  const entries = await buildLostEntriesForRange(
+    sequelize,
+    startDateTime,
+    endDateTime,
+    { includeMissedTable: true }
+  );
+
+  const lostRows = entries
+    .filter((e) => isCustomerCaller(e.caller))
+    .filter((e) => isLostWaitSeconds(e.wait_seconds))
+    .map((e) => ({
+      session_id: e.session_id,
+      caller: e.caller,
+      call_time: e.call_time,
+      wait_seconds: e.wait_seconds,
+    }));
+
+  const deduped = dedupeIncomingLostCdrs(lostRows);
+  return enrichAbandonReportRows(
+    sequelize,
+    startDateTime,
+    endDateTime,
+    deduped,
+    "LOST"
+  );
 }
 
 /**
@@ -1336,13 +1590,17 @@ async function ensureLostAbandonsInMissedCallsInner(sequelize, options = {}) {
 
 function mapMissedCallRowToLostDto(row) {
   const callTime = row.time || row.call_time;
+  const waitNorm = normalizeQueueWaitSeconds(row.wait_seconds);
   return {
-    id: row.id ?? null,
+    id: row.id ?? row.session_id ?? null,
     caller: normalizeCaller(row.caller),
     call_time: callTime,
     lost_time: callTime,
-    wait_seconds: row.wait_seconds ?? null,
-    status: row.status || "pending",
+    wait_seconds: waitNorm > 0 ? waitNorm : row.wait_seconds ?? null,
+    status: row.status || "LOST",
+    agent_extension: row.agent_extension ?? null,
+    agent_name: row.agent_name ?? null,
+    destination: row.destination ?? null,
     called_back_at: row.called_back_at || null,
     called_back_by: row.called_back_by || null,
     callback_agent_extension: row.called_back_by || null,
@@ -1350,8 +1608,8 @@ function mapMissedCallRowToLostDto(row) {
     callback_time: row.called_back_at || null,
     callback_duration: row.billsec ?? null,
     billsec: row.billsec ?? null,
-    linkedid: row.linkedid ?? null,
-    session_id: row.linkedid ?? null,
+    linkedid: row.linkedid ?? row.session_id ?? null,
+    session_id: row.session_id ?? row.linkedid ?? null,
   };
 }
 
@@ -1411,60 +1669,70 @@ async function fetchMissedCallsTodayForList(sequelize) {
   }
 }
 
+function filterLostEntriesForList(entries) {
+  return entries.filter(
+    (e) =>
+      isCustomerCaller(e.caller) &&
+      isLostWaitSeconds(normalizeQueueWaitSeconds(e.wait_seconds))
+  );
+}
+
 async function getTodayLostCallsList(sequelize) {
   await ensureLostAbandonsInMissedCalls(sequelize);
   const { start, end } = getTodayBounds();
-  const entries = await buildLostEntriesForRange(sequelize, start, end);
-  const missedRows = await fetchMissedCallsTodayForList(sequelize);
-  const missedById = new Map(missedRows.map((r) => [Number(r.id), r]));
-  const missedByLinked = new Map();
-  for (const row of missedRows) {
-    if (row.linkedid != null) {
-      missedByLinked.set(String(row.linkedid), row);
-    }
-  }
+  const entries = filterLostEntriesForList(
+    await buildLostEntriesForRange(sequelize, start, end)
+  );
 
-  return entries
-    .map((e) => {
-      const mc =
-        (e.missed_id && missedById.get(Number(e.missed_id))) ||
-        (e.session_id && missedByLinked.get(String(e.session_id))) ||
-        null;
-      return mapMissedCallRowToLostDto(
-        mc
-          ? {
-              ...mc,
-              caller: normalizeCaller(e.caller),
-              time: e.call_time,
-              wait_seconds: e.wait_seconds,
-            }
-          : {
-              caller: e.caller,
-              time: e.call_time,
-              linkedid: e.session_id,
-              status: "pending",
-              wait_seconds: e.wait_seconds,
-            }
-      );
+  if (entries.length === 0) return [];
+
+  const rowsForEnrich = dedupeAbandonSessionsBySessionId(
+    entries.map((e) => ({
+      session_id: e.session_id,
+      caller: e.caller,
+      call_time: e.call_time,
+      wait_seconds: normalizeQueueWaitSeconds(e.wait_seconds),
+    }))
+  );
+
+  const enriched = await enrichAbandonReportRows(
+    sequelize,
+    start,
+    end,
+    rowsForEnrich,
+    "LOST"
+  );
+
+  return enriched.map((row) =>
+    mapMissedCallRowToLostDto({
+      id: row.id,
+      caller: row.caller,
+      call_time: row.call_time,
+      session_id: row.session_id,
+      wait_seconds: row.wait_seconds,
+      status: "LOST",
+      agent_extension: row.agent_extension,
+      agent_name: row.agent_name,
+      destination: row.destination,
     })
-    .filter((dto) => isLostWaitSeconds(dto.wait_seconds));
+  );
 }
 
-/** Lost today: each >=5m abandon + each MissedCalls row (same number can repeat). */
+/** Lost today — one per session; count matches View Details list. */
 async function countTodayMissedCalls(sequelize) {
   await ensureLostAbandonsInMissedCalls(sequelize);
   const { start, end } = getTodayBounds();
-  const entries = await buildLostEntriesForRange(sequelize, start, end);
-  return entries.length;
+  const entries = filterLostEntriesForList(
+    await buildLostEntriesForRange(sequelize, start, end)
+  );
+  return dedupeAbandonSessionsBySessionId(entries).length;
 }
 
 async function countMissedCallsInRange(sequelize, startDateTime, endDateTime) {
-  const entries = await buildLostEntriesForRange(
-    sequelize,
-    startDateTime,
-    endDateTime
+  const entries = filterLostEntriesForList(
+    await buildLostEntriesForRange(sequelize, startDateTime, endDateTime)
   );
-  return entries.length;
+  return dedupeAbandonSessionsBySessionId(entries).length;
 }
 
 /**
@@ -1583,10 +1851,14 @@ async function getLostCallsDiagnostics(sequelize) {
 
 module.exports = {
   DEDUP_WINDOW_SECONDS,
+  QUEUE_EXIT_TIMEOUT_SECONDS,
+  LOST_CLASSIFY_GRACE_SECONDS,
   LOST_MIN_DURATION_SECONDS,
   hasKnownQueueWait,
+  normalizeQueueWaitSeconds,
   isLostWaitSeconds,
   isDroppedWaitSeconds,
+  queueWaitToMinutes,
   parseQueueLogWaitSeconds,
   effectiveQueueWaitSeconds,
   fetchQueueLogWaitMap,
@@ -1604,6 +1876,8 @@ module.exports = {
   callerMatchKey,
   dedupeLostCalls,
   dedupeIncomingLostCdrs,
+  dedupeAbandonSessionsBySessionId,
+  filterDroppedAbandonSessions,
   fetchTodayQueueLostSessionsRaw,
   fetchQueueAbandonSessionsRaw,
   fetchCallSummaryDurationMap,
@@ -1611,10 +1885,12 @@ module.exports = {
   countQueueLostInRange,
   countQueueDroppedInRange,
   fetchDroppedCallsForRange,
+  fetchLostCallsForRange,
   ensureLostAbandonsInMissedCalls,
   getTodayLostSessionsDeduped,
   countTodayMissedCalls,
   countMissedCallsInRange,
   countIvrAnsweredExcludingQueueLost,
   getTodayLostCallsList,
+  getTodayDroppedCallsList,
 };

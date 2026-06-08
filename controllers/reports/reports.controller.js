@@ -11,14 +11,36 @@ const {
   SLA_AGGREGATE_SELECT,
 } = require("../../utils/slaMetricsHelper");
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
+const {
+  ensureCallSummaryReady,
+  mapRowsToCdrApiShape,
+  enrichCdrRowsWithAgentNames,
+  buildDateRangeWhere,
+  buildCdrDestinationWhere,
+  buildDispositionWhere,
+  buildCdrReportSelectList,
+  buildCdrReportFromClause,
+  buildCdrQueueWaitReplacements,
+  queryAgentPerformanceAggregates,
+} = require("../../utils/callSummaryReportHelper");
+const { queryCdrSessionsForReport } = require("../../utils/cdrSessionAggregateHelper");
 
 let offHoursReportController = {};
+let lostCallsReportController = {};
 let slaReportController = {};
 try {
   offHoursReportController = require("./offHoursReport.controller");
 } catch (err) {
   console.warn(
     "[reports.controller] offHoursReport.controller not loaded:",
+    err.message
+  );
+}
+try {
+  lostCallsReportController = require("./lostCallsReport.controller");
+} catch (err) {
+  console.warn(
+    "[reports.controller] lostCallsReport.controller not loaded:",
     err.message
   );
 }
@@ -310,7 +332,7 @@ exports.getVoiceReport = (req, res) => {
     });
 };
 
-exports.getCDRReport = (req, res) => {
+exports.getCDRReport = async (req, res) => {
   const { startDate, endDate, disposition } = req.params;
 
   if (!startDate || !endDate) {
@@ -319,33 +341,63 @@ exports.getCDRReport = (req, res) => {
       .json({ error: "Start date and end date are required" });
   }
 
-  let query = `SELECT * FROM cdr WHERE cdrstarttime BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')`;
-  let replacements = { startDate, endDate };
+  try {
+    const excludeDestS =
+      req.query.excludeDestS === "1" || req.query.excludeDestS === "true";
 
-  // Add disposition filter if provided
-  if (disposition && disposition !== "all") {
-    query += ` AND disposition = :disposition`;
-    replacements.disposition = disposition;
-  }
-
-  query += ` ORDER BY cdrstarttime DESC`;
-
-  const cdrQuery = sequelize.query(query, {
-    replacements,
-    type: sequelize.QueryTypes.SELECT,
-  });
-
-  cdrQuery
-    .then((cdrData) => {
-      if (cdrData.length === 0) {
-        return res.status(404).json({ message: "No CDR records found" });
-      }
-      res.json(cdrData);
-    })
-    .catch((error) => {
-      console.error("Error fetching CDR data:", error);
-      res.status(500).json({ error: error.message });
+    let rows = await queryCdrSessionsForReport(sequelize, {
+      startDate,
+      endDate,
+      disposition,
+      excludeDestS,
     });
+
+    if (!rows.length) {
+      try {
+        await ensureCallSummaryReady(sequelize);
+        const dateFilter = buildDateRangeWhere("cs", startDate, endDate);
+        const destFilter = buildCdrDestinationWhere("cs", "called");
+        const dispFilter = buildDispositionWhere(disposition, "cs");
+        const queueWaitOpts = { queueLogDateFilter: true };
+        const whereParts = [dateFilter.sql, destFilter.sql];
+        if (dispFilter) whereParts.push(dispFilter.sql);
+        const replacements = {
+          ...dateFilter.replacements,
+          ...destFilter.replacements,
+          ...(dispFilter?.replacements || {}),
+          ...buildCdrQueueWaitReplacements(startDate, endDate),
+        };
+        rows = await sequelize.query(
+          `
+          SELECT ${buildCdrReportSelectList("cs")}
+          ${buildCdrReportFromClause("cs", queueWaitOpts)}
+          WHERE ${whereParts.join(" AND ")}
+          ORDER BY cs.call_start DESC
+          `,
+          {
+            replacements,
+            type: sequelize.QueryTypes.SELECT,
+          }
+        );
+        rows = mapRowsToCdrApiShape(rows);
+      } catch (viewErr) {
+        console.warn("[getCDRReport] call_summary fallback failed:", viewErr.message);
+      }
+    }
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "No CDR records found" });
+    }
+
+    const mapped = rows[0]?.disposition
+      ? rows
+      : mapRowsToCdrApiShape(rows);
+    const enriched = await enrichCdrRowsWithAgentNames(mapped, User, sequelize);
+    res.json(enriched);
+  } catch (error) {
+    console.error("Error fetching CDR data:", error);
+    res.status(500).json({ error: error.message });
+  }
 };
 
 // Ticket CRM Report
@@ -464,83 +516,81 @@ exports.getAgentPerformanceReport = async (req, res) => {
   }
 
   try {
-    if (!CDR || !User) {
+    if (!User) {
       throw new Error("Required models are not available");
     }
 
-    // Get all agents if agentId is "all"
-    let agents = [];
-    if (agentId === "all") {
-      agents = await User.findAll({
-        where: {
-          role: "agent",
-        },
+    const filterAgentId = agentId === "all" ? null : agentId;
+
+    if (filterAgentId) {
+      const agent = await User.findByPk(filterAgentId, {
         attributes: ["id", "full_name", "extension"],
       });
-    } else {
-      const agent = await User.findByPk(agentId);
-      if (agent) {
-        agents = [agent];
+      if (!agent) {
+        return res.json([]);
       }
     }
 
-    const performanceData = await Promise.all(
-      agents.map(async (agent) => {
-        // Get calls for this agent
-        const calls = await sequelize.query(
-          `SELECT * FROM cdr 
-           WHERE src = :extension 
-           AND cdrstarttime BETWEEN :startDate AND :endDate`,
-          {
-            replacements: {
-              extension: agent.extension || "",
-              startDate,
-              endDate,
-            },
-            type: sequelize.QueryTypes.SELECT,
-          }
-        );
+    const aggregates = await queryAgentPerformanceAggregates(sequelize, {
+      startDate,
+      endDate,
+      agentUserId: filterAgentId,
+    });
 
-        const totalCalls = calls.length;
-        const answeredCalls = calls.filter(
-          (c) => c.disposition === "ANSWERED"
-        ).length;
-        const missedCalls = totalCalls - answeredCalls;
-        const totalDuration = calls.reduce(
-          (sum, c) => sum + (parseInt(c.duration) || 0),
-          0
-        );
-        const avgDuration =
-          answeredCalls > 0 ? Math.round(totalDuration / answeredCalls) : 0;
-        const totalTalkTime = calls
-          .filter((c) => c.disposition === "ANSWERED")
-          .reduce((sum, c) => sum + (parseInt(c.billsec) || 0), 0);
+    if (agentId === "all") {
+      const agents = await User.findAll({
+        where: { role: "agent" },
+        attributes: ["id", "full_name", "extension"],
+        order: [["full_name", "ASC"]],
+      });
 
-        // Calculate FCR (First Call Resolution) - simplified
-        const fcrRate =
-          totalCalls > 0
-            ? `${Math.round((answeredCalls / totalCalls) * 100)}%`
-            : "0%";
+      const aggregateById = new Map(
+        aggregates.map((row) => [String(row.agent_id), row])
+      );
 
-        return {
-          id: agent.id,
-          agent_id: agent.id,
-          agent_name: agent.full_name || "Unknown Agent",
-          total_calls: totalCalls,
-          answered_calls: answeredCalls,
-          missed_calls: missedCalls,
-          avg_duration: avgDuration,
-          total_talk_time: totalTalkTime,
-          fcr_rate: fcrRate,
-        };
-      })
-    );
+      const performanceData = agents
+        .filter((agent) => agent.extension != null)
+        .map((agent) => {
+          const existing = aggregateById.get(String(agent.id));
+          if (existing) return existing;
+          return {
+            id: agent.id,
+            agent_id: agent.id,
+            agent_name: agent.full_name || "Unknown Agent",
+            total_calls: 0,
+            answered_calls: 0,
+            missed_calls: 0,
+            avg_duration: 0,
+            total_talk_time: 0,
+            fcr_rate: "0%",
+          };
+        });
 
-    if (performanceData.length === 0) {
-      return res.status(404).json({ message: "No performance data found" });
+      return res.json(performanceData);
     }
 
-    res.json(performanceData);
+    if (aggregates.length === 0 && filterAgentId) {
+      const agent = await User.findByPk(filterAgentId, {
+        attributes: ["id", "full_name"],
+      });
+      if (agent) {
+        return res.json([
+          {
+            id: agent.id,
+            agent_id: agent.id,
+            agent_name: agent.full_name || "Unknown Agent",
+            total_calls: 0,
+            answered_calls: 0,
+            missed_calls: 0,
+            avg_duration: 0,
+            total_talk_time: 0,
+            fcr_rate: "0%",
+          },
+        ]);
+      }
+    }
+
+    res.json(aggregates);
   } catch (error) {
     console.error("Error fetching agent performance report:", error);
     res.status(500).json({ error: error.message });
@@ -674,6 +724,17 @@ if (typeof offHoursReportController.getOffHoursReport === "function") {
     res.status(503).json({
       error:
         "Off-hours report is not available. Deploy offHoursReport.controller.js and utils/offHoursReportHelper.js.",
+    });
+  };
+}
+
+if (typeof lostCallsReportController.getLostCallsReport === "function") {
+  exports.getLostCallsReport = lostCallsReportController.getLostCallsReport;
+} else {
+  exports.getLostCallsReport = async (req, res) => {
+    res.status(503).json({
+      error:
+        "Lost calls report is not available. Deploy lostCallsReport.controller.js and latest missedCallHelper.js.",
     });
   };
 }
@@ -1047,15 +1108,3 @@ exports.getSlaReport =
   slaReportController.getSlaReport || getSlaReportHandler;
 exports.getTicketSlaReport =
   slaReportController.getTicketSlaReport || getTicketSlaReportHandler;
-
-let ticketWorkflowTatReportController = {};
-try {
-  ticketWorkflowTatReportController = require("./ticketWorkflowTatReport.controller");
-} catch (err) {
-  console.warn(
-    "[reports.controller] ticketWorkflowTatReport.controller:",
-    err.message
-  );
-}
-exports.getTicketWorkflowTatReport =
-  ticketWorkflowTatReportController.getTicketWorkflowTatReport;

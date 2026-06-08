@@ -8,6 +8,11 @@ const crypto = require("crypto");
 const { Op } = require("sequelize");
 // const { getEffectiveRoles } = require("../../utils/roleMapper");
 require("dotenv").config();
+const {
+  getNextDailyLogoutDate,
+  getSecondsUntilNextDailyLogout,
+  getDailyLogoutTimeLabel,
+} = require("../../utils/dailyLogoutHelper");
 
 const registerSuperAdmin = async () => {
   try {
@@ -256,11 +261,26 @@ const login = async (req, res) => {
       });
     }
 
-    // Step 5: Generate JWT token
+    // Step 5: Generate JWT token (agents expire at next daily logout; others 24h)
+    const isAgent = String(user.role || "").toLowerCase() === "agent";
+    let expiresAt;
+    let jwtExpiresIn;
+    if (isAgent) {
+      const secondsUntilLogout = getSecondsUntilNextDailyLogout();
+      expiresAt = getNextDailyLogoutDate().getTime();
+      jwtExpiresIn = secondsUntilLogout;
+      console.log(
+        `[Agent login] Daily logout at ${getDailyLogoutTimeLabel()} EAT | expiresAt: ${new Date(expiresAt).toISOString()}`
+      );
+    } else {
+      expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+      jwtExpiresIn = "24h";
+    }
+
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: jwtExpiresIn }
     );
 
     // Log agent login in AgentLoginLog
@@ -293,6 +313,7 @@ const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
+      expiresAt,
       user: {
         full_name: user.full_name,
         isActive: user.isActive,

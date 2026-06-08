@@ -1,5 +1,41 @@
 const sequelize = require("../../config/mysql_connection");
-const { buildTatReportPayload } = require("../../utils/ticketWorkflowReportHelper");
+const { buildHolidaySet } = require("../../utils/offHoursHelper");
+const {
+  buildTatReportPayload,
+  groupAssignmentsByTicketId,
+  resolveRated,
+  resolveChannel,
+  TAT_TEMPLATE_COLUMNS,
+} = require("../../utils/ticketWorkflowReportHelper");
+
+const MAX_TAT_TICKETS = 3000;
+
+async function fetchHolidayDateKeys() {
+  let holidayRows = [];
+  try {
+    const models = require("../../models");
+    if (models.holidays) {
+      holidayRows = await models.holidays.findAll({
+        attributes: ["holiday_date"],
+      });
+    }
+  } catch {
+    holidayRows = [];
+  }
+
+  if (!holidayRows.length) {
+    try {
+      holidayRows = await sequelize.query(
+        `SELECT holiday_date FROM holidays`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+    } catch {
+      holidayRows = [];
+    }
+  }
+
+  return [...buildHolidaySet(holidayRows)];
+}
 
 exports.getTicketWorkflowTatReport = async (req, res) => {
   const { startDate, endDate, status } = req.params;
@@ -14,7 +50,8 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
     let query = `
       SELECT
         t.*,
-        u2.full_name AS creator_name
+        u2.full_name AS creator_name,
+        u2.role AS creator_role
       FROM Tickets t
       LEFT JOIN Users u2 ON t.created_by = u2.id
       WHERE t.created_at BETWEEN CONCAT(:startDate, ' 00:00:00') AND CONCAT(:endDate, ' 23:59:59')
@@ -40,8 +77,14 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
     if (!tickets.length) {
       return res.json({
         summary: { total: 0, resolved: 0, avgTotalTatDays: 0, avgTotalTatMinutes: 0 },
-        templateColumns: [],
+        templateColumns: TAT_TEMPLATE_COLUMNS,
         rows: [],
+      });
+    }
+
+    if (tickets.length > MAX_TAT_TICKETS) {
+      return res.status(400).json({
+        error: `Too many tickets (${tickets.length}) for this date range. Narrow the range to at most ${MAX_TAT_TICKETS} tickets.`,
       });
     }
 
@@ -53,7 +96,8 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
         `
         SELECT
           ta.*,
-          u.full_name AS assigned_to_name
+          u.full_name AS assigned_to_name,
+          u.role AS assigned_user_role
         FROM Ticket_assignments ta
         LEFT JOIN Users u ON u.id = ta.assigned_to_id
         WHERE ta.ticket_id IN (:ticketIds)
@@ -66,7 +110,28 @@ exports.getTicketWorkflowTatReport = async (req, res) => {
       );
     }
 
-    const payload = buildTatReportPayload(tickets, assignments);
+    const holidays = await fetchHolidayDateKeys();
+    const payload = buildTatReportPayload(tickets, assignments, { holidays });
+    const assignmentsByTicket = groupAssignmentsByTicketId(assignments);
+
+    // Ensure dimension columns are always present on each row (guards stale module cache).
+    payload.rows = payload.rows.map((row, index) => {
+      const ticket = tickets[index];
+      if (!ticket) return row;
+      const ticketAssignments = assignmentsByTicket[ticket.id] || [];
+      const rated = resolveRated(ticket);
+      const channel =
+        row.channel ||
+        resolveChannel(ticket, { assignments: ticketAssignments });
+      return {
+        ...row,
+        category: ticket.category || row.category || "",
+        rated,
+        channel,
+        complaint_type: rated || ticket.complaint_type || row.complaint_type || "",
+      };
+    });
+
     res.json(payload);
   } catch (error) {
     console.error("Error fetching ticket workflow TAT report:", error);

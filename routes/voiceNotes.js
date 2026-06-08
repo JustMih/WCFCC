@@ -7,19 +7,29 @@ const { authMiddleware } = require("../middleware/authMiddleware");
 const { streamVoiceNote } = require("../controllers/reports.controller");
 router.get("/voice-notes", authMiddleware, async (req, res) => {
   try {
-    console.log("🔥 USING MODEL FILE:", require.resolve("../../models/voice_notes.model"));
-    console.log("🔥 MODEL NAME:", VoiceNote.name);
-    console.log("🔥 MODEL ATTRIBUTES:", Object.keys(VoiceNote.rawAttributes));
+    const agentId = req.query.agentId || req.user?.userId;
+    const extension = req.query.extension;
+
+    let where = {};
+    if (agentId || extension) {
+      const conditions = [];
+      if (agentId) {
+        conditions.push({ assigned_agent_id: String(agentId) });
+      }
+      if (extension) {
+        conditions.push({ assigned_extension: String(extension) });
+      }
+      where = { [Op.or]: conditions };
+    }
 
     const notes = await VoiceNote.findAll({
+      where,
       order: [["created_at", "DESC"]],
     });
 
-    console.log("📦 FIRST ROW:", notes[0]?.toJSON());
-
     res.json({ voiceNotes: notes });
   } catch (err) {
-    console.error("❌ Error fetching voice notes:", err);
+    console.error("Error fetching voice notes:", err);
     res.status(500).json({ error: "Failed to fetch voice notes" });
   }
 });

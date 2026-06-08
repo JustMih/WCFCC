@@ -8,6 +8,13 @@ const CEL = require("../../models/CEL")(
   require("sequelize").DataTypes
 );
 const QueueStatus = db.QueueStatus;
+const QueueLog = require("../../models/QueueLog")(
+  sequelize,
+  require("sequelize").DataTypes
+);
+const {
+  getAgentAvailabilityMetrics,
+} = require("../../utils/agentAvailabilityHelper");
 const {
   countTodayMissedCalls,
   countQueueDroppedInRange,
@@ -19,11 +26,13 @@ const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelpe
 const {
   buildAgentsNameMap,
   resolveAgentForCall,
+  extractExtensionFromQueueAgent,
 } = require("../../utils/agentExtensionHelper");
 const {
   loadSupervisorExtensionSet,
   applyCelRowToCall,
   filterCallsForDisplay,
+  summarizeLiveCallBuckets,
 } = require("../../utils/liveCallCelHelper");
 
 /* ================= SOCKET.IO ================= */
@@ -38,12 +47,53 @@ const emitDashboardUpdate = (payload) => {
   ioInstance.emit("public_dashboard_update", payload);
 };
 
+/** Fresh lost/dropped totals for today (same logic as reports). */
+async function fetchTodayLostDroppedCounts() {
+  const { start: dayStart, end: dayEnd } = getTodayBounds();
+  let lost = 0;
+  let dropped = 0;
+  try {
+    [lost, dropped] = await Promise.all([
+      countTodayMissedCalls(sequelize),
+      countQueueDroppedInRange(sequelize, dayStart, dayEnd),
+    ]);
+  } catch (err) {
+    console.error(
+      "[publicDashboard] lost/dropped counts failed:",
+      err?.message || err
+    );
+  }
+  return {
+    lost: Number(lost || 0),
+    dropped: Number(dropped || 0),
+    dayStart,
+    dayEnd,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/* ================= LOST / DROPPED STATS (lightweight poll) ================= */
+const getPublicDashboardCallStats = async (req, res) => {
+  try {
+    res.json(await fetchTodayLostDroppedCounts());
+  } catch (err) {
+    console.error("dashboard-call-stats:", err);
+    res.status(500).json({ error: "Failed to fetch call stats" });
+  }
+};
+
 /* ================= PUBLIC DASHBOARD ================= */
 const getPublicDashboardData = async (req, res) => {
   try {
+    /* ---------- LOST / DROPPED FIRST (always fresh even if CEL fails) ---------- */
+    const todayStats = await fetchTodayLostDroppedCounts();
+    const lostCount = todayStats.lost;
+    const droppedCount = todayStats.dropped;
+
     /* ---------- AGENT STATUS ---------- */
-    const [onlineCount, offlineCount] = await Promise.all([
+    const [onlineCount, pauseCount, offlineCount] = await Promise.all([
       User.count({ where: { role: "agent", status: "online" } }),
+      User.count({ where: { role: "agent", status: "pause" } }),
       User.count({
         where: {
           role: "agent",
@@ -51,6 +101,7 @@ const getPublicDashboardData = async (req, res) => {
         },
       }),
     ]);
+    const availability = getAgentAvailabilityMetrics(onlineCount, pauseCount);
 
     /* ---------- QUEUE STATUS ---------- */
     const queueStatus = QueueStatus
@@ -64,6 +115,9 @@ const getPublicDashboardData = async (req, res) => {
     /* =====================================================
        CEL LIVE CALL TRACKING (DASHBOARD)
     ====================================================== */
+    let enrichedLiveCalls = [];
+    let liveBuckets = { active: 0, inQueue: 0, total: 0 };
+    try {
     const events = await CEL.findAll({
       where: {
         eventtype: [
@@ -71,14 +125,15 @@ const getPublicDashboardData = async (req, res) => {
           "ANSWER",
           "HANGUP",
           "APP_START",
+          "APP_END",
           "BRIDGE_ENTER",
         ],
         eventtime: {
-          [Op.gte]: moment().utcOffset("+03:00").subtract(20, "minutes").toDate(),
+          [Op.gte]: moment().utcOffset("+03:00").subtract(30, "minutes").toDate(),
         },
       },
       order: [["eventtime", "ASC"]],
-      limit: 1000,
+      limit: 2000,
     });
 
     const calls = {};
@@ -104,31 +159,68 @@ const getPublicDashboardData = async (req, res) => {
     }
 
     const allCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
-    const liveCalls = allCalls.filter((c) => !c.call_end);
-    const activeCalls = liveCalls.filter((c) => c.status === "active");
-   
-  const inQueueCalls = liveCalls.filter(
-  c => c.queue_entry_time && !c.call_answered
-).length;
+    let liveCalls = allCalls.filter((c) => !c.call_end);
 
+    const liveCallIds = liveCalls
+      .map((c) => String(c.linkedid || ""))
+      .filter(Boolean);
+    if (liveCallIds.length > 0 && QueueLog) {
+      try {
+        const agentConnects = await QueueLog.findAll({
+          where: {
+            callid: { [Op.in]: liveCallIds },
+            event: { [Op.in]: ["CONNECT", "AGENTCONNECT"] },
+            agent: { [Op.ne]: null },
+          },
+          order: [["time", "DESC"]],
+          attributes: ["callid", "agent"],
+        });
+        for (const row of agentConnects) {
+          const call = liveCalls.find(
+            (c) => String(c.linkedid) === String(row.callid)
+          );
+          if (!call) continue;
+          const ext = extractExtensionFromQueueAgent(row.agent);
+          if (ext && !call.agent_extension) {
+            call.agent_extension = ext;
+          }
+          if (ext) {
+            call.call_answered = call.call_answered || new Date();
+            call.status = "active";
+          }
+        }
+      } catch (qlErr) {
+        console.warn(
+          "[publicDashboard] queue_log agent lookup skipped:",
+          qlErr?.message || qlErr
+        );
+      }
+    }
 
-const extensionCandidates = [];
-      activeCalls.forEach((c) => {
-        if (c.agent_extension) extensionCandidates.push(c.agent_extension);
-        if (c.caller) extensionCandidates.push(c.caller);
-      });
-      const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
+    const extensionCandidates = [];
+    liveCalls.forEach((c) => {
+      if (c.agent_extension) extensionCandidates.push(c.agent_extension);
+      if (c.caller) extensionCandidates.push(c.caller);
+    });
+    const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-      const enrichedActiveCalls = activeCalls.map((call) => {
-        const resolved = resolveAgentForCall(call, agentsMap);
-        return {
-          ...call,
-          agent_extension: resolved.agent_extension,
-          agent_name: resolved.agent_name,
-        };
-      });
+    enrichedLiveCalls = liveCalls.map((call) => {
+      const resolved = resolveAgentForCall(call, agentsMap);
+      return {
+        ...call,
+        agent_extension: resolved.agent_extension,
+        agent_name: resolved.agent_name,
+      };
+    });
 
-  
+    liveBuckets = summarizeLiveCallBuckets(enrichedLiveCalls);
+    } catch (celErr) {
+      console.error(
+        "[publicDashboard] live calls (CEL) failed:",
+        celErr?.message || celErr
+      );
+    }
+
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
     ====================================================== */
@@ -169,21 +261,6 @@ const monthlyCounts = await sequelize.query(
 );
 
 
-    const { start: dayStart, end: dayEnd } = getTodayBounds();
-    let lostCount = 0;
-    let droppedCount = 0;
-    try {
-      [lostCount, droppedCount] = await Promise.all([
-        countTodayMissedCalls(sequelize),
-        countQueueDroppedInRange(sequelize, dayStart, dayEnd),
-      ]);
-    } catch (lostDropErr) {
-      console.error(
-        "Lost/dropped counts failed (dashboard continues):",
-        lostDropErr?.message || lostDropErr
-      );
-    }
-
       const totalRows = dailyCounts.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
@@ -192,12 +269,19 @@ const monthlyCounts = await sequelize.query(
 
     /* ================= FINAL PAYLOAD ================= */
    const payload = {
-  agentStatus: { onlineCount, offlineCount },
-  liveCalls: enrichedActiveCalls,
+  agentStatus: {
+    onlineCount,
+    pauseCount,
+    offlineCount,
+    totalActive: availability.totalActive,
+    onlinePercent: availability.onlinePercent,
+    pausePercent: availability.pausePercent,
+  },
+  liveCalls: enrichedLiveCalls,
   callStatusSummary: {
-    active: activeCalls.length,
-    inQueue: inQueueCalls,
-    answered: activeCalls.length,
+    active: liveBuckets.active,
+    inQueue: liveBuckets.inQueue,
+    answered: liveBuckets.active,
     dropped: Number(droppedCount || 0),
     lost: Number(lostCount || 0),
   },
@@ -212,7 +296,11 @@ const monthlyCounts = await sequelize.query(
     totalRows,
   },
   queueStatus,
-  timestamp: new Date().toISOString(),
+  timestamp: todayStats.timestamp,
+  callStatsDay: {
+    start: todayStats.dayStart,
+    end: todayStats.dayEnd,
+  },
 };
 
 
@@ -250,6 +338,7 @@ const startPeriodicUpdates = () => {
 /* ================= EXPORTS ================= */
 module.exports = {
   getPublicDashboardData,
+  getPublicDashboardCallStats,
   getLostCallsToday,
   setSocketInstance,
   startPeriodicUpdates,
