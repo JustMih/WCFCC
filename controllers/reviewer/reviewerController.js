@@ -10,6 +10,7 @@ const TicketAssignment = require("../../models/TicketAssignment");
 const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const Notification = require("../../models/Notification"); // Added Notification model
 const { UserRole } = require("../../models");
+const { isPublicRelationUnit } = require("../../utils/reviewerActingAsHead");
 
 // Helper to get requester display name
 function getRequesterDisplayName(ticket) {
@@ -569,6 +570,38 @@ const convertOrForwardTicket = async (req, res) => {
               transaction
             });
           }
+
+          // Public Relation Unit: reviewer also serves as head when no head-of-unit user exists
+          if (!unitUser && targetRole === "head-of-unit" && isPublicRelationUnit(searchField)) {
+            unitUser = await User.findOne({
+              where: {
+                unit_section: searchField,
+                role: "reviewer",
+              },
+              transaction,
+            });
+
+            if (!unitUser) {
+              unitUser = await User.findOne({
+                where: {
+                  [Op.and]: [
+                    Sequelize.where(
+                      Sequelize.fn("LOWER", Sequelize.col("unit_section")),
+                      Sequelize.fn("LOWER", searchField)
+                    ),
+                    { role: "reviewer" },
+                  ],
+                },
+                transaction,
+              });
+            }
+
+            if (unitUser) {
+              console.log(
+                `DEBUG: Public Relation Unit fallback - using reviewer ${unitUser.full_name} as head-of-unit workflow assignee`
+              );
+            }
+          }
         }
         
         // If still not found, list all users with that role to see what values exist
@@ -590,12 +623,12 @@ const convertOrForwardTicket = async (req, res) => {
         }
       }
 
-      // Assign the ticket - only if target role (director or head-of-unit) is found
+      // Assign the ticket - workflow role is targetRole (head-of-unit/director), not the user's login role
       if (unitUser) {
-        ticket.assigned_to_role = unitUser.role;
-        ticket.assigned_to_id = unitUser.id; // Assign to the target role user
-        assignedRole = unitUser.role; // Store role for success message
-        console.log(`DEBUG: Assigned to ${targetRole}: ${unitUser.full_name} (${unitUser.id})`);
+        ticket.assigned_to_role = targetRole;
+        ticket.assigned_to_id = unitUser.id;
+        assignedRole = targetRole;
+        console.log(`DEBUG: Assigned to ${targetRole}: ${unitUser.full_name} (${unitUser.id}), login role: ${unitUser.role}`);
       } else {
         // If target role (director or head-of-unit) not found, return error - no fallback
         await safeRollback(transaction);
