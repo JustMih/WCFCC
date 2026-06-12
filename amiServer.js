@@ -40,6 +40,106 @@ const db = mysql.createPool({
 // ✅ Call tracking object
 const queueCalls = {};
 
+function getQueueCallId(event) {
+  return event.uniqueid || event.linkedid || null;
+}
+
+/** Resolve tracked queue call — AMI may use different ids per event */
+function resolveQueueCall(event) {
+  const candidateIds = [
+    event.uniqueid,
+    event.linkedid,
+    event.destuniqueid,
+    event.destlinkedid,
+  ].filter(Boolean);
+
+  for (const id of candidateIds) {
+    if (queueCalls[id] && !queueCalls[id].endedAt) {
+      return { id, call: queueCalls[id] };
+    }
+  }
+
+  // Fallback: match waiting caller by phone number
+  const caller =
+    event.calleridnum || event.callerid || event.calleridname || null;
+  if (caller) {
+    const callerDigits = String(caller).replace(/\D/g, "");
+    for (const [id, call] of Object.entries(queueCalls)) {
+      if (call.endedAt || call.answered) continue;
+      const callDigits = String(call.caller || "").replace(/\D/g, "");
+      if (callDigits && callerDigits && callDigits === callerDigits) {
+        return { id, call };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function trackQueueEntry(event, now) {
+  const callId = getQueueCallId(event);
+  if (!callId) return;
+
+  if (!queueCalls[callId]) {
+    queueCalls[callId] = {
+      caller: event.calleridnum || event.callerid || event.calleridname || "Unknown",
+      queue: event.queue || event.queuename || "unknown",
+      joinedAt: now,
+      answered: false,
+      abandoned: false,
+      leftAt: null,
+    };
+    console.log(
+      `📞 [QueueEntry] ${queueCalls[callId].caller} joined ${queueCalls[callId].queue}`
+    );
+
+    await logToQueueLog({
+      time: now,
+      callid: callId,
+      queuename: queueCalls[callId].queue,
+      agent: null,
+      event: "QUEUEENTRY",
+      data1: queueCalls[callId].caller || "",
+      data2: "",
+      data3: "",
+      data4: "",
+      data5: "",
+    });
+  }
+}
+
+async function trackAgentConnect(event, now) {
+  const resolved = resolveQueueCall(event);
+  if (!resolved) {
+    console.warn("[AgentConnect] no matching queue call", {
+      uniqueid: event.uniqueid,
+      linkedid: event.linkedid,
+      caller: event.calleridnum || event.callerid,
+    });
+    return;
+  }
+
+  const { id: callId, call } = resolved;
+  call.answered = true;
+  call.connectedAt = now;
+  call.endedAt = null;
+  call.agent = event.agent || event.membername || event.interface || event.member || "";
+  console.log(`✅ [AgentConnect] ${call.caller} connected to agent (${call.agent})`);
+
+  await logToQueueLog({
+    time: now,
+    callid: callId,
+    queuename: event.queue || call.queue,
+    agent: call.agent || "",
+    event: "AGENTCONNECT",
+    data1: event.calleridnum || call.caller || "",
+    data2: "",
+    data3: "",
+    data4: "",
+    data5: "",
+  });
+}
+
 // ✅ Log event to queue_log table
 async function logToQueueLog({ time, callid, queuename, agent, event, data1, data2, data3, data4, data5 }) {
   try {
@@ -58,60 +158,44 @@ if (ami) ami.on('managerevent', async (event) => {
 
   switch (event.event) {
     case 'QueueEntry':
-      if (!queueCalls[event.uniqueid]) {
-        queueCalls[event.uniqueid] = {
-          caller: event.calleridnum || event.callerid || 'Unknown',
-          queue: event.queue || 'unknown',
-          joinedAt: now,
-          answered: false,
-          abandoned: false,
-          leftAt: null
-        };
-        console.log(`📞 [QueueEntry] ${event.calleridnum} joined ${event.queue}`);
-
-        await logToQueueLog({
-          time: now,
-          callid: event.uniqueid,
-          queuename: event.queue,
-          agent: null,
-          event: 'QUEUEENTRY',
-          data1: event.calleridnum || '',
-          data2: '', data3: '', data4: '', data5: ''
-        });
-      } else {
-        console.log(`🔁 [QueueEntry Ignored] Already tracking ${event.calleridnum}`);
-      }
+    case 'QueueCallerJoin':
+      await trackQueueEntry(event, now);
       break;
 
     case 'AgentConnect':
-      if (queueCalls[event.uniqueid]) {
-        queueCalls[event.uniqueid].answered = true;
-        queueCalls[event.uniqueid].leftAt = now;
-        console.log(`✅ [AgentConnect] ${queueCalls[event.uniqueid].caller} connected to agent`);
+      await trackAgentConnect(event, now);
+      break;
 
-        await logToQueueLog({
-          time: now,
-          callid: event.uniqueid,
-          queuename: event.queue || queueCalls[event.uniqueid].queue,
-          agent: event.agent || '',
-          event: 'AGENTCONNECT',
-          data1: event.calleridnum || '',
-          data2: '', data3: '', data4: '', data5: ''
-        });
+    case 'Connect':
+      if (event.queue || event.queuename) {
+        await trackAgentConnect(event, now);
       }
       break;
 
+    case 'AgentComplete':
+      {
+        const resolved = resolveQueueCall(event);
+        if (resolved) resolved.call.endedAt = now;
+      }
+      break;
+
+    case 'AgentCalled':
+      break;
+
     case 'QueueCallerAbandon':
-      if (queueCalls[event.uniqueid]) {
-        queueCalls[event.uniqueid].abandoned = true;
-        queueCalls[event.uniqueid].leftAt = now;
-        console.log(`⚠️ [Abandon] ${queueCalls[event.uniqueid].caller} left after waiting too long`);
+      {
+        const callId = getQueueCallId(event);
+        if (!callId || !queueCalls[callId]) break;
+        queueCalls[callId].abandoned = true;
+        queueCalls[callId].leftAt = now;
+        queueCalls[callId].endedAt = now;
+        console.log(`⚠️ [Abandon] ${queueCalls[callId].caller} left after waiting too long`);
 
         const waitSec = Math.max(0, Math.floor(Number(event.waittime) || 0));
         await logToQueueLog({
           time: now,
-          callid: event.uniqueid,
-          queuename: event.queue || queueCalls[event.uniqueid].queue,
+          callid: callId,
+          queuename: event.queue || queueCalls[callId].queue,
           agent: null,
           event: 'ABANDON',
           data1: `waited ${waitSec}s`,
@@ -124,21 +208,21 @@ if (ami) ami.on('managerevent', async (event) => {
       break;
 
     case 'QueueCallerLeave':
-    case 'Hangup':
-      // Only log hangups if the caller joined a queue
-      if (queueCalls[event.uniqueid] && !queueCalls[event.uniqueid].leftAt) {
-        queueCalls[event.uniqueid].leftAt = now;
-        console.log(`🚫 [Hangup/Leave] ${queueCalls[event.uniqueid].caller} hung up`);
+      // Caller left queue — often fires BEFORE AgentConnect when bridging to agent.
+      // Do not end here; Hangup / AgentComplete / Abandon handle real termination.
+      break;
 
-        await logToQueueLog({
-          time: now,
-          callid: event.uniqueid,
-          queuename: event.queue || queueCalls[event.uniqueid].queue,
-          agent: null,
-          event: 'LEAVE',
-          data1: queueCalls[event.uniqueid].caller,
-          data2: '', data3: '', data4: '', data5: ''
-        });
+    case 'Hangup':
+      {
+        const resolved = resolveQueueCall(event);
+        if (!resolved) break;
+        const { id: callId, call } = resolved;
+        if (call.endedAt) break;
+        // Only end on hangup after agent answered — queue-leg hangup fires before AgentConnect
+        if (!call.answered) break;
+        call.endedAt = now;
+        if (!call.leftAt) call.leftAt = now;
+        console.log(`📴 [Hangup] active call ended for ${call.caller}`);
       }
       break;
   }
@@ -274,11 +358,11 @@ app.get('/api/queue-call-stats', (req, res) => {
     const left = call.leftAt ? new Date(call.leftAt) : null;
     const waitSeconds = left ? (left - joined) / 1000 : null;
 
-    if (!call.leftAt && !call.answered) {
+    if (!call.endedAt && !call.answered) {
       inQueue.push(call);
-    } else if (call.answered) {
-      answered.push({ ...call, waitSeconds });
-    } else if (!call.answered && left) {
+    } else if (call.answered && !call.endedAt) {
+      answered.push({ ...call, waitSeconds: call.connectedAt ? (new Date() - new Date(call.connectedAt)) / 1000 : null });
+    } else if (!call.answered && call.leftAt) {
       const { isLostWaitSeconds, isDroppedWaitSeconds } =
         require("./utils/missedCallHelper");
       if (waitSeconds != null && isDroppedWaitSeconds(waitSeconds)) {
@@ -306,3 +390,40 @@ apiServer.on('error', (err) => {
   }
   console.error('❌ amiServer API failed to start:', err);
 });
+
+const { extractExtensionFromQueueAgent } = require("./utils/agentExtensionHelper");
+
+/** Live queue calls tracked from AMI — used by public dashboard */
+function getLiveQueueCalls() {
+  return queueCalls;
+}
+
+function getLiveQueueCallsList() {
+  const list = [];
+  for (const [id, call] of Object.entries(queueCalls)) {
+    if (!call || call.endedAt) continue;
+
+    const status = call.answered ? "active" : "calling";
+    const agentExt = extractExtensionFromQueueAgent(call.agent);
+
+    list.push({
+      linkedid: id,
+      caller: call.caller || "Unknown",
+      callee: call.queue || "unknown",
+      status,
+      call_start: call.joinedAt,
+      queue_entry_time: call.joinedAt,
+      call_answered: call.connectedAt || null,
+      call_end: null,
+      agent_extension: agentExt,
+      agent_name: agentExt ? `Ext ${agentExt}` : "Waiting for agent",
+    });
+  }
+  return list;
+}
+
+module.exports = {
+  getLiveQueueCalls,
+  getLiveQueueCallsList,
+  queueCalls,
+};

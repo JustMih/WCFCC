@@ -34,6 +34,52 @@ const {
   filterCallsForDisplay,
   summarizeLiveCallBuckets,
 } = require("../../utils/liveCallCelHelper");
+const {
+  getLiveCallsFromQueueLog,
+} = require("../queueStatsController");
+
+let getAmiLiveQueueCallsList = null;
+try {
+  getAmiLiveQueueCallsList =
+    require("../../amiServer").getLiveQueueCallsList;
+} catch (_) {
+  getAmiLiveQueueCallsList = null;
+}
+
+/** Merge CEL, AMI memory, and queue_log live call rows by linkedid */
+function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
+  const byId = new Map();
+
+  const add = (call) => {
+    const id = String(call?.linkedid || "");
+    if (!id || call.call_end) return;
+    const existing = byId.get(id);
+    if (!existing) {
+      byId.set(id, { ...call });
+      return;
+    }
+    byId.set(id, {
+      ...existing,
+      ...call,
+      status:
+        call.status === "active" || existing.status === "active"
+          ? "active"
+          : call.status || existing.status,
+      call_answered: call.call_answered || existing.call_answered,
+      agent_extension: call.agent_extension || existing.agent_extension,
+      agent_name:
+        call.agent_name && call.agent_name !== "Waiting for agent"
+          ? call.agent_name
+          : existing.agent_name,
+    });
+  };
+
+  for (const c of celCalls) add(c);
+  for (const c of amiCalls) add(c);
+  for (const c of queueLogCalls) add(c);
+
+  return [...byId.values()];
+}
 
 /* ================= SOCKET.IO ================= */
 let ioInstance = null;
@@ -115,7 +161,7 @@ const getPublicDashboardData = async (req, res) => {
     /* =====================================================
        CEL LIVE CALL TRACKING (DASHBOARD)
     ====================================================== */
-    let enrichedLiveCalls = [];
+    let celLiveCalls = [];
     let liveBuckets = { active: 0, inQueue: 0, total: 0 };
     try {
     const events = await CEL.findAll({
@@ -204,7 +250,7 @@ const getPublicDashboardData = async (req, res) => {
     });
     const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-    enrichedLiveCalls = liveCalls.map((call) => {
+    celLiveCalls = liveCalls.map((call) => {
       const resolved = resolveAgentForCall(call, agentsMap);
       return {
         ...call,
@@ -212,14 +258,60 @@ const getPublicDashboardData = async (req, res) => {
         agent_name: resolved.agent_name,
       };
     });
-
-    liveBuckets = summarizeLiveCallBuckets(enrichedLiveCalls);
     } catch (celErr) {
       console.error(
         "[publicDashboard] live calls (CEL) failed:",
         celErr?.message || celErr
       );
     }
+
+    /* ---------- AMI + queue_log (always — fills gaps when CEL is empty) ---------- */
+    let amiLiveCalls = [];
+    if (typeof getAmiLiveQueueCallsList === "function") {
+      try {
+        amiLiveCalls = getAmiLiveQueueCallsList();
+      } catch (amiErr) {
+        console.warn(
+          "[publicDashboard] AMI live calls skipped:",
+          amiErr?.message || amiErr
+        );
+      }
+    }
+
+    let queueLogLiveCalls = [];
+    try {
+      queueLogLiveCalls = await getLiveCallsFromQueueLog();
+    } catch (qlErr) {
+      console.warn(
+        "[publicDashboard] queue_log live calls skipped:",
+        qlErr?.message || qlErr
+      );
+    }
+
+    let enrichedLiveCalls = mergeLiveCallSources(
+      celLiveCalls,
+      amiLiveCalls,
+      queueLogLiveCalls
+    );
+
+    if (enrichedLiveCalls.length > 0) {
+      const extensionCandidates = [];
+      enrichedLiveCalls.forEach((c) => {
+        if (c.agent_extension) extensionCandidates.push(c.agent_extension);
+        if (c.caller) extensionCandidates.push(c.caller);
+      });
+      const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
+      enrichedLiveCalls = enrichedLiveCalls.map((call) => {
+        const resolved = resolveAgentForCall(call, agentsMap);
+        return {
+          ...call,
+          agent_extension: resolved.agent_extension,
+          agent_name: resolved.agent_name,
+        };
+      });
+    }
+
+    liveBuckets = summarizeLiveCallBuckets(enrichedLiveCalls);
 
     /* =====================================================
        CALL STATISTICS (RESTORED OLD SHAPE)
@@ -268,6 +360,9 @@ const monthlyCounts = await sequelize.query(
 
 
     /* ================= FINAL PAYLOAD ================= */
+    const liveActiveCount = liveBuckets.active;
+    const liveInQueueCount = liveBuckets.inQueue;
+
    const payload = {
   agentStatus: {
     onlineCount,
@@ -279,9 +374,9 @@ const monthlyCounts = await sequelize.query(
   },
   liveCalls: enrichedLiveCalls,
   callStatusSummary: {
-    active: liveBuckets.active,
-    inQueue: liveBuckets.inQueue,
-    answered: liveBuckets.active,
+    active: liveActiveCount,
+    inQueue: liveInQueueCount,
+    answered: liveActiveCount,
     dropped: Number(droppedCount || 0),
     lost: Number(lostCount || 0),
   },
