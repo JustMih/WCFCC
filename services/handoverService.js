@@ -9,6 +9,10 @@ const {
   sendEmailNonBlocking,
   renderEmailCard,
 } = require("./emailService");
+const {
+  isPublicRelationUnit,
+  isReviewerActingAsHeadOfUnit,
+} = require("../utils/reviewerActingAsHead");
 
 const ACTIVE_TICKET_STATUSES = [
   "Assigned",
@@ -84,7 +88,7 @@ function getTicketActorPolicy(ticket, userId, actorRole) {
     roleForChecks:
       hasActiveHandover && isDelegate
         ? normalizeRole(ticket.handover_effective_role || ticket.assigned_to_role)
-        : normalizeRole(actorRole || ticket.assigned_to_role),
+        : getActorRoleForTicket(ticket, userId, actorRole),
     blockReason: null,
   };
 }
@@ -97,6 +101,18 @@ function getActorRoleForTicket(ticket, userId, actorRole) {
   if (hasActiveHandover && isDelegate) {
     return normalizeRole(ticket.handover_effective_role || ticket.assigned_to_role);
   }
+
+  if (
+    isReviewerActingAsHeadOfUnit({
+      userRole: normalizedActorRole,
+      userId,
+      userUnitSection: ticket._actor_unit_section,
+      ticket,
+    })
+  ) {
+    return "head-of-unit";
+  }
+
   return normalizedActorRole || normalizeRole(ticket.assigned_to_role);
 }
 

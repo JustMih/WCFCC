@@ -31,6 +31,7 @@ const {
   getTicketActorPolicy,
   getEffectiveActorRole,
 } = require("../../services/handoverService");
+const { isPublicRelationUnit } = require("../../utils/reviewerActingAsHead");
 
 /**
  * Helper function to get attachments array from ticket
@@ -1045,6 +1046,12 @@ const createTicket = async (req, res) => {
     const requesterName = capitalizeWords(rawRequesterName);
     const employerName = capitalizeWords(rawEmployerName);
     const representative_name = capitalizeWords(rawRepresentativeName);
+
+    if (requester === "Employee" && (!firstName || !String(firstName).trim())) {
+      return res.status(400).json({
+        message: "First name is required when requester is Employee.",
+      });
+    }
     
     // Debug: Log processed representative_name
     console.log("🔍 PROCESSED DATA:");
@@ -1532,9 +1539,9 @@ const createTicket = async (req, res) => {
     }
 
     const initialStatus = closeOnCreate ? "Closed" : status || "Open";
-    const resolvedComplaintType =
-      bodyComplaintType ||
-      (category === "Complaint" ? "Minor" : null);
+    // const resolvedComplaintType =
+    //   bodyComplaintType ||
+    //   (category === "Complaint" ? "Minor" : null);
     let ticketEmployerId = null;
     console.log("🔍 PHONE NUMBER DEBUG:");
     console.log("- Original phoneNumber:", phoneNumber);
@@ -1624,7 +1631,7 @@ const createTicket = async (req, res) => {
       district,
       category,
       inquiry_type: inquiry_type || null,
-      complaint_type: resolvedComplaintType,
+      // complaint_type: resolvedComplaintType,
       responsible_unit_id: mappedResponsibleUnitId,
       responsible_unit_name: responsible_unit_name,
       section: finalSectionName || "Unit",
@@ -4159,7 +4166,10 @@ const closeTicket = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    const actor = await User.findByPk(userId, { attributes: ["id", "role"] });
+    const actor = await User.findByPk(userId, { attributes: ["id", "role", "unit_section"] });
+    if (actor?.unit_section) {
+      ticket._actor_unit_section = actor.unit_section;
+    }
     const actorPolicy = canUserActOnTicket(ticket, userId, actor?.role);
     if (!actorPolicy.canMutate) {
       return res.status(403).json({
@@ -4954,14 +4964,18 @@ const getAllAttendee = async (req, res) => {
     
     // Determine which role to show based on current user's role and unit section
     let targetRole = "attendee"; // Default role
+    const actsAsHeadOfUnit =
+      currentUser.role === "head-of-unit" ||
+      (currentUser.role === "reviewer" &&
+        isPublicRelationUnit(currentUser.unit_section));
     
-    // If current user is Head of Unit or Director and their unit section contains "directorate", show managers
-    if ((currentUser.role === "head-of-unit" || currentUser.role === "director") && 
+    // If current user is Head of Unit or PR reviewer acting as head, and directorate -> managers
+    if ((actsAsHeadOfUnit || currentUser.role === "director") && 
         currentUser.unit_section && 
         currentUser.unit_section.toLowerCase().includes("directorate")) {
       targetRole = "manager";
       console.log(`DEBUG: Head of Unit with directorate unit, showing managers instead of attendees`);
-    } else if (currentUser.role === "head-of-unit" && 
+    } else if (actsAsHeadOfUnit && 
                currentUser.unit_section && 
                currentUser.unit_section.toLowerCase().includes("unit") ) {
       // If head-of-unit's unit_section contains "unit" (not "directorate"), show attendees
@@ -5076,8 +5090,8 @@ const getAllAttendee = async (req, res) => {
           console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have unit_section or report_to set!`);
         }
       }
-    } else if (currentUser.role === "head-of-unit") {
-      // For head-of-unit:
+    } else if (actsAsHeadOfUnit) {
+      // For head-of-unit (including PR reviewer acting as head):
       // - Managers/attendees are filtered by unit_section/report_to as before
       // - Reviewers should NOT depend on unit_section/report_to, so include them via OR
       if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
