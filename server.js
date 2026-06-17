@@ -455,9 +455,7 @@ setInterval(() => {
   const calls = amiLive.getLiveQueueCallsList();
   if (!calls.length) return;
 
-  const inQueue = calls.filter(
-    (c) => c.status === "calling" || c.status === "ringing"
-  ).length;
+  const inQueue = calls.filter((c) => c.status === "calling").length;
   const active = calls.filter((c) => c.status === "active").length;
 
   io.emit("public_dashboard_update", {

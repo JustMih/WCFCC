@@ -71,7 +71,7 @@ function resolveCalleeFromCelRow(row) {
   if (isUseful(dnid)) return String(dnid).trim();
   if (isUseful(peer)) return String(peer).trim();
   if (isUseful(exten)) return String(exten).trim();
-  return "Incoming";
+  return dnid || peer || exten || "-";
 }
 
 /* ============================== SOCKET EMITTER ============================== */
@@ -245,14 +245,6 @@ const getAllLiveCalls = async (req, res) => {
       const resolved = resolveAgentForCall(c, agentsMap);
       c.agent_extension = resolved.agent_extension;
       c.agent_name = resolved.agent_name;
-    });
-
-    mergedLiveCalls.forEach((c) => {
-      const start = c.queue_entry_time || c.call_start;
-      const startMs = new Date(start || 0).getTime();
-      c.elapsed_seconds = Number.isFinite(startMs)
-        ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
-        : 0;
     });
 
     const result = mergedLiveCalls.sort((a, b) => {

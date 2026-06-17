@@ -1,11 +1,5 @@
 "use strict";
 
-function pickEarliestTime(a, b) {
-  if (!a) return b || null;
-  if (!b) return a || null;
-  return new Date(a).getTime() <= new Date(b).getTime() ? a : b;
-}
-
 /** Merge CEL, AMI memory, and queue_log live call rows by linkedid. */
 function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
   const byId = new Map();
@@ -18,27 +12,22 @@ function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
       byId.set(id, { ...call });
       return;
     }
-    const start = pickEarliestTime(
-      existing.queue_entry_time || existing.call_start,
-      call.queue_entry_time || call.call_start
-    );
     byId.set(id, {
       ...existing,
       ...call,
-      status: mergeLiveCallStatus(existing.status, call.status),
+      status:
+        call.status === "active" || existing.status === "active"
+          ? "active"
+          : call.status || existing.status,
       call_answered: call.call_answered || existing.call_answered,
       agent_extension: call.agent_extension || existing.agent_extension,
       agent_name:
         call.agent_name && call.agent_name !== "Waiting for agent"
           ? call.agent_name
           : existing.agent_name,
-      queue_entry_time: start,
-      call_start: start,
-      phase: call.phase || existing.phase,
-      elapsed_seconds:
-        call.elapsed_seconds != null
-          ? call.elapsed_seconds
-          : existing.elapsed_seconds,
+      queue_entry_time:
+        call.queue_entry_time || existing.queue_entry_time || call.call_start,
+      call_start: call.call_start || existing.call_start,
     });
   };
 
@@ -47,13 +36,6 @@ function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
   for (const c of amiCalls || []) add(c);
 
   return [...byId.values()];
-}
-
-function mergeLiveCallStatus(a, b) {
-  const rank = { active: 3, ringing: 2, calling: 1 };
-  const ra = rank[a] || 0;
-  const rb = rank[b] || 0;
-  return ra >= rb ? a : b;
 }
 
 module.exports = {
