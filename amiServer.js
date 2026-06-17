@@ -39,9 +39,27 @@ const db = mysql.createPool({
 
 // ✅ Call tracking object
 const queueCalls = {};
+/** Call ids seen in latest QueueStatus snapshot (waiting callers only). */
+let queueStatusSyncIds = null;
 
 function getQueueCallId(event) {
-  return event.uniqueid || event.linkedid || null;
+  return event.uniqueid || event.Uniqueid || event.linkedid || event.Linkedid || null;
+}
+
+function formatAmiTimestamp(date = new Date()) {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+function parseAmiWaitSeconds(event) {
+  const raw = event.wait ?? event.Wait;
+  if (raw == null || raw === "") return 0;
+  const n = parseInt(String(raw), 10);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function joinedAtFromWait(now, waitSec) {
+  if (!waitSec) return now;
+  return formatAmiTimestamp(new Date(Date.now() - waitSec * 1000));
 }
 
 /** Resolve tracked queue call — AMI may use different ids per event */
@@ -76,21 +94,122 @@ function resolveQueueCall(event) {
   return null;
 }
 
+function isExternalCallerId(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 9;
+}
+
+function isAgentLegChannel(event) {
+  const chan = String(event.channel || event.Channel || "");
+  const m = chan.match(/PJSIP\/(\d{3,5})-/i);
+  if (!m) return false;
+  const ext = m[1];
+  const callerDigits = String(
+    event.calleridnum || event.CallerIDNum || ""
+  ).replace(/\D/g, "");
+  return callerDigits === ext;
+}
+
+/** Customer PSTN/SIP leg — before queue, IVR, or soft-queue. */
+function isCustomerInboundChannel(event) {
+  const chan = String(event.channel || event.Channel || "");
+  if (/chanspy|snoop|local\/\d/i.test(chan)) return false;
+  if (isAgentLegChannel(event)) return false;
+  if (!isExternalCallerId(event.calleridnum || event.CallerIDNum)) return false;
+  return /PJSIP\/|SIP\/|DAHDI/i.test(chan);
+}
+
+async function trackInboundCallStart(event, now) {
+  const callId =
+    event.linkedid ||
+    event.Linkedid ||
+    event.uniqueid ||
+    event.Uniqueid;
+  if (!callId) return;
+
+  const existing = queueCalls[callId];
+  if (existing?.endedAt) return;
+
+  const caller =
+    event.calleridnum ||
+    event.CallerIDNum ||
+    event.callerid ||
+    event.CallerIDName ||
+    "Unknown";
+  const destination =
+    event.exten ||
+    event.Exten ||
+    event.connectedlinenum ||
+    event.context ||
+    "incoming";
+
+  queueCalls[callId] = {
+    ...(existing || {}),
+    caller,
+    queue:
+      existing?.queue && !/^(unknown|incoming|s)$/i.test(String(existing.queue))
+        ? existing.queue
+        : destination,
+    joinedAt: existing?.joinedAt || now,
+    waitSeconds: 0,
+    answered: existing?.answered || false,
+    abandoned: existing?.abandoned || false,
+    leftAt: existing?.leftAt || null,
+    endedAt: null,
+    ringing: existing?.ringing || false,
+    ringingAgent: existing?.ringingAgent || null,
+    agent: existing?.agent || null,
+    connectedAt: existing?.connectedAt || null,
+    phase: existing?.phase || "dialing",
+  };
+
+  if (!existing) {
+    console.log(`📲 [InboundStart] ${caller} (${callId})`);
+  }
+}
+
 async function trackQueueEntry(event, now) {
   const callId = getQueueCallId(event);
   if (!callId) return;
 
-  if (!queueCalls[callId]) {
-    queueCalls[callId] = {
-      caller: event.calleridnum || event.callerid || event.calleridname || "Unknown",
-      queue: event.queue || event.queuename || "unknown",
-      joinedAt: now,
-      answered: false,
-      abandoned: false,
-      leftAt: null,
-    };
+  const waitSec = parseAmiWaitSeconds(event);
+  const joinedAt = joinedAtFromWait(now, waitSec);
+  const caller =
+    event.calleridnum ||
+    event.CallerIDNum ||
+    event.callerid ||
+    event.calleridname ||
+    event.CallerIDName ||
+    "Unknown";
+  const queue = event.queue || event.queuename || event.Queue || "unknown";
+
+  const isNew = !queueCalls[callId];
+
+  queueCalls[callId] = {
+    ...(queueCalls[callId] || {}),
+    caller,
+    queue,
+    joinedAt: queueCalls[callId]?.joinedAt || joinedAt,
+    waitSeconds: waitSec,
+    answered: queueCalls[callId]?.answered || false,
+    abandoned: queueCalls[callId]?.abandoned || false,
+    leftAt: queueCalls[callId]?.leftAt || null,
+    endedAt: null,
+    ringing: queueCalls[callId]?.ringing || false,
+    ringingAgent: queueCalls[callId]?.ringingAgent || null,
+    agent: queueCalls[callId]?.agent || null,
+    connectedAt: queueCalls[callId]?.connectedAt || null,
+    phase: "queued",
+  };
+
+  if (waitSec > 0) {
+    queueCalls[callId].joinedAt = joinedAt;
+    queueCalls[callId].waitSeconds = waitSec;
+  }
+
+  if (isNew) {
     console.log(
-      `📞 [QueueEntry] ${queueCalls[callId].caller} joined ${queueCalls[callId].queue}`
+      `📞 [QueueEntry] ${queueCalls[callId].caller} joined ${queueCalls[callId].queue} (wait ${waitSec}s)`
     );
 
     await logToQueueLog({
@@ -100,7 +219,7 @@ async function trackQueueEntry(event, now) {
       agent: null,
       event: "QUEUEENTRY",
       data1: queueCalls[callId].caller || "",
-      data2: "",
+      data2: String(waitSec || ""),
       data3: "",
       data4: "",
       data5: "",
@@ -121,6 +240,8 @@ async function trackAgentConnect(event, now) {
 
   const { id: callId, call } = resolved;
   call.answered = true;
+  call.ringing = false;
+  call.ringingAgent = null;
   call.connectedAt = now;
   call.endedAt = null;
   call.agent = event.agent || event.membername || event.interface || event.member || "";
@@ -157,30 +278,64 @@ if (ami) ami.on('managerevent', async (event) => {
   const now = new Date().toISOString().slice(0, 19).replace('T', ' '); // ✅ '2025-06-23 09:16:09'
 
   switch (event.event) {
-    case 'QueueEntry':
-    case 'QueueCallerJoin':
-      await trackQueueEntry(event, now);
+    case "Newchannel":
+      if (isCustomerInboundChannel(event)) {
+        await trackInboundCallStart(event, now);
+      }
       break;
 
-    case 'AgentConnect':
+    case "QueueStatus":
+      if (
+        String(event.eventlist || event.EventList || "").toLowerCase() === "start" ||
+        String(event.message || event.Message || "").includes("will follow")
+      ) {
+        queueStatusSyncIds = new Set();
+      }
+      break;
+
+    case "QueueEntry":
+    case "QueueCallerJoin":
+    case "QueueCallerEnter": {
+      const callId = getQueueCallId(event);
+      if (queueStatusSyncIds && callId) queueStatusSyncIds.add(String(callId));
+      await trackQueueEntry(event, now);
+      break;
+    }
+
+    case "QueueStatusComplete":
+      queueStatusSyncIds = null;
+      break;
+
+    case "AgentConnect":
       await trackAgentConnect(event, now);
       break;
 
-    case 'Connect':
+    case "Connect":
       if (event.queue || event.queuename) {
         await trackAgentConnect(event, now);
       }
       break;
 
-    case 'AgentComplete':
+    case "AgentComplete":
       {
         const resolved = resolveQueueCall(event);
         if (resolved) resolved.call.endedAt = now;
       }
       break;
 
-    case 'AgentCalled':
+    case "AgentCalled": {
+      const resolved = resolveQueueCall(event);
+      if (!resolved) break;
+      resolved.call.ringing = true;
+      resolved.call.ringingAgent =
+        event.agent ||
+        event.interface ||
+        event.membername ||
+        event.member ||
+        "";
+      resolved.call.ringingAt = now;
       break;
+    }
 
     case 'QueueCallerAbandon':
       {
@@ -214,11 +369,23 @@ if (ami) ami.on('managerevent', async (event) => {
 
     case 'Hangup':
       {
+        const callId = getQueueCallId(event);
+        if (
+          callId &&
+          queueCalls[callId] &&
+          !queueCalls[callId].answered &&
+          !queueCalls[callId].endedAt &&
+          queueCalls[callId].phase === "dialing" &&
+          isCustomerInboundChannel(event)
+        ) {
+          queueCalls[callId].endedAt = now;
+          queueCalls[callId].leftAt = now;
+        }
+
         const resolved = resolveQueueCall(event);
         if (!resolved) break;
-        const { id: callId, call } = resolved;
+        const { call } = resolved;
         if (call.endedAt) break;
-        // Only end on hangup after agent answered — queue-leg hangup fires before AgentConnect
         if (!call.answered) break;
         call.endedAt = now;
         if (!call.leftAt) call.leftAt = now;
@@ -228,13 +395,13 @@ if (ami) ami.on('managerevent', async (event) => {
   }
 });
 
-// ✅ Poll queue status every 10 seconds
+// ✅ Poll queue status every 3 seconds — lists all waiting callers via QueueEntry
 setInterval(() => {
   if (!ami) return;
-  ami.action({ Action: 'QueueStatus' }, (err) => {
-    if (err) console.error('❌ QueueStatus action error:', err);
+  ami.action({ Action: "QueueStatus" }, (err) => {
+    if (err) console.error("❌ QueueStatus action error:", err);
   });
-}, 10000);
+}, 2000);
 
 // ✅ API: Live calls (last 2 minutes)
 app.get('/api/live-calls-flow', async (req, res) => {
@@ -400,23 +567,40 @@ function getLiveQueueCalls() {
 
 function getLiveQueueCallsList() {
   const list = [];
+  const nowMs = Date.now();
+  const maxLiveMs = 35 * 60 * 1000;
+
   for (const [id, call] of Object.entries(queueCalls)) {
     if (!call || call.endedAt) continue;
 
-    const status = call.answered ? "active" : "calling";
-    const agentExt = extractExtensionFromQueueAgent(call.agent);
+    const joinedMs = new Date(call.joinedAt || 0).getTime();
+    if (Number.isFinite(joinedMs) && nowMs - joinedMs > maxLiveMs) continue;
+
+    const elapsedSeconds = Number.isFinite(joinedMs)
+      ? Math.max(0, Math.floor((nowMs - joinedMs) / 1000))
+      : 0;
+
+    let status = "calling";
+    if (call.answered) status = "active";
+    else if (call.ringing) status = "ringing";
+
+    const agentExt = extractExtensionFromQueueAgent(
+      call.agent || call.ringingAgent
+    );
 
     list.push({
       linkedid: id,
       caller: call.caller || "Unknown",
       callee: call.queue || "unknown",
       status,
+      phase: call.phase || (call.answered ? "active" : "queued"),
       call_start: call.joinedAt,
       queue_entry_time: call.joinedAt,
       call_answered: call.connectedAt || null,
       call_end: null,
       agent_extension: agentExt,
       agent_name: agentExt ? `Ext ${agentExt}` : "Waiting for agent",
+      elapsed_seconds: elapsedSeconds,
     });
   }
   return list;

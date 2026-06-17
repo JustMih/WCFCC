@@ -150,6 +150,19 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
       if (row.appname === "Queue" || row.appname === "AppQueue") {
         c.queue_entry_time = row.eventtime;
         if (!c.call_answered) c.status = "calling";
+        const queueName = String(row.appdata || "").split(",")[0];
+        if (queueName) c.callee = queueName;
+      } else if (
+        row.appname &&
+        String(row.appname).toLowerCase() !== "chanspy" &&
+        String(row.appname).toLowerCase() !== "voicemail"
+      ) {
+        c.call_start = c.call_start || row.eventtime;
+        c.queue_entry_time = c.queue_entry_time || row.eventtime;
+        if (!c.call_answered) c.status = "calling";
+        if (!c.callee || c.callee === "Incoming" || c.callee === "-") {
+          c.callee = String(row.appname);
+        }
       }
       if (String(row.appname || "").toLowerCase() === "chanspy") {
         c.supervisor_spy_active = true;

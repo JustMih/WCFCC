@@ -25,6 +25,15 @@ const {
   applyCelRowToCall,
   filterCallsForDisplay,
 } = require("../../utils/liveCallCelHelper");
+const { mergeLiveCallSources } = require("../../utils/liveCallMergeHelper");
+const { getLiveCallsFromQueueLog } = require("../queueStatsController");
+
+let getAmiLiveQueueCallsList = null;
+try {
+  getAmiLiveQueueCallsList = require("../../amiServer").getLiveQueueCallsList;
+} catch (_) {
+  getAmiLiveQueueCallsList = null;
+}
 
 /* ============================== SOCKET STATE ============================== */
 let ioInstance = null;
@@ -62,7 +71,7 @@ function resolveCalleeFromCelRow(row) {
   if (isUseful(dnid)) return String(dnid).trim();
   if (isUseful(peer)) return String(peer).trim();
   if (isUseful(exten)) return String(exten).trim();
-  return dnid || peer || exten || "-";
+  return "Incoming";
 }
 
 /* ============================== SOCKET EMITTER ============================== */
@@ -94,10 +103,11 @@ const getAllLiveCalls = async (req, res) => {
           "BRIDGE_ENTER",
         ],
         eventtime: {
-          [Op.gte]: moment().subtract(5, "minutes").toDate(),
+          [Op.gte]: moment().utcOffset("+03:00").subtract(30, "minutes").toDate(),
         },
       },
       order: [["eventtime", "ASC"]],
+      limit: 2000,
     });
 
     const calls = {};
@@ -158,31 +168,71 @@ const getAllLiveCalls = async (req, res) => {
 
     }
 
-    /* ================= FALLBACK: QUEUE_LOG ================= */
-    const callIds = Object.keys(calls);
+    /* ================= SORT + MERGE (CEL + AMI + queue_log) ================= */
+    let celLiveCalls = filterCallsForDisplay(Object.values(calls), supervisorExts).filter(
+      (c) => !c.call_end
+    );
 
-    if (callIds.length > 0) {
+    const liveCallIds = celLiveCalls
+      .map((c) => String(c.linkedid || ""))
+      .filter(Boolean);
+    if (liveCallIds.length > 0) {
       const agentConnects = await QueueLog.findAll({
         where: {
-          callid: { [Op.in]: callIds },
-          event: "AGENTCONNECT",
+          callid: { [Op.in]: liveCallIds },
+          event: { [Op.in]: ["CONNECT", "AGENTCONNECT"] },
           agent: { [Op.ne]: null },
         },
         order: [["time", "DESC"]],
         attributes: ["callid", "agent"],
       });
 
-      agentConnects.forEach((row) => {
+      for (const row of agentConnects) {
+        const call = celLiveCalls.find(
+          (c) => String(c.linkedid) === String(row.callid)
+        );
+        if (!call) continue;
         const ext = extractExtensionFromQueueAgent(row.agent);
-        if (ext && !calls[row.callid]?.agent_extension) {
-          calls[row.callid].agent_extension = ext;
+        if (ext && !call.agent_extension) {
+          call.agent_extension = ext;
         }
-      });
+        if (ext) {
+          call.call_answered = call.call_answered || new Date();
+          call.status = "active";
+        }
+      }
     }
 
-    /* ================= AGENT NAME RESOLUTION ================= */
+    let amiLiveCalls = [];
+    if (typeof getAmiLiveQueueCallsList === "function") {
+      try {
+        amiLiveCalls = getAmiLiveQueueCallsList();
+      } catch (amiErr) {
+        console.warn(
+          "[livestream] AMI live calls skipped:",
+          amiErr?.message || amiErr
+        );
+      }
+    }
+
+    let queueLogLiveCalls = [];
+    try {
+      queueLogLiveCalls = await getLiveCallsFromQueueLog();
+    } catch (qlErr) {
+      console.warn(
+        "[livestream] queue_log live calls skipped:",
+        qlErr?.message || qlErr
+      );
+    }
+
+    let mergedLiveCalls = mergeLiveCallSources(
+      celLiveCalls,
+      amiLiveCalls,
+      queueLogLiveCalls
+    );
+
     const extensionCandidates = [];
-    Object.values(calls).forEach((c) => {
+    mergedLiveCalls.forEach((c) => {
       if (c.agent_extension) extensionCandidates.push(c.agent_extension);
       if (c.caller) extensionCandidates.push(c.caller);
       const fromChan = extractExtensionFromChannel(c.agent_channel || c.channel);
@@ -191,20 +241,25 @@ const getAllLiveCalls = async (req, res) => {
 
     const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-    Object.values(calls).forEach((c) => {
+    mergedLiveCalls.forEach((c) => {
       const resolved = resolveAgentForCall(c, agentsMap);
       c.agent_extension = resolved.agent_extension;
       c.agent_name = resolved.agent_name;
     });
 
-    /* ================= SORT ================= */
-    const result = filterCallsForDisplay(Object.values(calls), supervisorExts).sort(
-      (a, b) => {
-        if (a.status === "active" && b.status !== "active") return -1;
-        if (b.status === "active" && a.status !== "active") return 1;
-        return new Date(b.call_start || 0) - new Date(a.call_start || 0);
-      }
-    );
+    mergedLiveCalls.forEach((c) => {
+      const start = c.queue_entry_time || c.call_start;
+      const startMs = new Date(start || 0).getTime();
+      c.elapsed_seconds = Number.isFinite(startMs)
+        ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
+        : 0;
+    });
+
+    const result = mergedLiveCalls.sort((a, b) => {
+      if (a.status === "active" && b.status !== "active") return -1;
+      if (b.status === "active" && a.status !== "active") return 1;
+      return new Date(b.call_start || 0) - new Date(a.call_start || 0);
+    });
 
     /* ✅ UPDATE LIVE CALL CACHE */
     liveCallsCache = result;
