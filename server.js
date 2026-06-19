@@ -450,12 +450,21 @@ io.on("connection", (socket) => {
   });
 });
 setInterval(() => {
-  if (!amiLive?.getLiveQueueCalls) return;
+  if (!amiLive?.getLiveQueueCallsList) return;
 
-  const calls = Object.values(amiLive.getLiveQueueCalls());
+  const calls = amiLive.getLiveQueueCallsList();
+  if (!calls.length) return;
+
+  const inQueue = calls.filter((c) => c.status === "calling").length;
+  const active = calls.filter((c) => c.status === "active").length;
 
   io.emit("public_dashboard_update", {
-    liveCalls: calls
+    liveCalls: calls,
+    callStatusSummary: {
+      active,
+      inQueue,
+      answered: active,
+    },
   });
 }, 2000);
 
