@@ -10,7 +10,7 @@ function buildSlaMetricsFromRow(row, date) {
   const notAnswered = Number(row?.not_answered) || 0;
 
   const serviceLevel =
-    answered > 0 ? Math.round((within20 / answered) * 100) : 0;
+    total > 0 ? Math.round((within20 / total) * 100) : 0;
   const abandonmentRate =
     total > 0 ? Math.round((notAnswered / total) * 100) : 0;
 

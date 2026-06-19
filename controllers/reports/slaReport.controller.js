@@ -1,12 +1,5 @@
 const sequelize = require("../../config/mysql_connection");
-const { buildSlaMetricsFromRow } = require("../../utils/slaMetricsHelper");
-const {
-  VIEW_NAME,
-  ensureCallSummaryReady,
-  buildDateRangeWhereBound,
-  buildSlaAggregateSelect,
-  buildCdrDestinationWhere,
-} = require("../../utils/callSummaryReportHelper");
+const { getDashboardSlaReportForRange } = require("../../utils/dashboardSlaHelper");
 const { checkSLACompliance } = require("../../services/workflowCommunicationService");
 
 /** Call-center SLA report for a date range (summary + daily breakdown) */
@@ -20,56 +13,11 @@ exports.getSlaReport = async (req, res) => {
   }
 
   try {
-    await ensureCallSummaryReady(sequelize);
-    const slaSelect = buildSlaAggregateSelect();
-    const dateFilter = buildDateRangeWhereBound(
-      "cs",
-      `${startDate} 00:00:00`,
-      `${endDate} 23:59:59`
+    const { summary, daily } = await getDashboardSlaReportForRange(
+      sequelize,
+      startDate,
+      endDate
     );
-    const destFilter = buildCdrDestinationWhere("cs");
-
-    const [summaryRow] = await sequelize.query(
-      `
-      SELECT ${slaSelect}
-      FROM ${VIEW_NAME} cs
-      WHERE ${dateFilter.sql}
-        AND ${destFilter.sql}
-      `,
-      {
-        replacements: {
-          ...dateFilter.replacements,
-          ...destFilter.replacements,
-        },
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
-
-    const dailyRows = await sequelize.query(
-      `
-      SELECT
-        DATE(cs.call_start) AS date,
-        ${slaSelect}
-      FROM ${VIEW_NAME} cs
-      WHERE ${dateFilter.sql}
-        AND ${destFilter.sql}
-      GROUP BY DATE(cs.call_start)
-      ORDER BY date ASC
-      `,
-      {
-        replacements: {
-          ...dateFilter.replacements,
-          ...destFilter.replacements,
-        },
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
-
-    const summary = buildSlaMetricsFromRow(summaryRow);
-    const daily = dailyRows.map((row) =>
-      buildSlaMetricsFromRow(row, row.date)
-    );
-
     res.json({ summary, daily });
   } catch (error) {
     console.error("Error fetching SLA report:", error);

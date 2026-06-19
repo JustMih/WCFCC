@@ -1,6 +1,7 @@
 const sequelize = require("../../config/database");
 const { QueryTypes } = require("sequelize");
 const { buildCdrDestinationWhere } = require("../../utils/callSummaryReportHelper");
+const { getTodayDashboardSlaMetrics } = require("../../utils/dashboardSlaHelper");
 const {
   ensureLostAbandonsInMissedCalls,
   countTodayMissedCalls,
@@ -287,6 +288,12 @@ const getCallSummary = async (req, res) => {
     const yearAnswered = currentYear.answered;
     const yearIvr = ivrYear;
 
+    const slaMetrics = await getTodayDashboardSlaMetrics(sequelize, {
+      answered: dayAnswered,
+      lost: lostToday,
+      dropped: droppedToday,
+    });
+
     const response = {
       currentDay: {
         answered: dayAnswered,
@@ -309,6 +316,7 @@ const getCallSummary = async (req, res) => {
         lost: lostYear,
         totalCalls: yearAnswered + yearIvr + lostYear + droppedYear,
       },
+      slaMetrics,
       timestamp: new Date().toISOString(),
     };
 
