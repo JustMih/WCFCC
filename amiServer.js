@@ -1,6 +1,7 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
+const moment = require('moment');
 const AsteriskManager = require('asterisk-manager');
 require('dotenv').config();
 const app = express();
@@ -154,7 +155,7 @@ async function logToQueueLog({ time, callid, queuename, agent, event, data1, dat
 
 // ✅ Handle AMI events
 if (ami) ami.on('managerevent', async (event) => {
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' '); // ✅ '2025-06-23 09:16:09'
+  const now = moment().utcOffset('+03:00').format('YYYY-MM-DD HH:mm:ss');
 
   switch (event.event) {
     case 'QueueEntry':
