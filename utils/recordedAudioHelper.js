@@ -110,31 +110,35 @@ function filterAndEnrichAgentRecordings(rows, agentsMap) {
 
   const deduped = dedupeByRecordingFile(rows.filter((row) => row.filename));
 
-  return deduped.map((row) => {
-    const ext = resolveAgentExtensionFromCdr(row, agentsMap);
-    const talkSeconds = Math.max(
-      Number(row.billsec) || 0,
-      Number(row.duration) || 0
-    );
-    const diskPath = resolveRecordedCallFilePath(row.filename, row.uniqueid);
+  return deduped
+    .map((row) => {
+      const ext = resolveAgentExtensionFromCdr(row, agentsMap);
+      const duration = Number(row.duration) || 0;
+      const billsec = Number(row.billsec) || 0;
+      const conversation_start_sec =
+        duration > billsec && billsec > 0 ? duration - billsec : 0;
+      const diskPath = resolveRecordedCallFilePath(row.filename, row.uniqueid);
 
-    return {
-      id: row.id,
-      cdrstarttime: row.cdrstarttime,
-      caller: row.caller,
-      dst: row.dst,
-      dcontext: row.dcontext,
-      agent_extension: ext,
-      dstchannel: row.dstchannel,
-      channel: row.channel,
-      billsec: talkSeconds || row.billsec,
-      disposition: row.disposition,
-      filename: row.filename,
-      uniqueid: row.uniqueid,
-      agent_name: ext && agentsMap[ext] ? agentsMap[ext] : null,
-      file_found: Boolean(diskPath),
-    };
-  });
+      return {
+        id: row.id,
+        cdrstarttime: row.cdrstarttime,
+        caller: row.caller,
+        dst: row.dst,
+        dcontext: row.dcontext,
+        agent_extension: ext,
+        dstchannel: row.dstchannel,
+        channel: row.channel,
+        duration,
+        billsec,
+        conversation_start_sec,
+        disposition: row.disposition,
+        filename: row.filename,
+        uniqueid: row.uniqueid,
+        agent_name: ext && agentsMap[ext] ? agentsMap[ext] : null,
+        file_found: Boolean(diskPath),
+      };
+    })
+    .filter((row) => row.agent_extension && row.billsec > 0);
 }
 
 module.exports = {
