@@ -1,5 +1,12 @@
 "use strict";
 
+function pickLatestTime(a, b) {
+  const da = a ? new Date(a).getTime() : NaN;
+  const db = b ? new Date(b).getTime() : NaN;
+  if (!Number.isFinite(da)) return b || a;
+  if (!Number.isFinite(db)) return a || b;
+  return da >= db ? a : b;
+}
 
 function collectEndedIds(celCalls) {
   const endedIds = new Set();
@@ -59,9 +66,10 @@ function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
 
           : existing.agent_name,
 
-      queue_entry_time:
-
-        call.queue_entry_time || existing.queue_entry_time || call.call_start,
+      queue_entry_time: pickLatestTime(
+        call.queue_entry_time || call.call_start,
+        existing.queue_entry_time || existing.call_start
+      ),
 
       call_start: call.call_start || existing.call_start,
 
