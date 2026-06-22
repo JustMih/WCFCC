@@ -37,6 +37,7 @@ const {
 const {
   getLiveCallsFromQueueLog,
 } = require("../queueStatsController");
+const { mergeLiveCallSources } = require("../../utils/liveCallMergeHelper");
 
 let getAmiLiveQueueCallsList = null;
 try {
@@ -44,41 +45,6 @@ try {
     require("../../amiServer").getLiveQueueCallsList;
 } catch (_) {
   getAmiLiveQueueCallsList = null;
-}
-
-/** Merge CEL, AMI memory, and queue_log live call rows by linkedid */
-function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
-  const byId = new Map();
-
-  const add = (call) => {
-    const id = String(call?.linkedid || "");
-    if (!id || call.call_end) return;
-    const existing = byId.get(id);
-    if (!existing) {
-      byId.set(id, { ...call });
-      return;
-    }
-    byId.set(id, {
-      ...existing,
-      ...call,
-      status:
-        call.status === "active" || existing.status === "active"
-          ? "active"
-          : call.status || existing.status,
-      call_answered: call.call_answered || existing.call_answered,
-      agent_extension: call.agent_extension || existing.agent_extension,
-      agent_name:
-        call.agent_name && call.agent_name !== "Waiting for agent"
-          ? call.agent_name
-          : existing.agent_name,
-    });
-  };
-
-  for (const c of celCalls) add(c);
-  for (const c of amiCalls) add(c);
-  for (const c of queueLogCalls) add(c);
-
-  return [...byId.values()];
 }
 
 /* ================= SOCKET.IO ================= */
@@ -205,7 +171,7 @@ const getPublicDashboardData = async (req, res) => {
     }
 
     const allCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
-    let liveCalls = allCalls.filter((c) => !c.call_end);
+    const liveCalls = allCalls.filter((c) => !c.call_end);
 
     const liveCallIds = liveCalls
       .map((c) => String(c.linkedid || ""))
@@ -250,7 +216,7 @@ const getPublicDashboardData = async (req, res) => {
     });
     const agentsMap = await buildAgentsNameMap(User, extensionCandidates);
 
-    celLiveCalls = liveCalls.map((call) => {
+    const enrichedLive = liveCalls.map((call) => {
       const resolved = resolveAgentForCall(call, agentsMap);
       return {
         ...call,
@@ -258,6 +224,12 @@ const getPublicDashboardData = async (req, res) => {
         agent_name: resolved.agent_name,
       };
     });
+    const enrichedById = new Map(
+      enrichedLive.map((call) => [String(call.linkedid), call])
+    );
+    celLiveCalls = allCalls.map(
+      (call) => enrichedById.get(String(call.linkedid)) || call
+    );
     } catch (celErr) {
       console.error(
         "[publicDashboard] live calls (CEL) failed:",

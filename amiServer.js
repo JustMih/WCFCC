@@ -109,6 +109,36 @@ async function trackQueueEntry(event, now) {
   }
 }
 
+async function completeQueueCall(callId, call, event, now, completeEvent) {
+  if (!call || call.endedAt) return;
+
+  call.endedAt = now;
+  if (!call.leftAt) call.leftAt = now;
+
+  const agent =
+    call.agent ||
+    event.agent ||
+    event.membername ||
+    event.interface ||
+    event.member ||
+    "";
+
+  await logToQueueLog({
+    time: now,
+    callid: callId,
+    queuename: event.queue || event.queuename || call.queue,
+    agent,
+    event: completeEvent,
+    data1: event.calleridnum || call.caller || "",
+    data2: "",
+    data3: "",
+    data4: "",
+    data5: "",
+  });
+
+  console.log(`📴 [${completeEvent}] call ended for ${call.caller}`);
+}
+
 async function trackAgentConnect(event, now) {
   const resolved = resolveQueueCall(event);
   if (!resolved) {
@@ -176,7 +206,15 @@ if (ami) ami.on('managerevent', async (event) => {
     case 'AgentComplete':
       {
         const resolved = resolveQueueCall(event);
-        if (resolved) resolved.call.endedAt = now;
+        if (resolved) {
+          await completeQueueCall(
+            resolved.id,
+            resolved.call,
+            event,
+            now,
+            'COMPLETEAGENT'
+          );
+        }
       }
       break;
 
@@ -217,13 +255,11 @@ if (ami) ami.on('managerevent', async (event) => {
       {
         const resolved = resolveQueueCall(event);
         if (!resolved) break;
-        const { call } = resolved;
+        const { id: callId, call } = resolved;
         if (call.endedAt) break;
         // Only end on hangup after agent answered — queue-leg hangup fires before AgentConnect
         if (!call.answered) break;
-        call.endedAt = now;
-        if (!call.leftAt) call.leftAt = now;
-        console.log(`📴 [Hangup] active call ended for ${call.caller}`);
+        await completeQueueCall(callId, call, event, now, 'COMPLETECALLER');
       }
       break;
   }

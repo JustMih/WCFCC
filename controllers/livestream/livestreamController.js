@@ -169,9 +169,8 @@ const getAllLiveCalls = async (req, res) => {
     }
 
     /* ================= SORT + MERGE (CEL + AMI + queue_log) ================= */
-    let celLiveCalls = filterCallsForDisplay(Object.values(calls), supervisorExts).filter(
-      (c) => !c.call_end
-    );
+    const allCelCalls = filterCallsForDisplay(Object.values(calls), supervisorExts);
+    const celLiveCalls = allCelCalls.filter((c) => !c.call_end);
 
     const liveCallIds = celLiveCalls
       .map((c) => String(c.linkedid || ""))
@@ -226,7 +225,7 @@ const getAllLiveCalls = async (req, res) => {
     }
 
     let mergedLiveCalls = mergeLiveCallSources(
-      celLiveCalls,
+      allCelCalls,
       amiLiveCalls,
       queueLogLiveCalls
     );

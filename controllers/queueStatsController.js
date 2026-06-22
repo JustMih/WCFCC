@@ -96,7 +96,27 @@ async function getLiveCallsFromQueueLog() {
     });
   }
 
-  return live;
+  if (live.length === 0) return live;
+
+  const hangupRows = await sequelize.query(
+    `
+    SELECT DISTINCT linkedid
+    FROM cel
+    WHERE eventtype = 'HANGUP'
+      AND eventtime >= :since
+      AND linkedid IS NOT NULL
+    `,
+    {
+      replacements: { since },
+      type: sequelize.QueryTypes.SELECT,
+    }
+  );
+
+  const hangupIds = new Set(
+    hangupRows.map((row) => String(row.linkedid)).filter(Boolean)
+  );
+
+  return live.filter((call) => !hangupIds.has(String(call.linkedid)));
 }
 
 function sumQueueStatusCounts(queueStatus) {
