@@ -4,7 +4,7 @@ config\config.js
 config\mysql_connection.js
 .env
 server.js
-amiserver.js
+# amiserver.js
 rtp-sniffer.js
 middleware\corsConfig.js
 # server.js
