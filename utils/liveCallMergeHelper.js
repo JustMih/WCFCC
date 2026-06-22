@@ -1,5 +1,13 @@
 "use strict";
 
+function pickLatestTime(a, b) {
+  const da = a ? new Date(a).getTime() : NaN;
+  const db = b ? new Date(b).getTime() : NaN;
+  if (!Number.isFinite(da)) return b || a;
+  if (!Number.isFinite(db)) return a || b;
+  return da >= db ? a : b;
+}
+
 /** Merge CEL, AMI memory, and queue_log live call rows by linkedid. */
 function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
   const byId = new Map();
@@ -25,8 +33,10 @@ function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
         call.agent_name && call.agent_name !== "Waiting for agent"
           ? call.agent_name
           : existing.agent_name,
-      queue_entry_time:
-        call.queue_entry_time || existing.queue_entry_time || call.call_start,
+      queue_entry_time: pickLatestTime(
+        call.queue_entry_time || call.call_start,
+        existing.queue_entry_time || existing.call_start
+      ),
       call_start: call.call_start || existing.call_start,
     });
   };
@@ -40,4 +50,5 @@ function mergeLiveCallSources(celCalls, amiCalls, queueLogCalls) {
 
 module.exports = {
   mergeLiveCallSources,
+  pickLatestTime,
 };
