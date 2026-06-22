@@ -12,10 +12,7 @@ const {
   getLostCallsDiagnostics,
 } = require("../../utils/missedCallHelper");
 const { getCdrSessionIdExpr } = require("../../utils/cdrSchemaHelper");
-const {
-  buildSlaMetricsFromRow,
-  SLA_AGGREGATE_SELECT,
-} = require("../../utils/slaMetricsHelper");
+const { getTodayDashboardSlaMetrics } = require("../../utils/dashboardSlaHelper");
 const { normalizeExtensionCandidate } = require("../../utils/agentExtensionHelper");
 const { getCountsForAgentByDirection } = require("./callSummary");
 const User = require("../../models/User");
@@ -555,19 +552,10 @@ const markLostCallAsAnswered = async (req, res) => {
   }
 };
 
-/** Call-center SLA snapshot for supervisor dashboard (today's CDR) */
+/** Call-center SLA snapshot for public dashboard (aligned with Call Statistics) */
 const getSlaMetrics = async (req, res) => {
   try {
-    const [row] = await sequelize.query(
-      `
-      SELECT ${SLA_AGGREGATE_SELECT}
-      FROM cdr
-      WHERE DATE(cdrstarttime) = CURDATE()
-      `,
-      { type: sequelize.QueryTypes.SELECT }
-    );
-
-    const metrics = buildSlaMetricsFromRow(row);
+    const metrics = await getTodayDashboardSlaMetrics(sequelize);
     res.json({
       averageResponseTime: metrics.averageResponseTime,
       averageHandleTime: metrics.averageHandleTime,

@@ -344,20 +344,36 @@ function mapRowsToCdrApiShape(rows) {
   return (rows || []).map(mapRowToCdrApiShape);
 }
 
-function buildSlaAggregateSelect() {
+function buildAgentWaitSecExpr() {
+  return buildCdrAgentWaitSelect().replace(/\s+AS agent_wait_sec\s*$/, "");
+}
+
+function buildSlaAnsweredExprs(alias = "cs") {
   const schema = getSchema();
-  const durationCol = schema.durationColumn || "total_duration";
-  const billsecCol = schema.billsecColumn || "billsec";
+  const a = alias;
 
-  const answeredExpr =
-    schema.dispositionColumn === "disposition"
-      ? "disposition = 'ANSWERED'"
-      : "cdr_status = 'ANSWERED'";
+  if (schema.dispositionColumn === "disposition") {
+    return {
+      answeredExpr: `${qualify(a, "disposition")} = 'ANSWERED'`,
+      notAnsweredExpr: `${qualify(a, "disposition")} != 'ANSWERED'`,
+    };
+  }
 
-  const notAnsweredExpr =
-    schema.dispositionColumn === "disposition"
-      ? "disposition != 'ANSWERED'"
-      : "cdr_status != 'ANSWERED'";
+  return {
+    answeredExpr: `${qualify(a, "cdr_status")} = 'ANSWERED'`,
+    notAnsweredExpr: `${qualify(a, "cdr_status")} != 'ANSWERED'`,
+  };
+}
+
+function buildSlaFromClause(alias = "cs", options = {}) {
+  return `FROM ${VIEW_NAME} ${alias}${buildCdrQueueWaitJoin(alias, options)}`;
+}
+
+function buildSlaAggregateSelect(alias = "cs") {
+  const schema = getSchema();
+  const durationCol = qualify(alias, schema.durationColumn || "total_duration");
+  const billsecCol = qualify(alias, schema.billsecColumn || "billsec");
+  const { answeredExpr, notAnsweredExpr } = buildSlaAnsweredExprs(alias);
 
   return `
   COUNT(*) AS total,
@@ -370,6 +386,36 @@ function buildSlaAggregateSelect() {
   ) AS answered_within_20s,
   SUM(CASE WHEN ${notAnsweredExpr} THEN 1 ELSE 0 END) AS not_answered,
   AVG(CASE WHEN ${answeredExpr} THEN ${durationCol} END) AS avg_response_sec,
+  AVG(CASE WHEN ${answeredExpr} THEN ${billsecCol} END) AS avg_handle_sec
+`;
+}
+
+/** SLA aggregates using queue_log speed-to-answer (agent_wait_sec), not total_duration. */
+function buildSlaAggregateSelectWithQueueWait(alias = "cs") {
+  const schema = getSchema();
+  const billsecCol = qualify(alias, schema.billsecColumn || "billsec");
+  const { answeredExpr, notAnsweredExpr } = buildSlaAnsweredExprs(alias);
+  const waitExpr = buildAgentWaitSecExpr();
+
+  return `
+  COUNT(*) AS total,
+  SUM(CASE WHEN ${answeredExpr} THEN 1 ELSE 0 END) AS answered,
+  SUM(
+    CASE
+      WHEN ${answeredExpr}
+        AND (${waitExpr}) IS NOT NULL
+        AND (${waitExpr}) <= 20
+      THEN 1
+      ELSE 0
+    END
+  ) AS answered_within_20s,
+  SUM(CASE WHEN ${notAnsweredExpr} THEN 1 ELSE 0 END) AS not_answered,
+  AVG(
+    CASE
+      WHEN ${answeredExpr} AND (${waitExpr}) IS NOT NULL THEN (${waitExpr})
+      ELSE NULL
+    END
+  ) AS avg_response_sec,
   AVG(CASE WHEN ${answeredExpr} THEN ${billsecCol} END) AS avg_handle_sec
 `;
 }
@@ -689,7 +735,11 @@ module.exports = {
   mapRowToCdrApiShape,
   mapRowsToCdrApiShape,
   enrichCdrRowsWithAgentNames,
+  buildAgentWaitSecExpr,
+  buildSlaAnsweredExprs,
+  buildSlaFromClause,
   buildSlaAggregateSelect,
+  buildSlaAggregateSelectWithQueueWait,
   buildCallSummaryAggregateSelect,
   buildAgentPerformanceFromClause,
   buildAgentPerformanceAggregateSelect,
