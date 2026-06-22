@@ -70,7 +70,6 @@ function applyCelRowToCall(c, row, supervisorExts, { isLostWaitSeconds } = {}) {
   switch (row.eventtype) {
     case "CHAN_START":
       c.call_start ??= row.eventtime;
-      c.queue_entry_time ??= row.eventtime;
       c.status = "calling";
       break;
 
