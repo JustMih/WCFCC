@@ -2,7 +2,7 @@ node_modules
 controllers\auth
 config\config.js
 config\mysql_connection.js
-.env
+# .env
 # server.js
 # amiserver.js
 rtp-sniffer.js
@@ -16,3 +16,5 @@ test-socket-connection.js
 # Lo
 
 voice
+
+.gitignore

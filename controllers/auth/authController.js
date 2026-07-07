@@ -684,7 +684,7 @@ const loginRedirect = async (req, res) => {
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
     // 4. Build MAC App URL
-    const macAppUrl = process.env.MAC_APP_URL || "https://democc.wcf.go.tz/";
+    const macAppUrl = process.env.MAC_APP_URL || "https://contactcenter.wcf.go.tz/";
     const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
       encryptedToken
     )}`;
