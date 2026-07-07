@@ -16,5 +16,5 @@ DEFAULT_USER_ID=03b12cf4-7270-4eef-a16d-5bd22fca7d6f
 PORT=5070
 
 # MAC Integration
-MAC_APP_URL=https://demomac.wcf.go.tz/
+MAC_APP_URL=https://contactcenter.wcf.go.tz/
 ENCRYPTION_KEY=yN!VkiK9#-GoUwB@eUD8l~zoY@3ccVmx
