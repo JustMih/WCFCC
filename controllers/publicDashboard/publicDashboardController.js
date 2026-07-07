@@ -84,6 +84,36 @@ async function fetchTodayLostDroppedCounts() {
   };
 }
 
+/** Agent-answered count for today (same call_summary + excludeDestS logic as call-summary API). */
+async function fetchTodayAgentAnsweredCount(dayStart, dayEnd) {
+  const destFilter = buildCdrDestinationWhere("", "called");
+  try {
+    const [row] = await sequelize.query(
+      `
+      SELECT COUNT(*) AS total FROM call_summary
+      WHERE call_start BETWEEN :startDate AND :endDate
+        AND status = 'ANSWERED' AND agent IS NOT NULL
+        AND ${destFilter.sql}
+      `,
+      {
+        replacements: {
+          startDate: dayStart,
+          endDate: dayEnd,
+          ...destFilter.replacements,
+        },
+        type: QueryTypes.SELECT,
+      }
+    );
+    return parseInt(row?.total || 0, 10);
+  } catch (err) {
+    console.error(
+      "[publicDashboard] answered count failed:",
+      err?.message || err
+    );
+    return 0;
+  }
+}
+
 /* ================= LOST / DROPPED STATS (lightweight poll) ================= */
 const getPublicDashboardCallStats = async (req, res) => {
   try {
@@ -97,10 +127,21 @@ const getPublicDashboardCallStats = async (req, res) => {
 /* ================= PUBLIC DASHBOARD ================= */
 const getPublicDashboardData = async (req, res) => {
   try {
-    /* ---------- LOST / DROPPED FIRST (always fresh even if CEL fails) ---------- */
+    /* ---------- LOST / DROPPED / ANSWERED FIRST (always fresh even if CEL fails) ---------- */
     const todayStats = await fetchTodayLostDroppedCounts();
     const lostCount = todayStats.lost;
     const droppedCount = todayStats.dropped;
+    const answeredCount = await fetchTodayAgentAnsweredCount(
+      todayStats.dayStart,
+      todayStats.dayEnd
+    );
+    const currentDay = {
+      answered: answeredCount,
+      lost: Number(lostCount || 0),
+      dropped: Number(droppedCount || 0),
+      total:
+        answeredCount + Number(lostCount || 0) + Number(droppedCount || 0),
+    };
 
     /* ---------- AGENT STATUS ---------- */
     const [onlineCount, pauseCount, offlineCount] = await Promise.all([
@@ -356,6 +397,7 @@ const monthlyCounts = await sequelize.query(
     lost: Number(lostCount || 0),
     dropped: Number(droppedCount || 0),
   },
+  currentDay,
   callStats: {
     totalCounts,
     monthlyCounts,
