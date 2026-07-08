@@ -3,17 +3,11 @@ const path = require('path');
 const fs = require('fs');
 
 const SIP_DOMAIN = process.env.SIP_DOMAIN || 'contactcenter.wcf.go.tz';
+const CONTACT_CENTER_PORTAL_URL = "https://contactcenter.wcf.go.tz/";
 
 /** Contact center portal URL for all email CTAs (always https). */
 const getContactCenterPortalUrl = () => {
-  const raw =
-    process.env.PORTAL_URL ||
-    process.env.CONTACT_CENTER_URL ||
-    'https://contactcenter.wcf.go.tz';
-  const withProtocol = /^https?:\/\//i.test(String(raw).trim())
-    ? String(raw).trim()
-    : `https://${String(raw).trim()}`;
-  return `${withProtocol.replace(/\/+$/, '')}/`;
+  return CONTACT_CENTER_PORTAL_URL;
 };
 
 /**
@@ -43,6 +37,7 @@ const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
         .btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:10px 16px;border-radius:6px;font-weight:600;font-size:13px}
         .footnote{padding:0 16px 12px;font-size:12px;color:#374151;border-top:1px solid #e5e7eb;margin-top:12px}
         .footnote p{margin:4px 0}
+        .portal-link{word-break:break-all}
       </style>
     </head>
     <body>
@@ -54,6 +49,7 @@ const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
           ${detailsHtml ? `<div class="label">Details</div><div class="details">${detailsHtml}</div>` : ''}
           <div class="footnote">
             <p>Please log in to the system to review and handle this ticket.</p>
+            <p class="portal-link">Portal link: <a href="${portalUrl}" target="_blank" rel="noopener">${portalUrl}</a></p>
             <p>Thank you,</p>
             <p>WCF Customer Care System</p>
           </div>
@@ -376,6 +372,10 @@ const sendForwardNotification = async (supervisorEmail, ticketId, unitName, just
             Please log into the system to view and process this ticket. 
             You can access the ticket management dashboard to take appropriate action.
           </p>
+          <p style="margin: 8px 0 0; word-break: break-all;">
+            Portal link:
+            <a href="${portalUrl}" target="_blank" rel="noopener">${portalUrl}</a>
+          </p>
           
           <a href="${portalUrl}" class="cta-button" target="_blank" rel="noopener">Access Dashboard</a>
         </div>
@@ -550,6 +550,10 @@ const sendRatingNotification = async (userEmail, ticketId, rating, justification
           <p style="margin: 25px 0; color: #6c757d;">
             Thank you for using our ticket management system. 
             The coordinator has reviewed and rated your ticket based on the provided information.
+          </p>
+          <p style="margin: 8px 0 0; word-break: break-all;">
+            Portal link:
+            <a href="${portalUrl}" target="_blank" rel="noopener">${portalUrl}</a>
           </p>
           
           <a href="${portalUrl}" class="cta-button" target="_blank" rel="noopener">View Ticket Details</a>

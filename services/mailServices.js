@@ -15,6 +15,7 @@ const transporter = nodemailer.createTransport({
 const sendTicketEmail = async (ticket, recipientEmail) => {
   try {
     const subjectLine = `New Ticket Assigned: ${ticket.subject}`;
+    const portalUrl = getContactCenterPortalUrl();
     const message = `
       Hello,
 
@@ -26,17 +27,45 @@ const sendTicketEmail = async (ticket, recipientEmail) => {
       Description: ${ticket.description}
 
       Please log into the system to review and take action:
-      ${getContactCenterPortalUrl()}
+      ${portalUrl}
 
       Regards,
       TTCL Support Desk
+    `;
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+        <p>Hello,</p>
+        <p>A new ticket has been assigned to you.</p>
+        <ul>
+          <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
+          <li><strong>Subject:</strong> ${ticket.subject}</li>
+          <li><strong>Category:</strong> ${ticket.category}</li>
+          <li><strong>Description:</strong> ${ticket.description}</li>
+        </ul>
+        <p>
+          Please log into the system to review and take action:
+          <a href="${portalUrl}" target="_blank" rel="noopener">${portalUrl}</a>
+        </p>
+        <p>
+          <a
+            href="${portalUrl}"
+            target="_blank"
+            rel="noopener"
+            style="display:inline-block;background:#0ea5e9;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;font-weight:600;"
+          >
+            Open Call Center System
+          </a>
+        </p>
+        <p>Regards,<br />TTCL Support Desk</p>
+      </div>
     `;
 
     await transporter.sendMail({
       from: '"TTCL Support Desk" <no-reply@ttcl.go.tz>',
       to: recipientEmail,
       subject: subjectLine,
-      text: message
+      text: message,
+      html,
     });
 
     console.log('📧 Email sent to:', recipientEmail);
