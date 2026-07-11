@@ -6344,6 +6344,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
         .content{padding:20px}.label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin-bottom:6px}
         .details{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;font-size:13px;color:#374151}
         .btn-wrap{padding:0 20px 20px}.btn{display:inline-block;background:#0ea5e9;color:#fff!important;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;font-size:14px}
+        .portal-link{padding:0 20px 16px;word-break:break-all;color:#374151}
       </style></head>
       <body><div class="card">
         <div class="header">${notifySubject}</div>
@@ -6356,6 +6357,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
         <div class="btn-wrap">
           <a class="btn" href="${portalUrl}" target="_blank" rel="noopener">Open in Portal</a>
         </div>
+        <div class="portal-link">Portal link: <a href="${portalUrl}" target="_blank" rel="noopener">${portalUrl}</a></div>
       </div></body></html>`;
     
     const notifyMsg = `Ticket ${ticket.ticket_id} has been reversed by ${attended_by_name} (${attended_by_role}) to ${prevUser ? prevUser.full_name : 'Unknown'}.`;
