@@ -91,6 +91,10 @@ const emitLiveCall = (callData) => {
 /* ============================== LIVE CALL FETCH ============================== */
 const getAllLiveCalls = async (req, res) => {
   try {
+    if (Date.now() - lastCacheRefresh < 2000 && lastCacheRefresh > 0) {
+      return res.json(liveCallsCache);
+    }
+
     /* ---------- FETCH CEL EVENTS ---------- */
     const events = await CEL.findAll({
       where: {
@@ -156,14 +160,9 @@ const getAllLiveCalls = async (req, res) => {
           );
         }
 
-        // 🔒 SANITIZE spyCallId (CRITICAL)
+        // SANITIZE spyCallId (CRITICAL)
         if (c.spyCallId === "-" || c.spyCallId === "") {
           c.spyCallId = null;
-        }
-
-        // Emit live updates
-        if (["CHAN_START", "ANSWER", "BRIDGE_ENTER"].includes(row.eventtype)) {
-          emitLiveCall({ ...c });
         }
 
     }
