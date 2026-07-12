@@ -28,6 +28,9 @@ const {
   getAgentAvailabilityMetrics,
   PAUSE_BLOCKED_MESSAGE,
 } = require("../../utils/agentAvailabilityHelper");
+const {
+  syncAgentQueuePauseFromStatus,
+} = require("../../services/queuePauseService");
 const { isTodayPublicHoliday } = require("../../utils/holidayCheckHelper");
 
 const createUser = async (req, res) => {
@@ -1858,11 +1861,16 @@ const updateUserStatus = async (req, res) => {
       attributes: [
         "id",
         "status",
+        "extension",
         "pause_activity",
         "pause_started_at",
         "pause_allowed_seconds",
       ],
     });
+
+    if (user?.extension) {
+      syncAgentQueuePauseFromStatus(user.extension, user.status);
+    }
 
     const metrics = user ? computePauseLiveMetrics(user) : {};
 

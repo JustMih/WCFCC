@@ -1,0 +1,59 @@
+; =============================================================================
+; WCF Call Center — recommended Asterisk queue settings (REFERENCE ONLY)
+; =============================================================================
+; Apply on the Asterisk/FreePBX host, then reload queues:
+;   asterisk -rx "queue reload all"
+;   or: module reload app_queue.so
+;
+; Goal: shorten the gap where the agent has answered WebRTC but the caller
+; still hears ringback/MOH until AgentConnect bridges the legs.
+;
+; Do NOT copy blindly into production without reviewing queue names and
+; member interfaces (this PBX uses PJSIP/{extension} members).
+; =============================================================================
+
+[general]
+persistentmembers = yes
+autofill = yes
+shared_lastcall = yes
+
+; Example inbound ACD queue — rename to match your live queue (e.g. support)
+[wcf-inbound]
+; Do not ring agents already on a call
+ringinuse = no
+
+; Round-robin with memory — fair distribution after last answered agent
+strategy = rrmemory
+
+; How long to ring one agent before trying the next (seconds)
+timeout = 20
+
+; Delay before retrying the same agent after timeout
+retry = 2
+
+; Wrap-up time after hangup before agent can take another call
+wrapuptime = 5
+
+; Announce position / hold time only if needed (adds delay before bridge)
+announce-frequency = 0
+announce-holdtime = no
+announce-position = no
+
+; Music on Hold — use a NEUTRAL hold class, not ringback-sounding audio.
+; Ring-like MOH makes callers think they are still ringing after the agent
+; already answered in the UI.
+musicclass = default
+; Prefer something like: musicclass = wcf-hold
+; Avoid: musicclass = ringback  (or any class that plays PSTN ring tones)
+
+; Join empty / leave when empty — tune to ops policy
+joinempty = yes
+leavewhenempty = no
+
+; Member example (realtime or static) — must match WCF QueuePause Interface:
+; member => PJSIP/1001
+; member => PJSIP/1002
+
+; Dialplan tip (extensions.conf / FreePBX custom):
+; After Queue() answers to an agent, avoid extra Playback()/Wait() before Bridge.
+; Extra dialplan after agent answer delays AgentConnect and keeps caller on MOH.

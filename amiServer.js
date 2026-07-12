@@ -89,6 +89,10 @@ async function trackQueueEntry(event, now) {
       answered: false,
       abandoned: false,
       leftAt: null,
+      tJoinedMs: Date.now(),
+      tAgentCalledMs: null,
+      tCallerLeaveMs: null,
+      tAgentConnectMs: null,
     };
     console.log(
       `📞 [QueueEntry] ${queueCalls[callId].caller} joined ${queueCalls[callId].queue}`
@@ -155,6 +159,24 @@ async function trackAgentConnect(event, now) {
   call.connectedAt = now;
   call.endedAt = null;
   call.agent = event.agent || event.membername || event.interface || event.member || "";
+  call.tAgentConnectMs = Date.now();
+
+  const agentCalledToConnect =
+    call.tAgentCalledMs != null
+      ? call.tAgentConnectMs - call.tAgentCalledMs
+      : null;
+  const callerLeaveToConnect =
+    call.tCallerLeaveMs != null
+      ? call.tAgentConnectMs - call.tCallerLeaveMs
+      : null;
+
+  console.log(
+    `[QueueTiming] callId=${callId} agentCalled_to_connect=${
+      agentCalledToConnect != null ? `${agentCalledToConnect}ms` : "n/a"
+    } callerLeave_to_connect=${
+      callerLeaveToConnect != null ? `${callerLeaveToConnect}ms` : "n/a"
+    }`
+  );
   console.log(`✅ [AgentConnect] ${call.caller} connected to agent (${call.agent})`);
 
   await logToQueueLog({
@@ -219,6 +241,23 @@ if (ami) ami.on('managerevent', async (event) => {
       break;
 
     case 'AgentCalled':
+      {
+        const resolved = resolveQueueCall(event);
+        if (resolved) {
+          resolved.call.tAgentCalledMs = Date.now();
+          if (!resolved.call.agent) {
+            resolved.call.agent =
+              event.agent ||
+              event.membername ||
+              event.interface ||
+              event.member ||
+              "";
+          }
+          console.log(
+            `[QueueTiming] AgentCalled callId=${resolved.id} agent=${resolved.call.agent || "?"}`
+          );
+        }
+      }
       break;
 
     case 'QueueCallerAbandon':
@@ -249,6 +288,15 @@ if (ami) ami.on('managerevent', async (event) => {
     case 'QueueCallerLeave':
       // Caller left queue — often fires BEFORE AgentConnect when bridging to agent.
       // Do not end here; Hangup / AgentComplete / Abandon handle real termination.
+      {
+        const resolved = resolveQueueCall(event);
+        if (resolved) {
+          resolved.call.tCallerLeaveMs = Date.now();
+          console.log(
+            `[QueueTiming] QueueCallerLeave callId=${resolved.id}`
+          );
+        }
+      }
       break;
 
     case 'Hangup':

@@ -1,0 +1,15 @@
+[33mcommit 242d560f5185dd1abbc619194e82a651a09299b6[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Merge: d0fde380 259962d6
+Author: Mbao <mikidadi.mbao@ttcl.co.tz>
+Date:   Sat Jul 11 12:54:40 2026 +0300
+
+    Merge branch 'main' of https://github.com/JustMih/WCFCC
+
+ .env                                   | 23 [32m+++++++++++++[m[31m----------[m
+ config/config.js                       |  6 [32m++++[m[31m--[m
+ config/database.js                     |  4 [32m++++[m
+ config/mysql_connection.js             |  2 [32m+[m[31m-[m
+ controllers/ticket/ticketController.js |  2 [32m++[m
+ services/emailService.js               | 20 [32m++++++++++++[m[31m--------[m
+ services/mailServices.js               | 33 [32m+++++++++++++++++++++++++++++++[m[31m--[m
+ 7 files changed, 67 insertions(+), 23 deletions(-)
