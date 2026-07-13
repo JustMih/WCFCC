@@ -4,15 +4,15 @@ APIs for external systems (ESSP portal, WCF portal, etc.) to interact with the c
 
 **Production**
 
-- ESSP create ticket: `https://contactcenter.wcf.go.tz/api/essp`
-- External ticket status: `https://contactcenter.wcf.go.tz/api/external`
+- ESSP create ticket: `https://democc.wcf.go.tz/api/essp`
+- External ticket status: `https://democc.wcf.go.tz/api/external`
 
 **Demo / staging (internal DNS or hosts file)**
 
-- ESSP create ticket: `https://contactcenter.wcf.go.tz/api/essp`
-- External ticket status: `https://contactcenter.wcf.go.tz/api/external`
+- ESSP create ticket: `https://democc.wcf.go.tz/api/essp`
+- External ticket status: `https://democc.wcf.go.tz/api/external`
 
-> `contactcenter.wcf.go.tz` is on the WCF internal network (typically `192.168.21.69`). Use VPN/office DNS, or map the host locally (see below) before calling with curl.
+> `democc.wcf.go.tz` is on the WCF internal network (typically `192.168.21.70`). Use VPN/office DNS, or map the host locally (see below) before calling with curl.
 
 ---
 
@@ -143,7 +143,7 @@ Wrap fields in a `payload` object (recommended) or send flat JSON.
 ### cURL example (production)
 
 ```bash
-curl -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
+curl -X POST "https://democc.wcf.go.tz/api/essp/create-ticket" \
   -H "Content-Type: application/json" \
   -H "x-api-key: YOUR_ESSP_API_KEY" \
   -d '{
@@ -160,15 +160,15 @@ curl -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
   }'
 ```
 
-### cURL example (demo — `contactcenter.wcf.go.tz`)
+### cURL example (demo — `democc.wcf.go.tz`)
 
 1. **Resolve the host** (pick one):
    - Connect to WCF VPN / use internal DNS, or
-   - On your Mac, add to `/etc/hosts`: `192.168.21.69 contactcenter.wcf.go.tz`
+   - On your Mac, add to `/etc/hosts`: `192.168.21.70 democc.wcf.go.tz`
 2. **Call the API** (use `-k` only if the demo server uses a self-signed TLS certificate):
 
 ```bash
-curl -k -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
+curl -k -X POST "https://democc.wcf.go.tz/api/essp/create-ticket" \
   -H "Content-Type: application/json" \
   -H "x-api-key: YOUR_ESSP_API_KEY" \
   -d '{
@@ -185,7 +185,7 @@ curl -k -X POST "https://contactcenter.wcf.go.tz/api/essp/create-ticket" \
   }'
 ```
 
-Ensure `VALID_API_KEYS` on the **contactcenter server** includes the same key you send in `x-api-key`.
+Ensure `VALID_API_KEYS` on the **democc server** includes the same key you send in `x-api-key`.
 
 ### Assignment rules (ESSP)
 

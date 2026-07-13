@@ -222,7 +222,7 @@ async function isExtensionReachable(ami, extension) {
     const sipDomain =
       process.env.SIP_DOMAIN ||
       process.env.SIP_DOMAIN_CONFIG ||
-      "contactcenter.wcf.go.tz";
+      "democc.wcf.go.tz";
 
     return {
       reachable: false,
