@@ -2,9 +2,9 @@ node_modules
 controllers\auth\authController.js
 config\config.js
 config\mysql_connection.js
-# .env
+.env
 # server.js
-# amiserver.js
+amiserver.js
 rtp-sniffer.js
 middleware\corsConfig.js
 # server.js
