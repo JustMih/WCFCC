@@ -31,7 +31,7 @@ const crypto = require('crypto');
   };
 
   const encryptedToken = encryptWithOpenSSL(payload);
-  const macAppUrl = 'https://democc.wcf.go.tz/';
+  const macAppUrl = 'https://contactcenter.wcf.go.tz/';
   const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(encryptedToken)}`;
 
   console.log('🔐 Encrypted Token:', encryptedToken);

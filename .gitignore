@@ -3,7 +3,7 @@ controllers\auth\authController.js
 config\config.js
 config\mysql_connection.js
 # .env
-# server.js
+server.js
 amiserver.js
 rtp-sniffer.js
 middleware\corsConfig.js
@@ -16,5 +16,6 @@ test-socket-connection.js
 # Lo
 
 voice
+recorded
 
 .gitignore
