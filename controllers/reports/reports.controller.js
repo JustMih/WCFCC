@@ -435,7 +435,10 @@ exports.getTicketReport = async (req, res) => {
       WHERE t.created_at BETWEEN :startDate AND :endDate
     `;
 
-    const replacements = { startDate, endDate };
+    const replacements = {
+      startDate: `${startDate} 00:00:00`,
+      endDate: `${endDate} 23:59:59`,
+    };
 
     if (status && status !== "all") {
       query += ` AND t.status = :status`;
@@ -688,7 +691,10 @@ exports.getTicketAssignmentsReport = async (req, res) => {
       WHERE ta.created_at BETWEEN :startDate AND :endDate
     `;
 
-    const replacements = { startDate, endDate };
+    const replacements = {
+      startDate: `${startDate} 00:00:00`,
+      endDate: `${endDate} 23:59:59`,
+    };
 
     query += ` ORDER BY ta.created_at DESC`;
 

@@ -978,8 +978,12 @@ async function fetchQueueAbandonSessionsRaw(
 ) {
   const { queueOnly = true } = options;
   const { QueryTypes } = require("sequelize");
-  const { getCdrSessionIdExpr } = require("./cdrSchemaHelper");
+  const {
+    getCdrSessionIdExpr,
+    cdrHasLinkedIdColumn,
+  } = require("./cdrSchemaHelper");
   const sessionIdExpr = await getCdrSessionIdExpr(sequelize, "c");
+  const hasCdrLinkedid = await cdrHasLinkedIdColumn(sequelize);
   /** Asterisk often writes queue timeout/exit as ANSWERED, not NO ANSWER. */
   const queueDispositionFilter = queueOnly
     ? `AND c.lastapp IN ('Queue', 'AppQueue')
@@ -1121,20 +1125,23 @@ async function fetchQueueAbandonSessionsRaw(
     }
 
     if (orphanCallIds.length > 0) {
+      const orphanIdFilter = hasCdrLinkedid
+        ? `c.uniqueid IN (:ids) OR c.linkedid IN (:ids)`
+        : `c.uniqueid IN (:ids)`;
       const callerRows = await sequelize.query(
         `
         SELECT
-          COALESCE(NULLIF(TRIM(linkedid), ''), uniqueid) AS session_id,
+          ${sessionIdExpr} AS session_id,
           MIN(
             COALESCE(
-              NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(clid, '<', -1), '>', 1)), ''),
-              NULLIF(TRIM(src), ''),
-              NULLIF(TRIM(clid), '')
+              NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(c.clid, '<', -1), '>', 1)), ''),
+              NULLIF(TRIM(c.src), ''),
+              NULLIF(TRIM(c.clid), '')
             )
           ) AS caller_raw
-        FROM cdr
-        WHERE uniqueid IN (:ids) OR linkedid IN (:ids)
-        GROUP BY COALESCE(NULLIF(TRIM(linkedid), ''), uniqueid)
+        FROM cdr c
+        WHERE ${orphanIdFilter}
+        GROUP BY ${sessionIdExpr}
         `,
         {
           replacements: { ids: orphanCallIds },

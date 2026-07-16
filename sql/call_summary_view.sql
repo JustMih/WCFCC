@@ -1,13 +1,14 @@
 -- One row per call session (not per queue ring attempt).
--- Asterisk writes many cdr rows per uniqueid/linkedid; this view sums duration.
+-- Asterisk writes many cdr rows per uniqueid; this view sums duration.
+-- This environment's cdr table has uniqueid but no linkedid — group by uniqueid only.
 -- Run on the WCF MySQL database after backup:
---   mysql -u user -p wcf_db < sql/call_summary_view.sql
+--   mysql -u user -p asterisk < sql/call_summary_view.sql
 
 DROP VIEW IF EXISTS call_summary;
 
 CREATE VIEW call_summary AS
 SELECT
-  COALESCE(NULLIF(TRIM(c.linkedid), ''), c.uniqueid) AS uniqueid,
+  c.uniqueid AS uniqueid,
   MIN(c.cdrstarttime) AS call_start,
   MAX(COALESCE(c.cdrendtime, c.cdrstarttime)) AS call_end,
   MIN(
@@ -92,4 +93,4 @@ SELECT
     1
   ) AS queue
 FROM cdr c
-GROUP BY COALESCE(NULLIF(TRIM(c.linkedid), ''), c.uniqueid);
+GROUP BY c.uniqueid;
