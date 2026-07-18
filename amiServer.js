@@ -32,7 +32,7 @@ if (!AMI_PASS) {
 
 // ✅ Connect to MySQL (CEL + queue_log)
 const db = mysql.createPool({
-  host: process.env.DB_HOST || '192.168.21.70',
+  host: process.env.DB_HOST || '192.168.21.69',
   user: process.env.DB_USER || 'asterisk',
   password: process.env.DB_PASS || "Wcf@1234",
   database: process.env.DB_NAME || "asterisk",
