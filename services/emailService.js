@@ -2,8 +2,8 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 
-const SIP_DOMAIN = process.env.SIP_DOMAIN || 'contactcenter.wcf.go.tz';
-const CONTACT_CENTER_PORTAL_URL = "https://contactcenter.wcf.go.tz/";
+const SIP_DOMAIN = process.env.SIP_DOMAIN || 'democc.wcf.go.tz';
+const CONTACT_CENTER_PORTAL_URL = "https://democc.wcf.go.tz/";
 
 /** Contact center portal URL for all email CTAs (always https). */
 const getContactCenterPortalUrl = () => {

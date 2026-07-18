@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const {
   getDailyLogoutCronExpression,
   getDailyLogoutTimeLabel,
-  runDailyAgentLogout,
+  runDailyUserLogout,
 } = require("../utils/dailyLogoutHelper");
 
 const cronExpr = getDailyLogoutCronExpression();
@@ -12,7 +12,7 @@ cron.schedule(
   cronExpr,
   async () => {
     try {
-      await runDailyAgentLogout();
+      await runDailyUserLogout();
     } catch (err) {
       console.error("[DailyLogout] Job failed:", err);
     }
@@ -21,5 +21,5 @@ cron.schedule(
 );
 
 console.log(
-  `[DailyLogout] Cron scheduled: ${cronExpr} (Africa/Dar_es_Salaam, target ${timeLabel})`
+  `[DailyLogout] All-user cron scheduled: ${cronExpr} (Africa/Dar_es_Salaam, target ${timeLabel})`
 );

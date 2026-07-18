@@ -261,21 +261,13 @@ const login = async (req, res) => {
       });
     }
 
-    // Step 5: Generate JWT token (agents expire at next daily logout; others 24h)
-    const isAgent = String(user.role || "").toLowerCase() === "agent";
-    let expiresAt;
-    let jwtExpiresIn;
-    if (isAgent) {
-      const secondsUntilLogout = getSecondsUntilNextDailyLogout();
-      expiresAt = getNextDailyLogoutDate().getTime();
-      jwtExpiresIn = secondsUntilLogout;
-      console.log(
-        `[Agent login] Daily logout at ${getDailyLogoutTimeLabel()} EAT | expiresAt: ${new Date(expiresAt).toISOString()}`
-      );
-    } else {
-      expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-      jwtExpiresIn = "24h";
-    }
+    // Step 5: Generate JWT token (all roles expire at next daily logout)
+    const secondsUntilLogout = getSecondsUntilNextDailyLogout();
+    const expiresAt = getNextDailyLogoutDate().getTime();
+    const jwtExpiresIn = secondsUntilLogout;
+    console.log(
+      `[Login] Daily logout at ${getDailyLogoutTimeLabel()} EAT | role: ${user.role} | expiresAt: ${new Date(expiresAt).toISOString()}`
+    );
 
     const token = jwt.sign(
       { userId: user.id, role: user.role },

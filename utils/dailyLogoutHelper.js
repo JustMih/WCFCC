@@ -2,6 +2,9 @@ const moment = require("moment");
 const { Op } = require("sequelize");
 const User = require("../models/User");
 const AgentPauseSession = require("../models/agent_pause_sessions");
+const {
+  syncAgentQueuePauseFromStatus,
+} = require("../services/queuePauseService");
 
 const TZ_OFFSET = "+03:00";
 const DEFAULT_LOGOUT_TIME = "02:00";
@@ -72,32 +75,34 @@ async function closeActivePauseSession(userId, endedAt = new Date()) {
 }
 
 /**
- * Force-logout all agents still online or on pause (DB + pause sessions).
+ * Force-logout all users still online or on pause (DB + pause sessions).
  */
-async function runDailyAgentLogout() {
+async function runDailyUserLogout() {
   const AgentStatus = require("../models/agents_status");
   const now = new Date();
   const timeLabel = getDailyLogoutTimeLabel();
 
-  console.log(`[DailyLogout] Running scheduled agent logout (${timeLabel} EAT)...`);
+  console.log(`[DailyLogout] Running scheduled user logout (${timeLabel} EAT)...`);
 
-  const activeAgents = await User.findAll({
+  const activeUsers = await User.findAll({
     where: {
-      role: "agent",
       status: { [Op.in]: ["online", "pause"] },
     },
-    attributes: ["id", "status"],
+    attributes: ["id", "role", "status", "extension"],
   });
 
-  for (const agent of activeAgents) {
-    if (agent.status === "pause") {
-      await closeActivePauseSession(agent.id, now);
+  for (const user of activeUsers) {
+    if (user.status === "pause") {
+      await closeActivePauseSession(user.id, now);
+    }
+    if (user.role === "agent" && user.extension) {
+      syncAgentQueuePauseFromStatus(user.extension, "offline");
     }
   }
 
   const [userCount] = await User.update(
     { status: "offline" },
-    { where: { role: "agent", status: { [Op.in]: ["online", "pause"] } } }
+    { where: { status: { [Op.in]: ["online", "pause"] } } }
   );
 
   const [agentStatusCount] = await AgentStatus.update(
@@ -106,10 +111,12 @@ async function runDailyAgentLogout() {
   );
 
   console.log(
-    `[DailyLogout] ${userCount} agent(s) set offline; ${agentStatusCount} AgentStatus row(s) updated.`
+    `[DailyLogout] ${userCount} user(s) set offline; ${agentStatusCount} AgentStatus row(s) updated.`
   );
-  return { userCount, agentStatusCount, activeBefore: activeAgents.length };
+  return { userCount, agentStatusCount, activeBefore: activeUsers.length };
 }
+
+const runDailyAgentLogout = runDailyUserLogout;
 
 module.exports = {
   DEFAULT_LOGOUT_TIME,
@@ -118,5 +125,6 @@ module.exports = {
   getSecondsUntilNextDailyLogout,
   getDailyLogoutCronExpression,
   getDailyLogoutTimeLabel,
+  runDailyUserLogout,
   runDailyAgentLogout,
 };

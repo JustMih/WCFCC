@@ -52,7 +52,7 @@ I've successfully integrated the login redirect functionality into your "View Cl
 
 ### 4. MAC App Opens
 ```javascript
-// Frontend opens: https://contactcenter.wcf.go.tz/login_redirect?token=encrypted_data
+// Frontend opens: https://democc.wcf.go.tz/login_redirect?token=encrypted_data
 window.open(response.data.success.url, '_blank');
 ```
 
@@ -116,7 +116,7 @@ import ClaimRedirectButton from './ClaimRedirectButton';
 ### Backend Environment Variables
 Add to your `.envt` file:
 ```env
-MAC_APP_URL="https://contactcenter.wcf.go.tz/"
+MAC_APP_URL="https://democc.wcf.go.tz/"
 ENCRYPTION_KEY="your-secret-key-32-chars-long!!"
 ```
 
@@ -176,7 +176,7 @@ function TestPage() {
 {
   "success": {
     "message": "Continue on MAC!",
-    "url": "https://contactcenter.wcf.go.tz/login_redirect?token=encrypted_data"
+    "url": "https://democc.wcf.go.tz/login_redirect?token=encrypted_data"
   }
 }
 ```
