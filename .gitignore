@@ -1,5 +1,5 @@
 node_modules
-controllers\auth\authController.js
+# controllers\auth\authController.js
 # config\config.js
 # config\mysql_connection.js
 # .env
@@ -20,18 +20,18 @@ controllers\auth\authController.js
 
 .gitignore
 
-# .env
-# .env_ttcl
-# .envt
-# amiServer.js
-# config/config.js
-# config/mysql_connection.js
-# controllers/ticket/ticketControllerOG.js
-# documentions/CLAIM_REDIRECT_INTEGRATION.md
-# documentions/external-api.md
-# mac-login.js
-# middleware/corsConfig.js
-# services/amiChannelHelper.js
-# services/emailService.js
-# utils/celPoller.js
+.env
+.env_ttcl
+.envt
+amiServer.js
+config/config.js
+config/mysql_connection.js
+controllers/ticket/ticketControllerOG.js
+documentions/CLAIM_REDIRECT_INTEGRATION.md
+documentions/external-api.md
+mac-login.js
+middleware/corsConfig.js
+services/amiChannelHelper.js
+services/emailService.js
+utils/celPoller.js
 recorded

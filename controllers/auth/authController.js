@@ -13,6 +13,134 @@ const {
   getSecondsUntilNextDailyLogout,
   getDailyLogoutTimeLabel,
 } = require("../../utils/dailyLogoutHelper");
+const {
+  syncAgentQueuePauseFromStatus,
+} = require("../../services/queuePauseService");
+
+const SUPER_ADMIN_EMAIL = "superadmin@wcf.go.tz";
+
+function isLdapEnabled() {
+  const v = process.env.USE_LDAP;
+  if (v == null || String(v).trim() === "") return true;
+  return !/^false$/i.test(String(v).trim());
+}
+
+function resolveSamAccountName(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (raw.includes("\\")) return raw.split("\\").pop();
+  if (raw.includes("@")) return raw.split("@")[0];
+  return raw;
+}
+
+function ldapAttr(ldapUser, key) {
+  const value = ldapUser?.[key];
+  if (Array.isArray(value)) return value[0] || "";
+  return value != null ? String(value).trim() : "";
+}
+
+const authenticateActiveDirectory = async (samAccountName, password) => {
+  const url = process.env.LDAP_URL || "ldap://192.168.1.15";
+  const baseDN = process.env.LDAP_BASE_DN || "dc=wcf,dc=go,dc=tz";
+  const domain = process.env.LDAP_DOMAIN || "WCF";
+  const bindDN = `${domain}\\${samAccountName}`;
+  const client = new Client({ url });
+
+  try {
+    await client.bind(bindDN, password);
+    console.log(`LDAP bind successful for ${samAccountName} (${url})`);
+
+    const { searchEntries } = await client.search(baseDN, {
+      scope: "sub",
+      filter: `(sAMAccountName=${samAccountName})`,
+      attributes: ["employeeID", "mail", "displayName"],
+    });
+
+    if (searchEntries.length === 0) {
+      throw new Error("User not found in LDAP.");
+    }
+
+    return searchEntries[0];
+  } catch (error) {
+    console.error("LDAP error:", error?.message || error);
+    throw new Error("Failed to authenticate user in Active Directory.");
+  } finally {
+    await client.unbind();
+  }
+};
+
+async function findOrCreateUserFromLdap(samAccountName, ldapUser) {
+  const mail = ldapAttr(ldapUser, "mail");
+  const displayName = ldapAttr(ldapUser, "displayName") || samAccountName;
+  const fallbackEmail = `${samAccountName}@wcf.go.tz`;
+  const emailCandidates = [mail, fallbackEmail].filter(Boolean);
+
+  let user = await User.findOne({
+    where: { username: samAccountName },
+  });
+
+  if (!user && emailCandidates.length > 0) {
+    user = await User.findOne({
+      where: { email: { [Op.in]: emailCandidates } },
+    });
+  }
+
+  if (!user) {
+    const email = mail || fallbackEmail;
+    user = await User.create({
+      full_name: displayName,
+      email,
+      username: samAccountName,
+      password: "wcf12345",
+      extension: null,
+      role: "agent",
+      isActive: false,
+    });
+    console.log(`User ${samAccountName} created with inactive status.`);
+  }
+
+  return user;
+}
+
+async function authenticateWithLdap(username, password) {
+  const samAccountName = resolveSamAccountName(username);
+  if (!samAccountName) {
+    throw new Error("Invalid username.");
+  }
+  const ldapUser = await authenticateActiveDirectory(samAccountName, password);
+  const user = await findOrCreateUserFromLdap(samAccountName, ldapUser);
+  return { user, samAccountName, ldapUser };
+}
+
+async function authenticateWithDatabase(email, password) {
+  const user = await User.findOne({
+    where: { email },
+  });
+
+  if (!user) {
+    return { error: "Authentication failed. User not found.", status: 400 };
+  }
+
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) {
+    return {
+      error: "Authentication failed. Invalid password.",
+      status: 400,
+      user,
+    };
+  }
+
+  if (user.isActive === false) {
+    return {
+      error:
+        "Your account is inactive. Please wait for the super admin to activate it.",
+      status: 400,
+      user,
+    };
+  }
+
+  return { user };
+}
 
 const registerSuperAdmin = async () => {
   try {
@@ -27,7 +155,7 @@ const registerSuperAdmin = async () => {
     const hashedPassword = await bcrypt.hash("superadmin123", 10);
     await User.create({
       full_name: "Super Admin",
-      email: "superadmin@wcf.go.tz",
+      email: SUPER_ADMIN_EMAIL,
       password: hashedPassword,
       role: "super-admin",
       isActive: true,
@@ -35,41 +163,6 @@ const registerSuperAdmin = async () => {
     console.log("Super Admin created successfully");
   } catch (error) {
     console.error("Error creating Super Admin:", error);
-  }
-};
-
-const authenticateActiveDirectory = async (username, password) => {
-  const url = "ldap://10.0.7.78";
-  const bindDN = `TTCLHQ\\${username}`;
-  const baseDN = "dc=ttcl,dc=co,dc=tz";
-  // const url = "ldap://192.168.1.15";
-  // const baseDN = "dc=wcf,dc=go,dc=tz";
-  // const bindDN = `WCF\\${username}`;
-  const client = new Client({ url });
-
-  try {
-    // LDAP bind (authenticate user)
-    await client.bind(bindDN, password);
-    console.log(`LDAP bind successful for ${username}`);
-
-    // LDAP search for user
-    const { searchEntries } = await client.search(baseDN, {
-      scope: "sub",
-      filter: `(sAMAccountName=${username})`,
-      attributes: ["employeeID", "mail"],
-    });
-
-    if (searchEntries.length === 0) {
-      throw new Error("User not found in LDAP.");
-    }
-
-    const ldapUser = searchEntries[0];
-    return ldapUser; // Successfully found user in Active Directory
-  } catch (error) {
-    console.error("LDAP error:", error);
-    throw new Error("Failed to authenticate user in Active Directory.");
-  } finally {
-    await client.unbind();
   }
 };
 
@@ -121,12 +214,10 @@ const login = async (req, res) => {
     let user;
     let authSource = "database";
 
-    // Step 1: Check if username is superadmin
-    if (username === "superadmin@wcf.go.tz") {
+    if (username === SUPER_ADMIN_EMAIL) {
       authSource = "super-admin";
-      // Authenticate directly from the local database
       user = await User.findOne({
-        where: { email: username },
+        where: { email: SUPER_ADMIN_EMAIL },
       });
 
       if (!user) {
@@ -141,7 +232,6 @@ const login = async (req, res) => {
         });
       }
 
-      // Check password for super admin (can be skipped if hashed)
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         setAuthenticationAudit(req, {
@@ -153,73 +243,11 @@ const login = async (req, res) => {
         });
         return res.status(400).json({ message: "Invalid password" });
       }
-    } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      authSource = "database";
-      // If username is an email, authenticate using DB only
-      user = await User.findOne({
-        where: { email: username },
-      });
-
-      if (!user) {
-        setAuthenticationAudit(req, {
-          status: "failure",
-          message: "Authentication failed. User not found.",
-          username,
-          metadata: { authSource },
-        });
-        return res
-          .status(400)
-          .json({ message: "Authentication failed. User not found." });
-      }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        setAuthenticationAudit(req, {
-          status: "failure",
-          message: "Authentication failed. Invalid password.",
-          user,
-          username,
-          metadata: { authSource },
-        });
-        return res
-          .status(400)
-          .json({ message: "Authentication failed. Invalid password." });
-      }
-      if (user.isActive === false) {
-        setAuthenticationAudit(req, {
-          status: "failure",
-          message:
-            "Your account is inactive. Please wait for the super admin to activate it.",
-          user,
-          username,
-          metadata: { authSource },
-        });
-        return res.status(400).json({
-          message:
-            "Your account is inactive. Please wait for the super admin to activate it.",
-        });
-      }
-    } else {
+    } else if (isLdapEnabled()) {
       authSource = "ldap";
-      // If not an email, authenticate using LDAP only
       try {
-        await authenticateActiveDirectory(username, password);
-        // LDAP success, now check or create user in DB
-        user = await User.findOne({
-          where: { email: `${username}@wcf.go.tz` },
-        });
-
-        if (!user) {
-          // If user doesn't exist, create a new user with inactive status
-          user = await User.create({
-            full_name: username,
-            email: `${username}@wcf.go.tz`,
-            password: "wcf12345",
-            extension: null,
-            role: "agent",
-            isActive: false,
-          });
-          console.log(`User ${username} created with inactive status.`);
-        }
+        const ldapResult = await authenticateWithLdap(username, password);
+        user = ldapResult.user;
 
         if (user.isActive === false) {
           setAuthenticationAudit(req, {
@@ -244,11 +272,40 @@ const login = async (req, res) => {
         });
         return res.status(400).json({ message: "LDAP authentication failed." });
       }
+    } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
+      authSource = "database";
+      const dbResult = await authenticateWithDatabase(username, password);
+      if (dbResult.error) {
+        setAuthenticationAudit(req, {
+          status: "failure",
+          message: dbResult.error,
+          user: dbResult.user,
+          username,
+          metadata: { authSource },
+        });
+        return res.status(dbResult.status || 400).json({ message: dbResult.error });
+      }
+      user = dbResult.user;
+    } else {
+      setAuthenticationAudit(req, {
+        status: "failure",
+        message: "LDAP authentication is disabled. Use your email to sign in.",
+        username,
+        metadata: { authSource: "database" },
+      });
+      return res.status(400).json({
+        message: "LDAP authentication is disabled. Use your email to sign in.",
+      });
     }
 
     // Set user status to "online"
     user.status = "online";
     await user.save();
+
+    // Unpause Asterisk queue member so inbound calls can ring the softphone
+    if (user.extension) {
+      syncAgentQueuePauseFromStatus(user.extension, "online");
+    }
 
     // Update or create AgentStatus entry for agents
     if (user.role === "agent") {
@@ -261,13 +318,21 @@ const login = async (req, res) => {
       });
     }
 
-    // Step 5: Generate JWT token (all roles expire at next daily logout)
-    const secondsUntilLogout = getSecondsUntilNextDailyLogout();
-    const expiresAt = getNextDailyLogoutDate().getTime();
-    const jwtExpiresIn = secondsUntilLogout;
-    console.log(
-      `[Login] Daily logout at ${getDailyLogoutTimeLabel()} EAT | role: ${user.role} | expiresAt: ${new Date(expiresAt).toISOString()}`
-    );
+    // Step 5: Generate JWT token (agents expire at next daily logout; others 24h)
+    const isAgent = String(user.role || "").toLowerCase() === "agent";
+    let expiresAt;
+    let jwtExpiresIn;
+    if (isAgent) {
+      const secondsUntilLogout = getSecondsUntilNextDailyLogout();
+      expiresAt = getNextDailyLogoutDate().getTime();
+      jwtExpiresIn = secondsUntilLogout;
+      console.log(
+        `[Agent login] Daily logout at ${getDailyLogoutTimeLabel()} EAT | expiresAt: ${new Date(expiresAt).toISOString()}`
+      );
+    } else {
+      expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+      jwtExpiresIn = "24h";
+    }
 
     const token = jwt.sign(
       { userId: user.id, role: user.role },
@@ -361,6 +426,11 @@ const logout = async (req, res) => {
     // Update user status to "offline"
     user.status = "offline";
     await user.save();
+
+    // Pause Asterisk queue member so logged-out agents do not receive queue rings
+    if (user.extension) {
+      syncAgentQueuePauseFromStatus(user.extension, "offline");
+    }
 
     // Update AgentStatus for agents
     if (user.role === "agent") {
@@ -627,7 +697,7 @@ const loginRedirect = async (req, res) => {
     const encryptedToken = encryptWithOpenSSL(auth_data);
 
     // 4. Build MAC App URL
-    const macAppUrl = process.env.MAC_APP_URL || "https://demomac.wcf.go.tz/";
+    const macAppUrl = process.env.MAC_APP_URL || "https://contactcenter.wcf.go.tz/";
     const url = `${macAppUrl}login_redirect?token=${encodeURIComponent(
       encryptedToken
     )}`;
@@ -685,3 +755,5 @@ module.exports = {
   loginRedirect,
   encryptWithOpenSSL,
 };
+
+

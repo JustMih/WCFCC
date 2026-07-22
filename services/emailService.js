@@ -6,7 +6,7 @@ const SIP_DOMAIN = process.env.SIP_DOMAIN || 'contactcenter.wcf.go.tz';
 const CONTACT_CENTER_PORTAL_URL = "https://contactcenter.wcf.go.tz/";
 
 /** Contact center portal URL for all email CTAs (always https). */
-const getContactCenterPortalUrl = () => {
+const getcontactcenterPortalUrl = () => {
   return CONTACT_CENTER_PORTAL_URL;
 };
 
@@ -18,7 +18,7 @@ const getContactCenterPortalUrl = () => {
  * @returns {string} Complete HTML email body
  */
 const renderEmailCard = (subject, bodyHtml, detailsHtml) => {
-  const portalUrl = getContactCenterPortalUrl();
+  const portalUrl = getcontactcenterPortalUrl();
   
   return `<!doctype html>
     <html>
@@ -234,7 +234,7 @@ const sendEmailNonBlocking = ({ to, subject, htmlBody, attachments }) => {
 };
 
 const sendForwardNotification = async (supervisorEmail, ticketId, unitName, justification) => {
-  const portalUrl = getContactCenterPortalUrl();
+  const portalUrl = getcontactcenterPortalUrl();
   const subject = `Ticket Forwarded to ${unitName}`;
   const htmlBody = `
     <!DOCTYPE html>
@@ -394,7 +394,7 @@ const sendForwardNotification = async (supervisorEmail, ticketId, unitName, just
 };
 
 const sendRatingNotification = async (userEmail, ticketId, rating, justification) => {
-  const portalUrl = getContactCenterPortalUrl();
+  const portalUrl = getcontactcenterPortalUrl();
   const subject = `Ticket Rated as ${rating}`;
   const htmlBody = `
     <!DOCTYPE html>
@@ -578,5 +578,5 @@ module.exports = {
   sendForwardNotification,
   sendRatingNotification,
   renderEmailCard,
-  getContactCenterPortalUrl,
+  getcontactcenterPortalUrl,
 }; 

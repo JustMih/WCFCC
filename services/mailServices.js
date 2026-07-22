@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-const { getContactCenterPortalUrl } = require('./emailService');
+const { getcontactcenterPortalUrl } = require('./emailService');
 
 // Configure your SMTP transporter
 const transporter = nodemailer.createTransport({
@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
 const sendTicketEmail = async (ticket, recipientEmail) => {
   try {
     const subjectLine = `New Ticket Assigned: ${ticket.subject}`;
-    const portalUrl = getContactCenterPortalUrl();
+    const portalUrl = getcontactcenterPortalUrl();
     const message = `
       Hello,
 

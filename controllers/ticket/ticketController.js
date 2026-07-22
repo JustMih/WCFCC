@@ -14,7 +14,7 @@ const {
   sendEmail,
   sendEmailNonBlocking,
   renderEmailCard,
-  getContactCenterPortalUrl,
+  getcontactcenterPortalUrl,
 } = require("../../services/emailService");
 const RequesterDetails = require("../../models/RequesterDetails");
 const Employer = require("../../models/Employer");
@@ -6322,7 +6322,7 @@ const sendReversalEmailsInBackground = async (ticket, prevUser, attended_by_name
   try {
     // Notify all reviewers and supervisors
     const notifySubject = `Ticket Reversed: ${ticket.subject}`;
-    const portalUrl = getContactCenterPortalUrl();
+    const portalUrl = getcontactcenterPortalUrl();
     const notifyDetailsHtml = `
       <ul>
         <li><strong>Ticket ID:</strong> ${ticket.ticket_id}</li>
