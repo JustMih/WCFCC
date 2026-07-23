@@ -262,18 +262,21 @@ if (ami) ami.on('managerevent', async (event) => {
 
     case 'QueueCallerAbandon':
       {
-        const callId = getQueueCallId(event);
-        if (!callId || !queueCalls[callId]) break;
-        queueCalls[callId].abandoned = true;
-        queueCalls[callId].leftAt = now;
-        queueCalls[callId].endedAt = now;
-        console.log(`⚠️ [Abandon] ${queueCalls[callId].caller} left after waiting too long`);
+        const resolved = resolveQueueCall(event);
+        if (!resolved) break;
+        const { id: callId, call } = resolved;
+        if (call.endedAt) break;
+
+        call.abandoned = true;
+        call.leftAt = now;
+        call.endedAt = now;
+        console.log(`⚠️ [Abandon] ${call.caller} left after waiting too long`);
 
         const waitSec = Math.max(0, Math.floor(Number(event.waittime) || 0));
         await logToQueueLog({
           time: now,
           callid: callId,
-          queuename: event.queue || queueCalls[callId].queue,
+          queuename: event.queue || call.queue,
           agent: null,
           event: 'ABANDON',
           data1: `waited ${waitSec}s`,
@@ -305,13 +308,52 @@ if (ami) ami.on('managerevent', async (event) => {
         if (!resolved) break;
         const { id: callId, call } = resolved;
         if (call.endedAt) break;
-        // Only end on hangup after agent answered — queue-leg hangup fires before AgentConnect
-        if (!call.answered) break;
-        await completeQueueCall(callId, call, event, now, 'COMPLETECALLER');
+
+        if (call.answered) {
+          await completeQueueCall(callId, call, event, now, 'COMPLETECALLER');
+          break;
+        }
+
+        // Bridge race: queue-leg hangup often fires after Leave / AgentCalled,
+        // before AgentConnect — do not clear during that short window.
+        const BRIDGE_MS = 15000;
+        const bridging =
+          (call.tAgentCalledMs != null &&
+            Date.now() - call.tAgentCalledMs < BRIDGE_MS) ||
+          (call.tCallerLeaveMs != null &&
+            Date.now() - call.tCallerLeaveMs < BRIDGE_MS);
+        if (bridging) break;
+
+        // Real unanswered hangup (caller left while waiting) — clear wallboard
+        call.abandoned = true;
+        await completeQueueCall(callId, call, event, now, 'ABANDON');
       }
       break;
   }
 });
+
+// Safety net: clear long-lived unanswered ghosts without requiring a restart
+const STALE_QUEUE_MS = 30 * 60 * 1000; // 30 minutes
+setInterval(() => {
+  const cutoff = Date.now() - STALE_QUEUE_MS;
+  let cleared = 0;
+  for (const [id, call] of Object.entries(queueCalls)) {
+    if (!call || call.endedAt || call.answered) continue;
+    const joinedMs = call.tJoinedMs || 0;
+    if (joinedMs > 0 && joinedMs < cutoff) {
+      call.abandoned = true;
+      call.endedAt = moment().utcOffset('+03:00').format('YYYY-MM-DD HH:mm:ss');
+      call.leftAt = call.endedAt;
+      cleared += 1;
+      console.log(
+        `🧹 [StaleSweep] Cleared unanswered ghost callId=${id} caller=${call.caller}`
+      );
+    }
+  }
+  if (cleared > 0) {
+    console.log(`[StaleSweep] Cleared ${cleared} stale IN QUEUE entr(y/ies)`);
+  }
+}, 60 * 1000);
 
 // ✅ Poll queue status every 10 seconds
 setInterval(() => {
