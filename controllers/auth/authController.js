@@ -25,6 +25,11 @@ function isLdapEnabled() {
   return !/^false$/i.test(String(v).trim());
 }
 
+/** Dev-only: accept any password (skips LDAP bind / bcrypt check). */
+function isAllowLoginAnyPassword() {
+  return /^true$/i.test(String(process.env.ALLOW_LOGIN_ANY_PASSWORD || "").trim());
+}
+
 function resolveSamAccountName(input) {
   const raw = String(input || "").trim();
   if (!raw) return "";
@@ -107,6 +112,21 @@ async function authenticateWithLdap(username, password) {
   if (!samAccountName) {
     throw new Error("Invalid username.");
   }
+
+  // Skip LDAP password bind — log in if the user already exists in the DB.
+  if (isAllowLoginAnyPassword()) {
+    console.warn(
+      `[DEV] ALLOW_LOGIN_ANY_PASSWORD: skipping LDAP bind for ${samAccountName}`
+    );
+    const user = await User.findOne({ where: { username: samAccountName } });
+    if (!user) {
+      throw new Error(
+        "User not found in database. Create/activate the user first when password mute is on."
+      );
+    }
+    return { user, samAccountName, ldapUser: null };
+  }
+
   const ldapUser = await authenticateActiveDirectory(samAccountName, password);
   const user = await findOrCreateUserFromLdap(samAccountName, ldapUser);
   return { user, samAccountName, ldapUser };
@@ -121,13 +141,19 @@ async function authenticateWithDatabase(email, password) {
     return { error: "Authentication failed. User not found.", status: 400 };
   }
 
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) {
-    return {
-      error: "Authentication failed. Invalid password.",
-      status: 400,
-      user,
-    };
+  if (!isAllowLoginAnyPassword()) {
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return {
+        error: "Authentication failed. Invalid password.",
+        status: 400,
+        user,
+      };
+    }
+  } else {
+    console.warn(
+      `[DEV] ALLOW_LOGIN_ANY_PASSWORD: skipping password check for ${email}`
+    );
   }
 
   if (user.isActive === false) {
