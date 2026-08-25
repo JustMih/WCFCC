@@ -63,8 +63,75 @@ function syncAgentQueuePauseFromStatus(extension, status) {
   }
 }
 
+const DEFAULT_QUEUE = process.env.ASTERISK_QUEUE || "support-queue";
+
+/**
+ * Dynamically add agent as queue member on login (idempotent — Asterisk
+ * ignores if already a member).
+ */
+function addAgentToQueue(extension, queue) {
+  try {
+    if (!isAmiConfigured()) return;
+    const iface = resolveQueueMemberInterface(extension);
+    if (!iface) return;
+    const ami = getAmi();
+    if (!ami) return;
+
+    ami.action(
+      {
+        Action: "QueueAdd",
+        Queue: queue || DEFAULT_QUEUE,
+        Interface: iface,
+        Paused: "false",
+        MemberName: iface,
+      },
+      (err) => {
+        if (err) {
+          console.warn(`[QueueAdd] failed for ${iface}:`, err.message || err);
+          return;
+        }
+        console.log(`[QueueAdd] ${iface} added to ${queue || DEFAULT_QUEUE}`);
+      }
+    );
+  } catch (err) {
+    console.warn("[QueueAdd] error:", err?.message || err);
+  }
+}
+
+/**
+ * Remove agent from queue on logout so logged-out agents never receive calls.
+ */
+function removeAgentFromQueue(extension, queue) {
+  try {
+    if (!isAmiConfigured()) return;
+    const iface = resolveQueueMemberInterface(extension);
+    if (!iface) return;
+    const ami = getAmi();
+    if (!ami) return;
+
+    ami.action(
+      {
+        Action: "QueueRemove",
+        Queue: queue || DEFAULT_QUEUE,
+        Interface: iface,
+      },
+      (err) => {
+        if (err) {
+          console.warn(`[QueueRemove] failed for ${iface}:`, err.message || err);
+          return;
+        }
+        console.log(`[QueueRemove] ${iface} removed from ${queue || DEFAULT_QUEUE}`);
+      }
+    );
+  } catch (err) {
+    console.warn("[QueueRemove] error:", err?.message || err);
+  }
+}
+
 module.exports = {
   syncAgentQueuePauseFromStatus,
   resolveQueueMemberInterface,
+  addAgentToQueue,
+  removeAgentFromQueue,
   READY_STATUSES,
 };

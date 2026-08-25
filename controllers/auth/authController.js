@@ -15,6 +15,8 @@ const {
 } = require("../../utils/dailyLogoutHelper");
 const {
   syncAgentQueuePauseFromStatus,
+  addAgentToQueue,
+  removeAgentFromQueue,
 } = require("../../services/queuePauseService");
 
 const SUPER_ADMIN_EMAIL = "superadmin@wcf.go.tz";
@@ -302,8 +304,9 @@ const login = async (req, res) => {
     user.status = "online";
     await user.save();
 
-    // Unpause Asterisk queue member so inbound calls can ring the softphone
+    // Add agent to Asterisk queue and unpause so inbound calls can ring the softphone
     if (user.extension) {
+      addAgentToQueue(user.extension);
       syncAgentQueuePauseFromStatus(user.extension, "online");
     }
 
@@ -427,9 +430,10 @@ const logout = async (req, res) => {
     user.status = "offline";
     await user.save();
 
-    // Pause Asterisk queue member so logged-out agents do not receive queue rings
+    // Remove agent from Asterisk queue so logged-out agents do not receive calls
     if (user.extension) {
       syncAgentQueuePauseFromStatus(user.extension, "offline");
+      removeAgentFromQueue(user.extension);
     }
 
     // Update AgentStatus for agents

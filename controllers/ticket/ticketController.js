@@ -84,7 +84,7 @@ function getWorkingDays(startDate, endDate, holidays = []) {
 }
 
 /** Set true for 2-min SLA testing; false for production working-days SLA */
-const ESCALATION_TEST_MODE = true;
+const ESCALATION_TEST_MODE = false;
 const ESCALATION_TEST_SLA_MINUTES = 2;
 
 function getElapsedMinutes(startDate, endDate) {

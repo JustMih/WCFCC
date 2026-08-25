@@ -30,6 +30,7 @@ const {
 } = require("../../utils/agentAvailabilityHelper");
 const {
   syncAgentQueuePauseFromStatus,
+  addAgentToQueue,
 } = require("../../services/queuePauseService");
 const { isTodayPublicHoliday } = require("../../utils/holidayCheckHelper");
 
@@ -1869,6 +1870,9 @@ const updateUserStatus = async (req, res) => {
     });
 
     if (user?.extension) {
+      if (user.status === "online") {
+        addAgentToQueue(user.extension);
+      }
       syncAgentQueuePauseFromStatus(user.extension, user.status);
     }
 
