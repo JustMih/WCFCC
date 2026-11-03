@@ -60,16 +60,61 @@ function getWorkflowInfo(ticket) {
   
   const workflow = WORKFLOW_PATHS[ticket.workflow_path];
   if (!workflow) return null;
+  const currentStep = Number(ticket.current_workflow_step) || 1;
+  const normalizeRole = (value) => {
+    const role = String(value || "").trim().toLowerCase().replace(/[ _]+/g, "-");
+    if (["supervisor", "head-unit"].includes(role)) return "head-of-unit";
+    if (role === "dg") return "director-general";
+    return role;
+  };
+  const recordedRole = normalizeRole(
+    ticket.current_workflow_role || ticket.assigned_to_role
+  );
+  const currentRole = workflow.steps.includes(recordedRole)
+    ? recordedRole
+    : workflow.steps[currentStep - 1] || null;
   
   return {
     path: ticket.workflow_path,
-    currentStep: ticket.current_workflow_step || 1,
+    currentStep,
     totalSteps: workflow.totalSteps,
-    currentRole: ticket.workflow_current_role,
-    nextRole: getNextRoleInWorkflow(ticket.workflow_path, ticket.current_workflow_step || 1),
+    currentRole,
+    nextRole: getNextRoleInWorkflow(ticket.workflow_path, currentStep),
     steps: workflow.steps,
     sla: workflow.sla
   };
+}
+
+/** Initialize workflow metadata when a rated complaint is first forwarded. */
+function initializeTicketWorkflow(ticket, currentRole, startedAt = new Date()) {
+  if (
+    !ticket ||
+    ticket.workflow_path ||
+    String(ticket.category || "").toLowerCase() !== "complaint" ||
+    !["Minor", "Major"].includes(ticket.complaint_type)
+  ) {
+    return false;
+  }
+
+  const isDirectorate = String(ticket.responsible_unit_name || "")
+    .toLowerCase()
+    .includes("directorate");
+  const prefix = ticket.complaint_type.toUpperCase();
+  const workflowPath = `${prefix}_${isDirectorate ? "DIRECTORATE" : "UNIT"}`;
+  const workflow = WORKFLOW_PATHS[workflowPath];
+  const roleKey = String(currentRole || "").trim().toLowerCase().replace(/_/g, "-");
+  const stepIndex = workflow?.steps.findIndex(
+    (role) => String(role).toLowerCase().replace(/_/g, "-") === roleKey
+  );
+  if (!workflow || stepIndex == null || stepIndex < 0) return false;
+
+  ticket.workflow_path = workflowPath;
+  ticket.current_workflow_step = stepIndex + 1;
+  ticket.current_workflow_role = roleKey;
+  ticket.workflow_started_at = startedAt;
+  ticket.workflow_completed = false;
+  ticket.workflow_completed_at = null;
+  return true;
 }
 
 /**
@@ -210,9 +255,14 @@ async function createWorkflowAssignmentRecord(ticket, action, assignedBy, assign
  * Calculate remaining SLA days for current step
  */
 function calculateRemainingSLADays(ticket, currentStep, workflow) {
-  if (!ticket.workflow_started_at) return null;
+  const stepStart =
+    ticket.sla_step_started_at ||
+    ticket.workflow_started_at ||
+    ticket.created_at;
+  if (!stepStart) return null;
   
-  const startDate = new Date(ticket.workflow_started_at);
+  const startDate = new Date(stepStart);
+  if (Number.isNaN(startDate.getTime())) return null;
   const currentDate = new Date();
   const currentRole = workflow.steps[currentStep - 1];
   const allowedDays = workflow.sla[currentRole] || 0;
@@ -228,7 +278,7 @@ function calculateRemainingSLADays(ticket, currentStep, workflow) {
     current.setDate(current.getDate() + 1);
   }
   
-  return Math.max(0, allowedDays - workingDaysElapsed);
+  return allowedDays - workingDaysElapsed;
 }
 
 /**
@@ -258,11 +308,11 @@ async function processWorkflowStepTransition(ticketId, action, assignedBy, assig
       case 'Forwarded':
       case 'Assigned':
         nextStep = workflow.currentStep + 1;
-        nextRole = getNextRoleInWorkflow(ticket.workflow_path, nextStep);
+        nextRole = workflow.steps[nextStep - 1] || null;
         break;
       case 'Reversed':
         nextStep = Math.max(1, workflow.currentStep - 1);
-        nextRole = getNextRoleInWorkflow(ticket.workflow_path, nextStep);
+        nextRole = workflow.steps[nextStep - 1] || null;
         break;
       case 'Closed':
         nextStep = workflow.totalSteps;
@@ -273,7 +323,7 @@ async function processWorkflowStepTransition(ticketId, action, assignedBy, assig
     // Update ticket workflow state
     const workflowUpdates = {
       current_workflow_step: nextStep,
-      workflow_current_role: nextRole,
+      current_workflow_role: nextRole || workflow.currentRole,
       workflow_completed: nextStep >= workflow.totalSteps
     };
     
@@ -338,7 +388,7 @@ async function getWorkflowAuditTrail(ticketId) {
         workflow_path: ticket.workflow_path,
         current_workflow_step: ticket.current_workflow_step,
         workflow_total_steps: ticket.workflow_total_steps,
-        workflow_current_role: ticket.workflow_current_role,
+        workflow_current_role: ticket.current_workflow_role,
         workflow_started_at: ticket.workflow_started_at,
         workflow_completed: ticket.workflow_completed
       },
@@ -382,9 +432,17 @@ async function getWorkflowAuditTrail(ticketId) {
  */
 function checkSLACompliance(ticket) {
   const workflow = getWorkflowInfo(ticket);
-  if (!workflow) return { status: 'Unknown', details: 'No workflow path set' };
+  if (!ticket.workflow_path) {
+    return { status: 'Not in workflow', details: 'No workflow path recorded' };
+  }
+  if (!workflow) {
+    return { status: 'Unknown', details: 'Invalid workflow path recorded' };
+  }
   
   const currentRole = workflow.currentRole;
+  if (!currentRole) {
+    return { status: 'Unknown', details: 'Current workflow role is missing' };
+  }
   const slaDays = workflow.sla[currentRole] || 0;
   
   if (slaDays === 0) return { status: 'No SLA', details: 'No SLA defined for current role' };
@@ -422,7 +480,7 @@ function getNextStepDeadline(ticket, slaInfo) {
   
   const startDate = new Date(ticket.workflow_started_at);
   const currentDate = new Date();
-  const currentRole = ticket.workflow_current_role;
+  const currentRole = ticket.current_workflow_role || ticket.assigned_to_role;
   const allowedDays = slaInfo[currentRole] || 0;
   
   if (allowedDays === 0) return null;
@@ -452,5 +510,6 @@ module.exports = {
   getWorkflowAuditTrail,
   checkSLACompliance,
   getNextStepDeadline,
+  initializeTicketWorkflow,
   WORKFLOW_PATHS
 }; 

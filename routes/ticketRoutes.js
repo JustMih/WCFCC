@@ -170,6 +170,14 @@ router.get(
   searchByTicketId
 );
 
+// Keep this explicit route before /:ticketId so it is not captured as
+// ticketId="admin" by the generic ticket lookup route.
+router.get(
+  "/admin/attendee",
+  authMiddleware,
+  getAllAttendee
+);
+
 // Get ticket by ID
 router.get('/:ticketId', 
   authMiddleware,
@@ -202,15 +210,6 @@ router.post(
   roleMiddleware(["admin", "super-admin"]),
   exchangeTicketOwnership
 );
-
-// Add after other ticket routes
-router.get(
-  '/admin/attendee',
-  authMiddleware,
-  // roleMiddleware(["focal-person", "claim-focal-person", "compliance-focal-person", 'super-admin', 'reviewer', 'admin']),
-  getAllAttendee
-);
-
 
 // Add after other ticket routes
 router.post(

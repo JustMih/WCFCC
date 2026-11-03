@@ -447,27 +447,40 @@ async function closeHandover({ handoverId, actorId, actorRole, mode = "revoked" 
     });
     if (!fromUser || !toUser) throw new Error("Invalid handover users");
 
+    // All tickets stamped with this handover (any status) — markers must always clear.
     const tickets = await Ticket.findAll({
-      where: {
-        handover_id: handover.id,
-        status: { [Op.in]: ACTIVE_TICKET_STATUSES },
-      },
+      where: { handover_id: handover.id },
       transaction,
     });
 
+    const allTicketIds = tickets.map((t) => t.id);
     const returnableIds = tickets
-      .filter((t) => canReassignFromDelegate(t, handover.from_user_id, handover.to_user_id))
+      .filter(
+        (t) =>
+          ACTIVE_TICKET_STATUSES.includes(t.status) &&
+          canReassignFromDelegate(t, handover.from_user_id, handover.to_user_id)
+      )
       .map((t) => t.id);
 
+    // Always clear handover columns so initiator is never left locked after revoke/expire.
+    if (allTicketIds.length > 0) {
+      await Ticket.update(
+        {
+          handover_id: null,
+          handover_from_user_id: null,
+          handover_effective_role: null,
+        },
+        { where: { id: { [Op.in]: allTicketIds } }, transaction }
+      );
+    }
+
+    // Reassign only tickets still held by the delegate.
     if (returnableIds.length > 0) {
       await Ticket.update(
         {
           assigned_to_id: handover.from_user_id,
           assigned_to: handover.from_user_id,
           assigned_to_role: handover.from_user_role,
-          handover_id: null,
-          handover_from_user_id: null,
-          handover_effective_role: null,
           status: "Assigned",
         },
         { where: { id: { [Op.in]: returnableIds } }, transaction }
@@ -510,13 +523,89 @@ async function closeHandover({ handoverId, actorId, actorRole, mode = "revoked" 
       fromUserId: handover.from_user_id,
       toUserId: handover.to_user_id,
       returnedTicketCount: returnableIds.length,
+      clearedTicketCount: allTicketIds.length,
       actorId,
       actorRole,
       message: `Handover ${mode} between ${fromUser.full_name} and ${toUser.full_name}`,
     });
 
-    return { handover, returnedTicketCount: returnableIds.length };
+    return {
+      handover,
+      returnedTicketCount: returnableIds.length,
+      clearedTicketCount: allTicketIds.length,
+    };
   });
+}
+
+/**
+ * If ticket.handover_id points to a missing or non-active UserHandover,
+ * clear stale handover columns (persist + mutate in-memory) so policy unlocks.
+ */
+async function healStaleTicketHandover(ticket, { transaction } = {}) {
+  if (!ticket?.handover_id) return ticket;
+
+  const handover = await UserHandover.findByPk(ticket.handover_id, {
+    attributes: ["id", "status"],
+    transaction,
+  });
+
+  if (handover && handover.status === "active") {
+    return ticket;
+  }
+
+  if (ticket.id) {
+    await Ticket.update(
+      {
+        handover_id: null,
+        handover_from_user_id: null,
+        handover_effective_role: null,
+      },
+      { where: { id: ticket.id }, transaction }
+    );
+  }
+
+  ticket.handover_id = null;
+  ticket.handover_from_user_id = null;
+  ticket.handover_effective_role = null;
+  return ticket;
+}
+
+/** One-time / maintenance: clear handover_* on tickets whose handover is not active (or missing). */
+async function repairStaleHandoverFields() {
+  const ticketsWithHandover = await Ticket.findAll({
+    where: { handover_id: { [Op.ne]: null } },
+    attributes: ["id", "handover_id"],
+  });
+
+  if (ticketsWithHandover.length === 0) {
+    return { cleared: 0, ticketIds: [] };
+  }
+
+  const handoverIds = [...new Set(ticketsWithHandover.map((t) => t.handover_id))];
+  const activeHandovers = await UserHandover.findAll({
+    where: { id: { [Op.in]: handoverIds }, status: "active" },
+    attributes: ["id"],
+  });
+  const activeSet = new Set(activeHandovers.map((h) => String(h.id)));
+
+  const staleIds = ticketsWithHandover
+    .filter((t) => !activeSet.has(String(t.handover_id)))
+    .map((t) => t.id);
+
+  if (staleIds.length === 0) {
+    return { cleared: 0, ticketIds: [] };
+  }
+
+  await Ticket.update(
+    {
+      handover_id: null,
+      handover_from_user_id: null,
+      handover_effective_role: null,
+    },
+    { where: { id: { [Op.in]: staleIds } } }
+  );
+
+  return { cleared: staleIds.length, ticketIds: staleIds };
 }
 
 async function expireDueHandovers() {
@@ -647,4 +736,6 @@ module.exports = {
   isHandoverParticipant,
   getTicketActorPolicy,
   getEffectiveActorRole,
+  healStaleTicketHandover,
+  repairStaleHandoverFields,
 };

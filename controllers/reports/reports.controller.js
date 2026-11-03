@@ -1026,7 +1026,24 @@ async function getTicketSlaReportHandler(req, res) {
       SELECT
         t.*,
         u1.full_name AS assigned_to_name,
-        u2.full_name AS creator_name
+        u2.full_name AS creator_name,
+        (
+          SELECT MAX(ta.created_at)
+          FROM Ticket_assignments ta
+          WHERE ta.ticket_id = t.id
+            AND ta.assigned_to_id = t.assigned_to_id
+            AND LOWER(COALESCE(ta.action, '')) NOT IN ('created', 'closed', 'attended')
+        ) AS sla_step_started_at,
+        (
+          LOWER(COALESCE(t.category, '')) = 'complaint'
+          AND LOWER(COALESCE(t.complaint_type, '')) IN ('minor', 'major')
+          AND EXISTS (
+          SELECT 1
+          FROM Ticket_assignments ta
+          WHERE ta.ticket_id = t.id
+            AND LOWER(COALESCE(ta.action, '')) LIKE '%forward%'
+          )
+        ) AS has_workflow_evidence
       FROM Tickets t
       LEFT JOIN Users u1 ON t.assigned_to_id = u1.id
       LEFT JOIN Users u2 ON t.created_by = u2.id
@@ -1049,10 +1066,18 @@ async function getTicketSlaReportHandler(req, res) {
       overdue: 0,
       noSla: 0,
       unknown: 0,
+      notInWorkflow: 0,
     };
 
     const rows = tickets.map((ticket) => {
-      const compliance = checkSLACompliance(ticket);
+      const hasWorkflowEvidence = Boolean(Number(ticket.has_workflow_evidence));
+      const compliance =
+        !ticket.workflow_path && hasWorkflowEvidence
+          ? {
+              status: "Unknown",
+              details: "Workflow was forwarded but workflow metadata is missing",
+            }
+          : checkSLACompliance(ticket);
       const slaStatus = compliance?.status || "Unknown";
       const slaDetails = compliance?.details || "";
       const slaSeverity = compliance?.severity || null;
@@ -1070,6 +1095,9 @@ async function getTicketSlaReportHandler(req, res) {
         case "No SLA":
           summary.noSla += 1;
           break;
+        case "Not in workflow":
+          summary.notInWorkflow += 1;
+          break;
         default:
           summary.unknown += 1;
       }
@@ -1080,7 +1108,8 @@ async function getTicketSlaReportHandler(req, res) {
         ticket_id: ticket.ticket_id || ticket.id,
         subject: ticket.subject || "-",
         status: ticket.status || "-",
-        workflow_current_role: ticket.workflow_current_role || "-",
+        workflow_current_role:
+          ticket.current_workflow_role || ticket.assigned_to_role || "-",
         assigned_to_name: ticket.assigned_to_name || "-",
         created_at: ticket.created_at,
         sla_status: slaStatus,
@@ -1095,6 +1124,7 @@ async function getTicketSlaReportHandler(req, res) {
       "on-time": "On Time",
       ontime: "On Time",
       "no-sla": "No SLA",
+      "not-in-workflow": "Not in workflow",
     };
 
     const filterLabel = statusMap[statusFilter];

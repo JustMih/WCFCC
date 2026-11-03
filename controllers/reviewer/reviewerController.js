@@ -11,6 +11,7 @@ const { sendEmail, renderEmailCard } = require("../../services/emailService");
 const Notification = require("../../models/Notification"); // Added Notification model
 const { UserRole } = require("../../models");
 const { isPublicRelationUnit } = require("../../utils/reviewerActingAsHead");
+const { initializeTicketWorkflow } = require("../../services/workflowCommunicationService");
 
 // Helper to get requester display name
 function getRequesterDisplayName(ticket) {
@@ -302,7 +303,10 @@ const convertOrForwardTicket = async (req, res) => {
           });
       }
 
-      ticket.converted_to = category;
+      // Persist Inquiry as both category and converted_to so Attend/UI treat it as Inquiry
+      ticket.category = "Inquiry";
+      ticket.converted_to = "Inquiry";
+      ticket.complaint_type = null;
       ticket.converted_by_id = userId;
       ticket.converted_at = new Date();
       conversionDone = true;
@@ -645,6 +649,14 @@ const convertOrForwardTicket = async (req, res) => {
       ticket.forwarded_at = new Date();
       ticket.status = "Forwarded";
       forwardingDone = true;
+
+      // Rated complaints enter workflow when the reviewer forwards them to
+      // their first workflow role (director or head of unit).
+      initializeTicketWorkflow(
+        ticket,
+        ticket.assigned_to_role,
+        ticket.forwarded_at
+      );
 
       // Create TicketAssignment record for forwarding (only forwarding, no conversion)
       // Include rating (complaintType) in the reason since forwarding requires rating

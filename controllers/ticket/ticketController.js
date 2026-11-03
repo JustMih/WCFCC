@@ -30,6 +30,7 @@ const {
   isHandoverParticipant,
   getTicketActorPolicy,
   getEffectiveActorRole,
+  healStaleTicketHandover,
 } = require("../../services/handoverService");
 const { isPublicRelationUnit } = require("../../utils/reviewerActingAsHead");
 
@@ -144,7 +145,8 @@ function checkTicketSlaBreach(ticket, holidays = []) {
   return { workingDays, slaDays, breached };
 }
 
-function canUserActOnTicket(ticket, userId, actorRole) {
+async function canUserActOnTicket(ticket, userId, actorRole) {
+  await healStaleTicketHandover(ticket);
   return getTicketActorPolicy(ticket, userId, actorRole);
 }
 
@@ -4170,7 +4172,7 @@ const closeTicket = async (req, res) => {
     if (actor?.unit_section) {
       ticket._actor_unit_section = actor.unit_section;
     }
-    const actorPolicy = canUserActOnTicket(ticket, userId, actor?.role);
+    const actorPolicy = await canUserActOnTicket(ticket, userId, actor?.role);
     if (!actorPolicy.canMutate) {
       return res.status(403).json({
         message: actorPolicy.blockReason || "You are not allowed to act on this ticket",
@@ -4857,6 +4859,41 @@ const assignTicket = async (req, res) => {
       });
     }
 
+    // A reviewer may redirect a complaint to a Director only when the
+    // ticket was returned by the Director General to that reviewer. Keep
+    // this specific reassignment within the ticket's directorate.
+    if (req.user?.role === "reviewer" && assignedTo.role === "director") {
+      const returnedAssignment = await TicketAssignment.findOne({
+        where: {
+          ticket_id: ticket.id,
+          action: "Reversed",
+          assigned_to_id: assigned_by_id,
+        },
+        attributes: ["assigned_by_id"],
+        order: [["created_at", "DESC"]],
+      });
+      const reversalSender = returnedAssignment
+        ? await User.findByPk(returnedAssignment.assigned_by_id, { attributes: ["role"] })
+        : null;
+      const wasReturnedByDirectorGeneral = reversalSender?.role === "director-general";
+      const directorate = String(ticket.section || "").trim().toLowerCase();
+      const directorUnit = String(assignedTo.unit_section || "").trim().toLowerCase();
+      const isAssignedToCurrentReviewer = String(ticket.assigned_to_id) === String(assigned_by_id);
+
+      if (
+        !isAssignedToCurrentReviewer ||
+        !wasReturnedByDirectorGeneral ||
+        ticket.category !== "Complaint" ||
+        !directorate ||
+        directorUnit !== directorate
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "Reviewers may assign this complaint to a Director in its directorate only after it has been returned by the Director General.",
+        });
+      }
+    }
+
     // Create a new assignment record
     await TicketAssignment.create({
       ticket_id: ticketId,
@@ -4952,6 +4989,31 @@ const getAllAttendee = async (req, res) => {
     if (!currentUser) {
       return res.status(404).json({ message: "Current user not found" });
     }
+
+    let assignmentTicket = null;
+    let reviewerCanRouteToDirector = false;
+    if (currentUser.role === "reviewer" && req.query.ticketId) {
+      assignmentTicket = await Ticket.findByPk(req.query.ticketId, {
+        attributes: ["id", "category", "section", "assigned_to_id"],
+      });
+      if (assignmentTicket && String(assignmentTicket.assigned_to_id) === String(currentUser.id)) {
+        const returnedAssignment = await TicketAssignment.findOne({
+          where: {
+            ticket_id: assignmentTicket.id,
+            action: "Reversed",
+            assigned_to_id: currentUser.id,
+          },
+          attributes: ["assigned_by_id"],
+          order: [["created_at", "DESC"]],
+        });
+        if (returnedAssignment) {
+          const reversalSender = await User.findByPk(returnedAssignment.assigned_by_id, {
+            attributes: ["role"],
+          });
+          reviewerCanRouteToDirector = reversalSender?.role === "director-general";
+        }
+      }
+    }
     
     // Get current user's full name for filtering attendees who report to them
     const currentUserFullName = currentUser?.full_name || '';
@@ -4963,19 +5025,22 @@ const getAllAttendee = async (req, res) => {
     };
     
     // Determine which role to show based on current user's role and unit section
-    let targetRole = "attendee"; // Default role
+    let targetRole = reviewerCanRouteToDirector && assignmentTicket?.category === "Complaint"
+      ? "director"
+      : "attendee";
     const actsAsHeadOfUnit =
       currentUser.role === "head-of-unit" ||
       (currentUser.role === "reviewer" &&
         isPublicRelationUnit(currentUser.unit_section));
     
     // If current user is Head of Unit or PR reviewer acting as head, and directorate -> managers
-    if ((actsAsHeadOfUnit || currentUser.role === "director") && 
+    if (!reviewerCanRouteToDirector &&
+        (actsAsHeadOfUnit || currentUser.role === "director") && 
         currentUser.unit_section && 
         currentUser.unit_section.toLowerCase().includes("directorate")) {
       targetRole = "manager";
       console.log(`DEBUG: Head of Unit with directorate unit, showing managers instead of attendees`);
-    } else if (actsAsHeadOfUnit && 
+    } else if (!reviewerCanRouteToDirector && actsAsHeadOfUnit && 
                currentUser.unit_section && 
                currentUser.unit_section.toLowerCase().includes("unit") ) {
       // If head-of-unit's unit_section contains "unit" (not "directorate"), show attendees
@@ -4993,6 +5058,18 @@ const getAllAttendee = async (req, res) => {
     // Also include "focal-person" when targetRole is "manager" (for managers/directors viewing attendees)
     if (targetRole === "attendee") {
       whereClause.role = { [Op.in]: ["attendee", "agent", "focal-person"] };
+    } else if (targetRole === "director") {
+      const directorate = String(assignmentTicket?.section || "").trim();
+      if (!directorate) {
+        return res.status(200).json({ attendees: [], targetRole, currentUserRole: currentUser.role });
+      }
+      whereClause = {
+        role: "director",
+        [Op.and]: Sequelize.where(
+          Sequelize.fn("LOWER", Sequelize.fn("TRIM", Sequelize.col("unit_section"))),
+          directorate.toLowerCase()
+        ),
+      };
     } else if (targetRole === "manager") {
       // For managers/directors, show both managers and focal-persons in attendees list
       whereClause.role = { [Op.in]: ["manager", "reviewer"] };
@@ -5090,7 +5167,7 @@ const getAllAttendee = async (req, res) => {
           console.log(`WARNING: Focal person ${currentUser.id} (${currentUser.full_name}) does not have unit_section or report_to set!`);
         }
       }
-    } else if (actsAsHeadOfUnit) {
+    } else if (actsAsHeadOfUnit && !reviewerCanRouteToDirector) {
       // For head-of-unit (including PR reviewer acting as head):
       // - Managers/attendees are filtered by unit_section/report_to as before
       // - Reviewers should NOT depend on unit_section/report_to, so include them via OR
@@ -5212,7 +5289,7 @@ const getAllAttendee = async (req, res) => {
         console.log(`DEBUG: No valid designation mapping found for manager, showing all ${targetRole}s`);
         console.log(`DEBUG: Current user designation: "${currentUser.designation}"`);
       }
-    } else {
+    } else if (targetRole !== "director") {
       // For other roles, filter by unit_section
       if (currentUser.unit_section && currentUser.unit_section.trim() !== '') {
         whereClause.unit_section = currentUser.unit_section;
@@ -5225,7 +5302,7 @@ const getAllAttendee = async (req, res) => {
     
     const users = await User.findAll({
       where: whereClause,
-      attributes: ['id', 'full_name', 'username', 'email', 'role', 'report_to', 'designation']
+      attributes: ['id', 'full_name', 'username', 'email', 'role', 'report_to', 'designation', 'unit_section']
     });
     
     console.log(`DEBUG: Found ${users.length} ${targetRole}s matching criteria`);
@@ -8418,7 +8495,7 @@ const getTicketWorkflowInfo = async (req, res) => {
           workflow_path: ticket.workflow_path,
           current_workflow_step: ticket.current_workflow_step,
           workflow_total_steps: ticket.workflow_total_steps,
-          workflow_current_role: ticket.workflow_current_role,
+          workflow_current_role: ticket.current_workflow_role || ticket.assigned_to_role,
           workflow_started_at: ticket.workflow_started_at,
           workflow_completed: ticket.workflow_completed,
           created_at: ticket.created_at,
@@ -8536,7 +8613,7 @@ const managerAttendMajor = async (req, res) => {
       return res.status(403).json({ message: "User not found" });
     }
 
-    const managerPolicy = canUserActOnTicket(ticket, userId, manager.role);
+    const managerPolicy = await canUserActOnTicket(ticket, userId, manager.role);
     if (!managerPolicy.canMutate) {
       return res.status(403).json({
         message: managerPolicy.blockReason || "Ticket is not assigned to you",
@@ -9073,7 +9150,7 @@ const managerSendToDirector = async (req, res) => {
     }
 
     // Verify ticket is assigned to this manager
-    const managerPolicy = canUserActOnTicket(ticket, userId, manager.role);
+    const managerPolicy = await canUserActOnTicket(ticket, userId, manager.role);
     if (!managerPolicy.canMutate) {
       return res.status(403).json({
         message: managerPolicy.blockReason || "Ticket is not assigned to you",
